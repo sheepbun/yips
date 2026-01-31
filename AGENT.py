@@ -767,7 +767,7 @@ class YipsAgent:
 
         # Render top border with gradient
         title_text = "Yips CLI"
-        version_text = f"v{APP_VERSION}"
+        version_text = APP_VERSION
         title_length = len(title_text) + 1 + len(version_text)  # +1 for space
         border_available = terminal_width - title_length - 7  # 7 for ╭─── ╮
         if border_available < 0:

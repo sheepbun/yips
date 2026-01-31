@@ -44,7 +44,7 @@ CONFIG_FILE = BASE_DIR / ".yips_config.json"
 # Version - Automatically managed by git pre-commit hook
 # Format: vYYYY.MM.DD-SHORTHASH (e.g., v2026.01.31-a3f52b9)
 APP_NAME = "Yips"
-APP_VERSION = "1.0.0"
+APP_VERSION = "v2026.01.31-b244c40"
 
 # Priority 0: LM Studio (local, free)
 LM_STUDIO_URL = os.environ.get("LM_STUDIO_URL", "http://localhost:1234")

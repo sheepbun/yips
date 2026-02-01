@@ -7,6 +7,7 @@ beautiful gradient CLI output, and autonomous tool execution.
 """
 
 import json
+import math
 import os
 import re
 import subprocess
@@ -28,8 +29,14 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.tree import Tree
 from rich.live import Live
-from rich.spinner import Spinner
+from rich.spinner import Spinner, SPINNERS
 from prompt_toolkit import prompt as prompt_toolkit_prompt
+
+# Register custom clockwise 8-dot spinner
+SPINNERS["clockwise_dots_8"] = {
+    "interval": 80,
+    "frames": ["⣾", "⣷", "⣯", "⣟", "⡿", "⢿", "⣻", "⣽"]
+}
 from prompt_toolkit.formatted_text import HTML as HTMLText
 from prompt_toolkit.styles import Style as PromptStyle
 
@@ -200,6 +207,22 @@ def interpolate_color(c1: RGBColor, c2: RGBColor, t: float) -> RGBColor:
         int(c1[1] + (c2[1] - c1[1]) * t),
         int(c1[2] + (c2[2] - c1[2]) * t),
     )
+
+
+class PulsingSpinner:
+    """A Rich renderable that pulses a spinner and text between pink and yellow."""
+    def __init__(self, message: str):
+        self.message = message
+        self.spinner = Spinner("clockwise_dots_8")
+
+    def __rich__(self) -> Spinner:
+        # Pulse between 0 and 1 over ~3 seconds for a slow effect
+        t = (math.sin(time.time() * 2.0) + 1) / 2
+        r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, t)
+        color = f"rgb({r},{g},{b})"
+        self.spinner.text = Text(self.message, style=f"dim {color}")
+        self.spinner.style = color
+        return self.spinner
 
 
 def gradient_text(text: str) -> Text:
@@ -611,7 +634,7 @@ class YipsAgent:
         try:
             # Display with Live for real-time updates
             prefix = get_yips_prefix()
-            spinner = Spinner("dots2", text="[dim]Thinking...[/dim]")
+            spinner = PulsingSpinner("Thinking...")
 
             response = requests.post(
                 f"{LM_STUDIO_URL}/v1/messages",
@@ -784,7 +807,7 @@ class YipsAgent:
 
             # Display with Live for real-time updates
             prefix = get_yips_prefix()
-            spinner = Spinner("dots2", text="[dim]Thinking...[/dim]")
+            spinner = PulsingSpinner("Thinking...")
 
             with Live(spinner, console=self.console, refresh_per_second=20, transient=True) as live:
                 while True:
@@ -970,9 +993,8 @@ class YipsAgent:
         return tree
 
     def _show_loading(self, message: str = "Waiting for response...") -> Live:
-        """Create and return a Rich Live context with loading spinner."""
-        spinner = Spinner("dots2", text=f"[dim]{message}[/dim]")
-        return Live(spinner, console=self.console, transient=True)
+        """Create and return a Rich Live context with a pulsing pink->yellow loading spinner."""
+        return Live(PulsingSpinner(message), console=self.console, transient=True, refresh_per_second=10)
 
     def execute_tool(self, request: ToolRequest) -> str:
         """Execute a tool request (autonomously unless destructive)."""

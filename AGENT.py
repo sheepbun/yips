@@ -246,6 +246,15 @@ def apply_gradient_to_text(text: str) -> Text:
     return gradient_text(text)
 
 
+def get_yips_prefix() -> Text:
+    """Create the 'Yips:' prefix with gradient on name and solid yellow on colon."""
+    prefix = gradient_text("Yips")
+    yellow = f"rgb({GRADIENT_YELLOW[0]},{GRADIENT_YELLOW[1]},{GRADIENT_YELLOW[2]})"
+    prefix.append(":", style=yellow)
+    prefix.append(" ")
+    return prefix
+
+
 # =============================================================================
 # Title Box Helper Functions
 # =============================================================================
@@ -332,7 +341,7 @@ def print_gradient(text: str) -> None:
 
 def print_yips(text: str) -> None:
     """Print Yips' response with gradient styling."""
-    prefix = gradient_text("Yips: ")
+    prefix = get_yips_prefix()
     console.print(prefix, end="")
 
     # Print response lines with gradient
@@ -617,7 +626,7 @@ class YipsAgent:
             tool_calls = []
 
             # Display with Live for real-time updates
-            prefix = gradient_text("Yips: ")
+            prefix = get_yips_prefix()
 
             with Live("", console=self.console, refresh_per_second=20, transient=True) as live:
                 for line in response.iter_lines():
@@ -769,7 +778,7 @@ class YipsAgent:
             stderr_output = ""
 
             # Display with Live for real-time updates
-            prefix = gradient_text("Yips: ")
+            prefix = get_yips_prefix()
 
             with Live("", console=self.console, refresh_per_second=20, transient=True) as live:
                 while True:
@@ -1334,7 +1343,9 @@ class YipsAgent:
                     styled_line.append(char, style=f"rgb({r},{g},{b})")
             elif line_num == 1:  # Welcome message - pink to yellow gradient (centered)
                 centered_text = left_text.center(left_width)
-                styled_line.append(gradient_text(centered_text))
+                welcome_text = gradient_text(centered_text)
+                welcome_text.stylize("bold")
+                styled_line.append(welcome_text)
             elif line_num == 9:  # Model info - solid blue (centered)
                 centered_text = left_text.center(left_width)
                 r, g, b = GRADIENT_BLUE
@@ -1342,7 +1353,9 @@ class YipsAgent:
                 styled_line.append(centered_text, style=blue_style)
             elif line_num == 10:  # CWD - pink to yellow gradient (centered)
                 centered_text = left_text.center(left_width)
-                styled_line.append(gradient_text(centered_text))
+                cwd_text = gradient_text(centered_text)
+                # Not bolding CWD as per previous instructions, but keeping it consistent with the Text append pattern
+                styled_line.append(cwd_text)
             else:
                 # Other left content - center aligned with default color
                 centered_text = left_text.center(left_width)
@@ -1354,7 +1367,14 @@ class YipsAgent:
             # Right content with styling
             right_col_start_position = left_width + 2
             
-            if line_num <= 4:  # Tips and commands - gradient matching border
+            if line_num == 0:  # Tips header - gradient matching border, bold
+                padded_text = right_text.ljust(right_width)
+                for i, char in enumerate(padded_text):
+                    char_position = right_col_start_position + i
+                    progress = char_position / max(terminal_width - 1, 1)
+                    r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, progress)
+                    styled_line.append(char, style=f"rgb({r},{g},{b}) bold")
+            elif 1 <= line_num <= 4:  # Commands - gradient matching border, NOT bold
                 padded_text = right_text.ljust(right_width)
                 for i, char in enumerate(padded_text):
                     char_position = right_col_start_position + i
@@ -1369,7 +1389,7 @@ class YipsAgent:
                     r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, progress)
                     styled_line.append(char, style=f"rgb({r},{g},{b})")
             elif line_num == 6:  # Recent activity header - white
-                styled_line.append(right_text.ljust(right_width), style="bright_white")
+                styled_line.append(right_text.ljust(right_width), style="bright_white bold")
             elif line_num >= 7:  # Activity items - dim
                 styled_line.append(right_text.ljust(right_width), style="dim")
             else:
@@ -1398,7 +1418,7 @@ class YipsAgent:
 
     def stream_text(self, text: str) -> None:
         """Simulate streaming for a static piece of text."""
-        prefix = gradient_text("Yips: ")
+        prefix = get_yips_prefix()
         
         accumulated = ""
         with Live("", console=self.console, refresh_per_second=20, transient=True) as live:

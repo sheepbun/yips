@@ -342,15 +342,18 @@ def print_gradient(text: str) -> None:
 def print_yips(text: str) -> None:
     """Print Yips' response with gradient styling."""
     prefix = get_yips_prefix()
-    console.print(prefix, end="")
-
+    
+    final_text = Text()
+    final_text.append_text(prefix)
+    
     # Print response lines with gradient
     lines = text.split('\n')
     for i, line in enumerate(lines):
-        if i == 0:
-            console.print(gradient_text(line))
-        else:
-            console.print(gradient_text("      " + line))
+        if i > 0:
+            final_text.append("\n      ")
+        final_text.append(gradient_text(line))
+    
+    console.print(final_text)
 
 
 # =============================================================================
@@ -606,6 +609,10 @@ class YipsAgent:
         }
 
         try:
+            # Display with Live for real-time updates
+            prefix = get_yips_prefix()
+            spinner = Spinner("dots2", text="[dim]Thinking...[/dim]")
+
             response = requests.post(
                 f"{LM_STUDIO_URL}/v1/messages",
                 headers=headers,
@@ -625,10 +632,7 @@ class YipsAgent:
             accumulated_text = ""
             tool_calls = []
 
-            # Display with Live for real-time updates
-            prefix = get_yips_prefix()
-
-            with Live("", console=self.console, refresh_per_second=20, transient=True) as live:
+            with Live(spinner, console=self.console, refresh_per_second=20, transient=True) as live:
                 for line in response.iter_lines():
                     if not line:
                         continue
@@ -723,13 +727,14 @@ class YipsAgent:
 
             # Print final output after Live exits (so it persists)
             if accumulated_text:
-                self.console.print(prefix, end="")
+                final_text = Text()
+                final_text.append_text(prefix)
                 lines = accumulated_text.split('\n')
                 for i, line in enumerate(lines):
-                    if i == 0:
-                        self.console.print(gradient_text(line))
-                    else:
-                        self.console.print(gradient_text("      " + line))
+                    if i > 0:
+                        final_text.append("\n      ")
+                    final_text.append(gradient_text(line))
+                self.console.print(final_text)
 
             # Display tool calls after streaming completes
             if self.verbose_mode and tool_calls:
@@ -779,8 +784,9 @@ class YipsAgent:
 
             # Display with Live for real-time updates
             prefix = get_yips_prefix()
+            spinner = Spinner("dots2", text="[dim]Thinking...[/dim]")
 
-            with Live("", console=self.console, refresh_per_second=20, transient=True) as live:
+            with Live(spinner, console=self.console, refresh_per_second=20, transient=True) as live:
                 while True:
                     # Read one character at a time for maximum responsiveness
                     char = process.stdout.read(1)
@@ -807,13 +813,14 @@ class YipsAgent:
 
             # Print final output after Live exits (so it persists)
             if accumulated_text:
-                self.console.print(prefix, end="")
+                final_text = Text()
+                final_text.append_text(prefix)
                 lines = accumulated_text.split('\n')
                 for i, line in enumerate(lines):
-                    if i == 0:
-                        self.console.print(gradient_text(line))
-                    else:
-                        self.console.print(gradient_text("      " + line))
+                    if i > 0:
+                        final_text.append("\n      ")
+                    final_text.append(gradient_text(line))
+                self.console.print(final_text)
 
             # Collect stderr
             stderr_output = process.stderr.read()
@@ -1519,6 +1526,9 @@ class YipsAgent:
                     "role": "system",
                     "content": result
                 })
+            
+            # Final break line after response
+            self.console.print()
 
 
 # =============================================================================

@@ -35,7 +35,7 @@ from prompt_toolkit import prompt as prompt_toolkit_prompt
 # Register custom clockwise 8-dot spinner
 SPINNERS["clockwise_dots_8"] = {
     "interval": 80,
-    "frames": ["⣾", "⣷", "⣯", "⣟", "⡿", "⢿", "⣻", "⣽"]
+    "frames": ["⠹", "⢸", "⣰", "⣤", "⣆", "⡇", "⠏", "⠛"]
 }
 from prompt_toolkit.formatted_text import HTML as HTMLText
 from prompt_toolkit.styles import Style as PromptStyle

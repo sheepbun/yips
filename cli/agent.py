@@ -731,7 +731,10 @@ class YipsAgent:
                         else:
                             styled_line.append(char)
                     else:
-                        styled_line.append(char)
+                        # Padding: extend gradient based on overall position in content_width
+                        overall_progress = i / max(content_width - 1, 1)
+                        r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, overall_progress)
+                        styled_line.append(char, style=f"rgb({r},{g},{b})")
             elif not show_logo and line_num == 1:
                 # Abbreviated "YIPS" text - gradient bold
                 centered_text = safe_center(line_text, content_width)
@@ -826,7 +829,10 @@ class YipsAgent:
                         else:
                             styled_line.append(char)
                     else:
-                        styled_line.append(char)
+                        # Padding: extend gradient based on overall position in content_width
+                        overall_progress = i / max(content_width - 1, 1)
+                        r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, overall_progress)
+                        styled_line.append(char, style=f"rgb({r},{g},{b})")
             elif not show_logo and line_num == 3:
                 # Abbreviated "YIPS" text - gradient bold
                 centered_text = safe_center(line_text, content_width)

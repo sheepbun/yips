@@ -1213,6 +1213,8 @@ class YipsAgent:
         display_model = get_friendly_model_name(self.current_model)
         cwd = str(Path.home() / "Yips")  # ~/Yips representation
         logo = generate_yips_logo()
+        logo_height = len(logo)
+        logo_width = len(logo[0]) if logo else 1
         activity = get_recent_activity(3)
 
         # Build left column (12 lines)
@@ -1312,6 +1314,7 @@ class YipsAgent:
         r_right, g_right, b_right = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, right_progress)
         right_bar_style = f"rgb({r_right},{g_right},{b_right})"
 
+        total_logo_cells = logo_height * logo_width
         for line_num in range(max_lines):
             left_text = left_col[line_num] if line_num < len(left_col) else ""
             right_text = right_col[line_num] if line_num < len(right_col) else ""
@@ -1320,27 +1323,28 @@ class YipsAgent:
             styled_line.append("│", style=left_bar_style)
 
             # Left content with proper styling
-            if line_num >= 3 and line_num <= 8:  # Logo lines - vertical pink to yellow gradient
-                logo_line_index = line_num - 3  # Convert to 0-5 range
-
+            if line_num >= 3 and line_num <= 8:  # Logo lines - raster scan pink to yellow gradient
+                logo_line_index = line_num - 3
                 # Center the text
                 centered_text = left_text.center(left_width)
+                padding_left = (left_width - len(left_text)) // 2
 
-                # Apply smooth gradient per character for smooth color transitions
+                # Apply raster scan gradient (row-by-row, left-to-right)
                 for i, char in enumerate(centered_text):
-                    # Line-based progress (0.0 = pink top, 1.0 = yellow bottom)
-                    line_progress = logo_line_index / 5
-
-                    # Character-based progress for smooth horizontal smoothing
-                    # This adds subtle variation across each line for visual smoothness
-                    char_progress = (i / max(len(centered_text) - 1, 1)) * (1/6) if len(centered_text) > 1 else 0
-
-                    # Combine: primarily vertical gradient with subtle horizontal smoothing
-                    gradient_progress = min(1.0, line_progress + char_progress)
-
-                    # Interpolate color for this character
-                    r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, gradient_progress)
-                    styled_line.append(char, style=f"rgb({r},{g},{b})")
+                    col_index = i - padding_left
+                    if 0 <= col_index < logo_width:
+                        # Raster scan progress calculation
+                        cell_index = (logo_line_index * logo_width) + col_index
+                        progress = cell_index / max(total_logo_cells - 1, 1)
+                        
+                        if not char.isspace():
+                            r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, progress)
+                            styled_line.append(char, style=f"rgb({r},{g},{b})")
+                        else:
+                            styled_line.append(char)
+                    else:
+                        # Outside the logo's own bounding box (the centering padding)
+                        styled_line.append(char)
             elif line_num == 1:  # Welcome message - pink to yellow gradient (centered)
                 centered_text = left_text.center(left_width)
                 welcome_text = gradient_text(centered_text)

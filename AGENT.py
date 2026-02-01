@@ -26,6 +26,9 @@ from rich.console import Console
 from rich.text import Text
 from rich.panel import Panel
 from rich.table import Table
+from rich.tree import Tree
+from rich.live import Live
+from rich.spinner import Spinner
 from prompt_toolkit import prompt as prompt_toolkit_prompt
 from prompt_toolkit.formatted_text import HTML as HTMLText
 from prompt_toolkit.styles import Style as PromptStyle
@@ -200,19 +203,47 @@ def interpolate_color(c1: RGBColor, c2: RGBColor, t: float) -> RGBColor:
 
 
 def gradient_text(text: str) -> Text:
-    """Create gradient-colored text: pink -> yellow."""
+    """Create gradient-colored text: pink -> yellow. Skips leading/trailing whitespace."""
     styled = Text()
-    length = len(text)
-
-    if length == 0:
+    
+    if not text:
         return styled
 
-    for i, char in enumerate(text):
+    # Find start and end of non-whitespace content
+    stripped_l = text.lstrip()
+    if not stripped_l:
+        # String is all whitespace
+        styled.append(text)
+        return styled
+        
+    leading_ws_len = len(text) - len(stripped_l)
+    leading_ws = text[:leading_ws_len]
+    
+    stripped_full = stripped_l.rstrip()
+    trailing_ws_len = len(stripped_l) - len(stripped_full)
+    trailing_ws = stripped_l[len(stripped_full):]
+    
+    content = stripped_full
+    length = len(content)
+    
+    # Append leading whitespace
+    styled.append(leading_ws)
+    
+    # Apply gradient to content
+    for i, char in enumerate(content):
         progress = i / max(length - 1, 1)
         r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, progress)
         styled.append(char, style=f"rgb({r},{g},{b})")
+        
+    # Append trailing whitespace
+    styled.append(trailing_ws)
 
     return styled
+
+
+def apply_gradient_to_text(text: str) -> Text:
+    """Apply pink->yellow gradient to text for streaming display."""
+    return gradient_text(text)
 
 
 # =============================================================================
@@ -301,7 +332,6 @@ def print_gradient(text: str) -> None:
 
 def print_yips(text: str) -> None:
     """Print Yips' response with gradient styling."""
-    console.print()
     prefix = gradient_text("Yips: ")
     console.print(prefix, end="")
 
@@ -352,6 +382,8 @@ class YipsAgent:
         config = load_config()
         saved_model = config.get("model")
         saved_backend = config.get("backend")
+        self.verbose_mode = config.get("verbose", True)  # Show tool calls by default
+        self.streaming_enabled = config.get("streaming", True)  # Enable streaming by default
 
         # Determine backend and model from saved config or defaults
         # Do NOT start LM Studio here - that happens in initialize_backend() after title box display
@@ -383,11 +415,7 @@ class YipsAgent:
                 self.console.print(f"[yellow]{get_friendly_backend_name('lmstudio')} unavailable, using {get_friendly_backend_name('claude')}.[/yellow]")
                 self.use_claude_cli = True
                 self.current_model = CLAUDE_CLI_MODEL
-            else:
-                self.console.print(f"[dim]{get_friendly_backend_name('lmstudio')} ready.[/dim]")
-        else:
-            self.console.print(f"[dim]{get_friendly_backend_name('lmstudio')} ready.[/dim]")
-
+        
         self.backend_initialized = True
 
     def load_context(self) -> str:
@@ -443,8 +471,127 @@ class YipsAgent:
         for msg in self.conversation_history:
             if msg["role"] in ("user", "assistant"):
                 messages.append({"role": msg["role"], "content": msg["content"]})
-        messages.append({"role": "user", "content": message})
+        
+        # Only append 'message' if it's not already the last message in history
+        # (prevents duplication in run loop while supporting one-off prompts)
+        if not messages or messages[-1]["content"] != message:
+            messages.append({"role": "user", "content": message})
 
+        headers = {
+            "Content-Type": "application/json",
+        }
+
+        # If streaming is enabled, use streaming mode
+        if self.streaming_enabled:
+            try:
+                return self._stream_lm_studio(system_prompt, messages)
+            except Exception as e:
+                self.console.print(f"[yellow]Streaming failed ({e}), using non-streaming mode[/yellow]")
+                # Fall through to non-streaming mode
+
+        try:
+            # Show loading spinner
+            with self._show_loading("Waiting for LM Studio response..."):
+                response = requests.post(
+                    f"{LM_STUDIO_URL}/v1/messages",
+                    headers=headers,
+                    json={
+                        "model": self.current_model,
+                        "system": system_prompt,
+                        "messages": messages,
+                        "max_tokens": 2048,
+                    },
+                    timeout=120
+                )
+                response.raise_for_status()
+                data = response.json()
+
+            # Anthropic format: {"content": [{"type": "text", "text": "..."}, {"type": "tool_use", ...}]}
+            content_blocks = data.get("content", [])
+            text_parts: list[str] = []
+
+            # Process all content blocks
+            for block in content_blocks:
+                block_type = block.get("type", "")
+
+                if block_type == "text":
+                    text_parts.append(block.get("text", ""))
+                elif block_type == "tool_use" and self.verbose_mode:
+                    # Display tool use if verbose mode is enabled
+                    tool_name = block.get("name", "unknown")
+                    tool_input = block.get("input", {})
+                    self._display_lm_studio_tool_call(tool_name, tool_input)
+
+            # Return combined text (fallback to old format if no content blocks)
+            if text_parts:
+                return "\n".join(text_parts)
+            elif content_blocks and content_blocks[0].get("text"):
+                return content_blocks[0]["text"]
+            else:
+                return "[No text response from model]"
+
+        except requests.exceptions.ConnectionError:
+            return "[Error: Could not connect to LM Studio. Is it running?]"
+        except requests.exceptions.Timeout:
+            return "[Error: Request timed out after 120 seconds]"
+        except Exception as e:
+            return f"[Error calling LM Studio: {e}]"
+
+    def call_claude_cli(self, message: str) -> str:
+        """Fallback: Call Claude Code CLI (Priority 1)."""
+        system_prompt = self.load_context()
+        
+        # Build history string from conversation_history
+        history_parts = []
+        for msg in self.conversation_history:
+            role = "User" if msg["role"] == "user" else "Assistant"
+            history_parts.append(f"{role}: {msg['content']}")
+        
+        # Add the current message if it's not the last one in history
+        if not self.conversation_history or self.conversation_history[-1]["content"] != message:
+            history_parts.append(f"User: {message}")
+        
+        history_text = "\n\n".join(history_parts)
+        full_prompt = f"{system_prompt}\n\n# CONVERSATION HISTORY\n\n{history_text}"
+
+        # If streaming is enabled, use streaming mode
+        if self.streaming_enabled:
+            try:
+                return self._stream_claude_cli(full_prompt)
+            except Exception as e:
+                self.console.print(f"[yellow]Streaming failed ({e}), using non-streaming mode[/yellow]")
+                # Fall through to non-streaming mode
+
+        try:
+            # Build command with optional verbose flag
+            cmd = [CLAUDE_CLI_PATH, "-p", "--model", self.current_model]
+            if self.verbose_mode:
+                cmd.append("--verbose")
+
+            # Show loading spinner
+            with self._show_loading("Waiting for Claude response..."):
+                result = subprocess.run(
+                    cmd,
+                    input=full_prompt,
+                    capture_output=True,
+                    text=True,
+                    timeout=120
+                )
+
+            # Display stderr (contains tool calls and debug info) if verbose mode is on
+            if self.verbose_mode and result.stderr:
+                self._display_claude_tool_calls(result.stderr)
+
+            if result.returncode == 0:
+                return result.stdout.strip()
+            return f"[Error from Claude CLI: {result.stderr}]"
+        except subprocess.TimeoutExpired:
+            return "[Error: Claude CLI timed out after 120 seconds]"
+        except Exception as e:
+            return f"[Error calling Claude CLI: {e}]"
+
+    def _stream_lm_studio(self, system_prompt: str, messages: list[Message]) -> str:
+        """Stream response from LM Studio API with real-time display."""
         headers = {
             "Content-Type": "application/json",
         }
@@ -458,41 +605,221 @@ class YipsAgent:
                     "system": system_prompt,
                     "messages": messages,
                     "max_tokens": 2048,
+                    "stream": True,
                 },
-                timeout=120
+                timeout=120,
+                stream=True
             )
             response.raise_for_status()
-            data = response.json()
-            # Anthropic format: {"content": [{"type": "text", "text": "..."}]}
-            return data["content"][0]["text"]
+
+            # Accumulate response text
+            accumulated_text = ""
+            tool_calls = []
+
+            # Display with Live for real-time updates
+            prefix = gradient_text("Yips: ")
+
+            with Live("", console=self.console, refresh_per_second=20, transient=True) as live:
+                for line in response.iter_lines():
+                    if not line:
+                        continue
+
+                    # Decode SSE format
+                    line_str = line.decode('utf-8').strip()
+                    
+                    # Skip 'event: ...' lines
+                    if line_str.startswith('event:'):
+                        continue
+                        
+                    if not line_str.startswith('data:'):
+                        continue
+
+                    data_str = line_str[5:].strip()  # Remove 'data:' prefix
+                    if data_str == '[DONE]':
+                        break
+
+                    try:
+                        data = json.loads(data_str)
+                        event_type = data.get("type", "")
+
+                        if event_type == "content_block_delta":
+                            delta = data.get("delta", {})
+                            delta_type = delta.get("type", "")
+
+                            if delta_type == "text_delta":
+                                # Accumulate text tokens
+                                text = delta.get("text", "")
+                                accumulated_text += text
+
+                                # Update display with full gradient (include prefix)
+                                display_text = Text()
+                                display_text.append_text(prefix)
+
+                                lines = accumulated_text.split('\n')
+                                for i, text_line in enumerate(lines):
+                                    if i > 0:
+                                        display_text.append("\n      ")
+                                    display_text.append(apply_gradient_to_text(text_line))
+
+                                live.update(display_text)
+                            
+                            elif delta_type == "input_json_delta":
+                                # Accumulate JSON for tool call
+                                partial_json = delta.get("partial_json", "")
+                                if tool_calls:
+                                    current_tool = tool_calls[-1]
+                                    if "input_json" not in current_tool:
+                                        current_tool["input_json"] = ""
+                                    current_tool["input_json"] += partial_json
+                                
+                                # Update display to show tool usage activity
+                                display_text = Text()
+                                display_text.append_text(prefix)
+                                if accumulated_text:
+                                    lines = accumulated_text.split('\n')
+                                    for i, text_line in enumerate(lines):
+                                        if i > 0: display_text.append("\n      ")
+                                        display_text.append(apply_gradient_to_text(text_line))
+                                    display_text.append("\n      ")
+                                
+                                tool_name = tool_calls[-1].get("name", "tool")
+                                display_text.append(f"🔧 Using tool: {tool_name}...", style="cyan dim")
+                                live.update(display_text)
+                        
+                        elif event_type == "content_block_start":
+                            block = data.get("content_block", {})
+                            if block.get("type") == "tool_use":
+                                tool_name = block.get("name", "unknown")
+                                # Initialize tool call object
+                                tool_calls.append({
+                                    "name": tool_name,
+                                    "input_json": ""
+                                })
+                                
+                                # Update display to show tool call started
+                                display_text = Text()
+                                display_text.append_text(prefix)
+                                if accumulated_text:
+                                    lines = accumulated_text.split('\n')
+                                    for i, text_line in enumerate(lines):
+                                        if i > 0: display_text.append("\n      ")
+                                        display_text.append(apply_gradient_to_text(text_line))
+                                    display_text.append("\n      ")
+                                
+                                display_text.append(f"🔧 Using tool: {tool_name}...", style="cyan dim")
+                                live.update(display_text)
+
+                    except json.JSONDecodeError:
+                        continue
+
+            # Print final output after Live exits (so it persists)
+            if accumulated_text:
+                self.console.print(prefix, end="")
+                lines = accumulated_text.split('\n')
+                for i, line in enumerate(lines):
+                    if i == 0:
+                        self.console.print(gradient_text(line))
+                    else:
+                        self.console.print(gradient_text("      " + line))
+
+            # Display tool calls after streaming completes
+            if self.verbose_mode and tool_calls:
+                for tool_call in tool_calls:
+                    tool_name = tool_call.get("name", "unknown")
+                    input_json = tool_call.get("input_json", "{}")
+                    try:
+                        tool_input = json.loads(input_json) if input_json else {}
+                    except json.JSONDecodeError:
+                        tool_input = {"error": "Invalid JSON in tool call", "raw": input_json}
+                    self._display_lm_studio_tool_call(tool_name, tool_input)
+
+            return accumulated_text if accumulated_text else "[No text response from model]"
 
         except requests.exceptions.ConnectionError:
             return "[Error: Could not connect to LM Studio. Is it running?]"
         except requests.exceptions.Timeout:
             return "[Error: Request timed out after 120 seconds]"
         except Exception as e:
-            return f"[Error calling LM Studio: {e}]"
+            return f"[Error streaming from LM Studio: {e}]"
 
-    def call_claude_cli(self, message: str) -> str:
-        """Fallback: Call Claude Code CLI (Priority 1)."""
-        system_prompt = self.load_context()
-        full_prompt = f"{system_prompt}\n\n---\n\nUser: {message}"
-
+    def _stream_claude_cli(self, full_prompt: str) -> str:
+        """Stream response from Claude CLI with real-time display."""
         try:
-            result = subprocess.run(
-                [CLAUDE_CLI_PATH, "-p", "--model", self.current_model],
-                input=full_prompt,
-                capture_output=True,
+            # Build command with optional verbose flag
+            cmd = [CLAUDE_CLI_PATH, "-p", "--model", self.current_model]
+            if self.verbose_mode:
+                cmd.append("--verbose")
+
+            # Use Popen for streaming
+            process = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=120
+                bufsize=1  # Line buffered
             )
-            if result.returncode == 0:
-                return result.stdout.strip()
-            return f"[Error from Claude CLI: {result.stderr}]"
-        except subprocess.TimeoutExpired:
-            return "[Error: Claude CLI timed out after 120 seconds]"
+
+            # Send input
+            process.stdin.write(full_prompt)
+            process.stdin.close()
+
+            # Accumulate response
+            accumulated_text = ""
+            stderr_output = ""
+
+            # Display with Live for real-time updates
+            prefix = gradient_text("Yips: ")
+
+            with Live("", console=self.console, refresh_per_second=20, transient=True) as live:
+                while True:
+                    # Read one character at a time for maximum responsiveness
+                    char = process.stdout.read(1)
+                    if not char and process.poll() is not None:
+                        break
+                    
+                    if not char:
+                        time.sleep(0.01)
+                        continue
+
+                    accumulated_text += char
+
+                    # Update display with full gradient (include prefix)
+                    display_text = Text()
+                    display_text.append_text(prefix)
+
+                    lines = accumulated_text.split('\n')
+                    for i, text_line in enumerate(lines):
+                        if i > 0:
+                            display_text.append("\n      ")
+                        display_text.append(apply_gradient_to_text(text_line))
+
+                    live.update(display_text)
+
+            # Print final output after Live exits (so it persists)
+            if accumulated_text:
+                self.console.print(prefix, end="")
+                lines = accumulated_text.split('\n')
+                for i, line in enumerate(lines):
+                    if i == 0:
+                        self.console.print(gradient_text(line))
+                    else:
+                        self.console.print(gradient_text("      " + line))
+
+            # Collect stderr
+            stderr_output = process.stderr.read()
+            process.wait()
+
+            # Display tool calls if verbose mode is on
+            if self.verbose_mode and stderr_output:
+                self._display_claude_tool_calls(stderr_output)
+
+            if process.returncode == 0:
+                return accumulated_text.strip()
+            return f"[Error from Claude CLI: {stderr_output}]"
+
         except Exception as e:
-            return f"[Error calling Claude CLI: {e}]"
+            return f"[Error streaming from Claude CLI: {e}]"
 
     def get_response(self, message: str) -> str:
         """Get response using available backend (LM Studio or Claude CLI)."""
@@ -582,6 +909,54 @@ class YipsAgent:
     def log_action(self, description: str) -> None:
         """Log an autonomous action being taken."""
         self.console.print(f"  [dim italic][{description}][/dim italic]")
+
+    def _display_claude_tool_calls(self, stderr_output: str) -> None:
+        """Parse and display Claude Code tool calls from stderr using Rich Tree."""
+        lines = stderr_output.split('\n')
+
+        # Collect tool-related lines to display with Tree
+        tool_lines = []
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+
+            # Look for tool call indicators
+            if 'Tool:' in line or 'tool:' in line or 'Reading' in line or 'Writing' in line or 'Running' in line:
+                tool_lines.append(line)
+
+        # If we found tool calls, display them in a tree
+        if tool_lines:
+            tree = Tree("[cyan]Claude Code Tools[/cyan]")
+            for line in tool_lines:
+                tree.add(f"[dim]{line}[/dim]")
+            panel = Panel(tree, title="Tool Calls", border_style="cyan dim", expand=False)
+            self.console.print(panel)
+
+    def _display_lm_studio_tool_call(self, tool_name: str, tool_input: dict[str, Any]) -> None:
+        """Display LM Studio tool calls in a formatted way using Rich Tree."""
+        tree = self._format_tool_call_tree(tool_name, tool_input)
+        panel = Panel(tree, title="Tool Call", border_style="cyan dim", expand=False)
+        self.console.print(panel)
+
+    def _format_tool_call_tree(self, tool_name: str, tool_input: dict[str, Any]) -> Tree:
+        """Build a Rich Tree structure for tool call display."""
+        tree = Tree(f"[cyan]{tool_name}[/cyan]")
+
+        if tool_input:
+            for key, value in tool_input.items():
+                # Truncate long values
+                value_str = str(value)
+                if len(value_str) > 80:
+                    value_str = value_str[:77] + "..."
+                tree.add(f"[dim]{key}:[/dim] {value_str}")
+
+        return tree
+
+    def _show_loading(self, message: str = "Waiting for response...") -> Live:
+        """Create and return a Rich Live context with loading spinner."""
+        spinner = Spinner("dots2", text=f"[dim]{message}[/dim]")
+        return Live(spinner, console=self.console, transient=True)
 
     def execute_tool(self, request: ToolRequest) -> str:
         """Execute a tool request (autonomously unless destructive)."""
@@ -695,7 +1070,9 @@ class YipsAgent:
         if model_name in claude_models:
             self.use_claude_cli = True
             self.current_model = model_name
-            save_config({"backend": "claude", "model": model_name})
+            config = load_config()
+            config.update({"backend": "claude", "model": model_name, "verbose": self.verbose_mode})
+            save_config(config)
             self.console.print(f"[green]Switched to {get_friendly_backend_name('claude')} with model: {get_friendly_model_name(model_name)}[/green]")
             self.refresh_display()
         elif args in lm_models or any(args.lower() in m.lower() for m in lm_models):
@@ -706,7 +1083,9 @@ class YipsAgent:
             if matched:
                 self.use_claude_cli = False
                 self.current_model = matched
-                save_config({"backend": "lmstudio", "model": matched})
+                config = load_config()
+                config.update({"backend": "lmstudio", "model": matched, "verbose": self.verbose_mode})
+                save_config(config)
                 self.console.print(f"[green]Switched to {get_friendly_backend_name('lmstudio')} with model: {get_friendly_model_name(matched)}[/green]")
                 self.refresh_display()
             else:
@@ -734,6 +1113,27 @@ class YipsAgent:
             self.handle_model_command(args)
             return True
 
+        if command == "verbose":
+            # Toggle verbose mode
+            self.verbose_mode = not self.verbose_mode
+            config = load_config()
+            config["verbose"] = self.verbose_mode
+            save_config(config)
+            status = "enabled" if self.verbose_mode else "disabled"
+            self.console.print(f"[green]Verbose mode (Claude Code tool calls): {status}[/green]")
+            return True
+
+        if command == "stream":
+            # Toggle streaming mode
+            self.streaming_enabled = not self.streaming_enabled
+            config = load_config()
+            config["streaming"] = self.streaming_enabled
+            save_config(config)
+            status = "enabled" if self.streaming_enabled else "disabled"
+            self.console.print(f"[green]Streaming mode: {status}[/green]")
+            self.refresh_display()
+            return True
+
         # Skill-based commands
         skill_path = SKILLS_DIR / f"{command.upper()}.py"
         if skill_path.exists():
@@ -753,7 +1153,7 @@ class YipsAgent:
         # Unknown command
         self.console.print(f"[red]Unknown command: /{command}[/red]")
         available = [s.stem.lower() for s in SKILLS_DIR.glob("*.py")]
-        available.extend(["exit", "model"])
+        available.extend(["exit", "model", "verbose", "stream"])
         self.console.print(f"[dim]Available: /{', /'.join(sorted(available))}[/dim]")
         return True
 
@@ -818,12 +1218,16 @@ class YipsAgent:
         left_col.append("")  # [11] blank padding
 
         # Build right column
+        verbose_status = "on" if self.verbose_mode else "off"
+        streaming_status = "on" if self.streaming_enabled else "off"
         right_col = [
             "Tips for getting started",  # [0]
             "Type /model to switch models",  # [1]
-            "Type /exit to leave",  # [2]
-            "─" * right_width,  # [3] divider
-            "Recent activity",  # [4]
+            f"Type /verbose to toggle tool calls ({verbose_status})",  # [2]
+            f"Type /stream to toggle streaming ({streaming_status})",  # [3]
+            "Type /exit to leave",  # [4]
+            "─" * right_width,  # [5] divider
+            "Recent activity",  # [6]
         ]
         # Add activity lines (up to 3)
         right_col.extend(activity)
@@ -930,15 +1334,15 @@ class YipsAgent:
                     styled_line.append(char, style=f"rgb({r},{g},{b})")
             elif line_num == 1:  # Welcome message - pink to yellow gradient (centered)
                 centered_text = left_text.center(left_width)
-                for i, char in enumerate(centered_text):
-                    char_progress = i / max(len(centered_text) - 1, 1)
-                    r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, char_progress)
-                    styled_line.append(char, style=f"rgb({r},{g},{b})")
+                styled_line.append(gradient_text(centered_text))
             elif line_num == 9:  # Model info - solid blue (centered)
                 centered_text = left_text.center(left_width)
                 r, g, b = GRADIENT_BLUE
                 blue_style = f"rgb({r},{g},{b})"
                 styled_line.append(centered_text, style=blue_style)
+            elif line_num == 10:  # CWD - pink to yellow gradient (centered)
+                centered_text = left_text.center(left_width)
+                styled_line.append(gradient_text(centered_text))
             else:
                 # Other left content - center aligned with default color
                 centered_text = left_text.center(left_width)
@@ -948,25 +1352,25 @@ class YipsAgent:
             styled_line.append("│", style=divider_style)
 
             # Right content with styling
-            if line_num == 0:  # Tips header
-                styled_line.append(right_text.ljust(right_width), style="bright_white")
-            elif line_num == 3:  # Divider line with flowing gradient
-                # Calculate starting position for right column content
-                # Position: left border (1) + left content (left_width) + middle divider (1) = left_width + 2
-                right_col_start_position = left_width + 2
-
-                # Apply gradient to each character of the divider line
+            right_col_start_position = left_width + 2
+            
+            if line_num <= 4:  # Tips and commands - gradient matching border
                 padded_text = right_text.ljust(right_width)
                 for i, char in enumerate(padded_text):
-                    # Absolute position of this character in the terminal
                     char_position = right_col_start_position + i
-                    # Calculate progress based on absolute position
                     progress = char_position / max(terminal_width - 1, 1)
                     r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, progress)
                     styled_line.append(char, style=f"rgb({r},{g},{b})")
-            elif line_num == 4:  # Recent activity header
+            elif line_num == 5:  # Divider line with flowing gradient
+                padded_text = right_text.ljust(right_width)
+                for i, char in enumerate(padded_text):
+                    char_position = right_col_start_position + i
+                    progress = char_position / max(terminal_width - 1, 1)
+                    r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, progress)
+                    styled_line.append(char, style=f"rgb({r},{g},{b})")
+            elif line_num == 6:  # Recent activity header - white
                 styled_line.append(right_text.ljust(right_width), style="bright_white")
-            elif line_num >= 5:  # Activity items
+            elif line_num >= 7:  # Activity items - dim
                 styled_line.append(right_text.ljust(right_width), style="dim")
             else:
                 styled_line.append(right_text.ljust(right_width))
@@ -992,6 +1396,36 @@ class YipsAgent:
         os.system('clear' if os.name != 'nt' else 'cls')
         self.render_title_box()
 
+    def stream_text(self, text: str) -> None:
+        """Simulate streaming for a static piece of text."""
+        prefix = gradient_text("Yips: ")
+        
+        accumulated = ""
+        with Live("", console=self.console, refresh_per_second=20, transient=True) as live:
+            for char in text:
+                accumulated += char
+                
+                display_text = Text()
+                display_text.append_text(prefix)
+                
+                lines = accumulated.split('\n')
+                for i, line in enumerate(lines):
+                    if i > 0:
+                        display_text.append("\n      ")
+                    display_text.append(apply_gradient_to_text(line))
+                
+                live.update(display_text)
+                time.sleep(0.02)  # Adjust for desired speed
+                
+        # Print final persistent output
+        self.console.print(prefix, end="")
+        lines = text.split('\n')
+        for i, line in enumerate(lines):
+            if i == 0:
+                self.console.print(gradient_text(line))
+            else:
+                self.console.print(gradient_text("      " + line))
+
     def run(self):
         """Main conversation loop."""
         # Clear terminal
@@ -1003,8 +1437,17 @@ class YipsAgent:
         # Initialize backend after displaying UI
         self.initialize_backend()
 
+        # Show streaming greeting
+        username = get_username()
+        greeting = f"Hey {username}! 👋 How can I help get things done today?"
+        self.stream_text(greeting)
+        self.conversation_history.append({"role": "assistant", "content": greeting})
+
         while True:
             try:
+                # Add a newline before the prompt for better separation
+                self.console.print()
+                
                 # Create custom style for prompt_toolkit input
                 style = PromptStyle.from_dict({
                     '': PROMPT_COLOR,  # Input text color (e.g., #FFCCFF)
@@ -1026,7 +1469,6 @@ class YipsAgent:
             if slash_result == "exit":
                 break
             if slash_result:
-                self.console.print()
                 continue
 
             # Store user message
@@ -1050,7 +1492,9 @@ class YipsAgent:
             # Display cleaned response with gradient
             cleaned = self.clean_response(response)
             if cleaned:
-                print_yips(cleaned)
+                # Always print if streaming is disabled OR if it's an error/special message
+                if not self.streaming_enabled or response.startswith("["):
+                    print_yips(cleaned)
 
             # Execute tool requests autonomously
             for request in tool_requests:
@@ -1060,8 +1504,6 @@ class YipsAgent:
                     "role": "system",
                     "content": result
                 })
-
-            self.console.print()
 
 
 # =============================================================================

@@ -70,6 +70,30 @@ GRADIENT_BLUE = (137, 207, 240)     # #89CFF0
 # User prompt color
 PROMPT_COLOR = "#FFCCFF"
 
+
+# =============================================================================
+# Display Name Mappings
+# =============================================================================
+
+def get_friendly_backend_name(backend_name: str) -> str:
+    """Convert internal backend name to display-friendly name."""
+    mapping = {
+        "claude": "Claude Pro",
+        "lmstudio": "LM Studio",
+    }
+    return mapping.get(backend_name, backend_name)
+
+
+def get_friendly_model_name(model_name: str) -> str:
+    """Convert internal model name to display-friendly name."""
+    mapping = {
+        "haiku": "4.5 Haiku",
+        "sonnet": "4.5 Sonnet",
+        "opus": "4.5 Opus",
+        "lmstudio-community/gpt-oss-20b-GGUF": "gpt-oss",
+    }
+    return mapping.get(model_name, model_name)
+
 # Destructive commands that require confirmation
 DESTRUCTIVE_PATTERNS = [
     r"rm\s+(-[rf]+\s+)*(/|~|\$HOME)",
@@ -142,7 +166,7 @@ def interpolate_color(c1: RGBColor, c2: RGBColor, t: float) -> RGBColor:
 
 
 def gradient_text(text: str) -> Text:
-    """Create gradient-colored text: pink -> yellow -> blue."""
+    """Create gradient-colored text: pink -> yellow."""
     styled = Text()
     length = len(text)
 
@@ -151,15 +175,7 @@ def gradient_text(text: str) -> Text:
 
     for i, char in enumerate(text):
         progress = i / max(length - 1, 1)
-
-        # Two-segment gradient
-        if progress < 0.5:
-            t = progress * 2
-            r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, t)
-        else:
-            t = (progress - 0.5) * 2
-            r, g, b = interpolate_color(GRADIENT_YELLOW, GRADIENT_BLUE, t)
-
+        r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, progress)
         styled.append(char, style=f"rgb({r},{g},{b})")
 
     return styled
@@ -296,6 +312,7 @@ class YipsAgent:
     def __init__(self):
         self.conversation_history: list[Message] = []
         self.console = console
+        self.backend_initialized = False
 
         # Load saved configuration
         config = load_config()
@@ -303,31 +320,41 @@ class YipsAgent:
         saved_backend = config.get("backend")
 
         # Determine backend and model from saved config or defaults
+        # Do NOT start LM Studio here - that happens in initialize_backend() after title box display
         if saved_backend == "claude" and saved_model:
             self.use_claude_cli = True
             self.current_model = saved_model
         elif saved_backend == "lmstudio" and saved_model:
             self.use_claude_cli = False
             self.current_model = saved_model
-            # Ensure LM Studio is running for saved LM Studio model
-            if not is_lmstudio_running():
-                self.console.print("[dim]Starting LM Studio...[/dim]")
-                if not ensure_lmstudio_running():
-                    self.console.print("[yellow]LM Studio unavailable, using Claude CLI.[/yellow]")
-                    self.use_claude_cli = True
-                    self.current_model = CLAUDE_CLI_MODEL
         else:
             # No saved config - use defaults
             self.use_claude_cli = False
             self.current_model = LM_STUDIO_MODEL
-            if not is_lmstudio_running():
-                self.console.print("[dim]Starting LM Studio...[/dim]")
-                if ensure_lmstudio_running():
-                    self.console.print("[dim]LM Studio ready.[/dim]")
-                else:
-                    self.console.print("[yellow]LM Studio unavailable, using Claude CLI.[/yellow]")
-                    self.use_claude_cli = True
-                    self.current_model = CLAUDE_CLI_MODEL
+
+    def initialize_backend(self) -> None:
+        """Initialize backend after UI is displayed."""
+        if self.backend_initialized:
+            return
+
+        # If using Claude CLI, nothing to initialize
+        if self.use_claude_cli:
+            self.backend_initialized = True
+            return
+
+        # LM Studio backend - ensure it's running
+        if not is_lmstudio_running():
+            self.console.print(f"[dim]Starting {get_friendly_backend_name('lmstudio')}...[/dim]")
+            if not ensure_lmstudio_running():
+                self.console.print(f"[yellow]{get_friendly_backend_name('lmstudio')} unavailable, using {get_friendly_backend_name('claude')}.[/yellow]")
+                self.use_claude_cli = True
+                self.current_model = CLAUDE_CLI_MODEL
+            else:
+                self.console.print(f"[dim]{get_friendly_backend_name('lmstudio')} ready.[/dim]")
+        else:
+            self.console.print(f"[dim]{get_friendly_backend_name('lmstudio')} ready.[/dim]")
+
+        self.backend_initialized = True
 
     def load_context(self) -> str:
         """Load all context documents into a system prompt."""
@@ -436,13 +463,16 @@ class YipsAgent:
 
     def get_response(self, message: str) -> str:
         """Get response using available backend (LM Studio or Claude CLI)."""
+        if not self.backend_initialized:
+            return "[Error: Backend not initialized]"
+
         if self.use_claude_cli:
             return self.call_claude_cli(message)
 
         response = self.call_lm_studio(message)
         # If LM Studio fails mid-session, fall back to CLI
         if response.startswith("[Error: Could not connect"):
-            self.console.print("[yellow]LM Studio disconnected, switching to Claude CLI.[/yellow]")
+            self.console.print(f"[yellow]{get_friendly_backend_name('lmstudio')} disconnected, switching to {get_friendly_backend_name('claude')}.[/yellow]")
             self.use_claude_cli = True
             return self.call_claude_cli(message)
         return response
@@ -615,13 +645,13 @@ class YipsAgent:
             for model in ["haiku", "sonnet", "opus"]:
                 is_current = self.use_claude_cli and self.current_model == model
                 status = "← current" if is_current else ""
-                table.add_row(model, "Claude CLI", status)
+                table.add_row(get_friendly_model_name(model), get_friendly_backend_name("claude"), status)
 
             # LM Studio models
             for model in lm_models:
                 is_current = not self.use_claude_cli and self.current_model == model
                 status = "← current" if is_current else ""
-                table.add_row(model, "LM Studio", status)
+                table.add_row(get_friendly_model_name(model), get_friendly_backend_name("lmstudio"), status)
 
             self.console.print(table)
             return
@@ -633,7 +663,8 @@ class YipsAgent:
             self.use_claude_cli = True
             self.current_model = model_name
             save_config({"backend": "claude", "model": model_name})
-            self.console.print(f"[green]Switched to Claude CLI with model: {model_name}[/green]")
+            self.console.print(f"[green]Switched to {get_friendly_backend_name('claude')} with model: {get_friendly_model_name(model_name)}[/green]")
+            self.refresh_display()
         elif args in lm_models or any(args.lower() in m.lower() for m in lm_models):
             # Find matching LM Studio model
             matched = args if args in lm_models else next(
@@ -643,7 +674,8 @@ class YipsAgent:
                 self.use_claude_cli = False
                 self.current_model = matched
                 save_config({"backend": "lmstudio", "model": matched})
-                self.console.print(f"[green]Switched to LM Studio with model: {matched}[/green]")
+                self.console.print(f"[green]Switched to {get_friendly_backend_name('lmstudio')} with model: {get_friendly_model_name(matched)}[/green]")
+                self.refresh_display()
             else:
                 self.console.print(f"[red]Model not found: {args}[/red]")
         else:
@@ -734,8 +766,9 @@ class YipsAgent:
 
         # Gather content
         username = get_username()
-        backend = "Claude CLI" if self.use_claude_cli else "LM Studio"
-        model = self.current_model
+        backend_key = "claude" if self.use_claude_cli else "lmstudio"
+        display_backend = get_friendly_backend_name(backend_key)
+        display_model = get_friendly_model_name(self.current_model)
         cwd = str(Path.home() / "Yips")  # ~/Yips representation
         logo = generate_yips_logo()
         activity = get_recent_activity(3)
@@ -747,7 +780,7 @@ class YipsAgent:
             "",  # [2] blank
         ]
         left_col.extend(logo)  # [3-8] logo lines (6 lines)
-        left_col.append(f"{model} · Backend: {backend}")  # [9]
+        left_col.append(f"{display_backend} · {display_model}")  # [9]
         left_col.append(cwd)  # [10]
         left_col.append("")  # [11] blank padding
 
@@ -862,19 +895,17 @@ class YipsAgent:
                     # Interpolate color for this character
                     r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, gradient_progress)
                     styled_line.append(char, style=f"rgb({r},{g},{b})")
-            elif line_num == 1:  # Welcome message - pink to yellow gradient
-                for i, char in enumerate(left_text):
-                    char_progress = i / max(len(left_text) - 1, 1)
+            elif line_num == 1:  # Welcome message - pink to yellow gradient (centered)
+                centered_text = left_text.center(left_width)
+                for i, char in enumerate(centered_text):
+                    char_progress = i / max(len(centered_text) - 1, 1)
                     r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, char_progress)
                     styled_line.append(char, style=f"rgb({r},{g},{b})")
-                # Pad to width with spaces
-                styled_line.append(" " * (left_width - len(left_text)))
-            elif line_num == 9:  # Model info - solid blue
+            elif line_num == 9:  # Model info - solid blue (centered)
+                centered_text = left_text.center(left_width)
                 r, g, b = GRADIENT_BLUE
                 blue_style = f"rgb({r},{g},{b})"
-                styled_line.append(left_text, style=blue_style)
-                # Pad to width with spaces
-                styled_line.append(" " * (left_width - len(left_text)))
+                styled_line.append(centered_text, style=blue_style)
             else:
                 # Other left content - center aligned with default color
                 centered_text = left_text.center(left_width)
@@ -923,10 +954,21 @@ class YipsAgent:
         self.console.print(bottom_text)
         self.console.print()
 
+    def refresh_display(self) -> None:
+        """Clear terminal and re-render title box."""
+        os.system('clear' if os.name != 'nt' else 'cls')
+        self.render_title_box()
+
     def run(self):
         """Main conversation loop."""
+        # Clear terminal
+        os.system('clear' if os.name != 'nt' else 'cls')
+
         # Render the new two-column title box
         self.render_title_box()
+
+        # Initialize backend after displaying UI
+        self.initialize_backend()
 
         while True:
             try:

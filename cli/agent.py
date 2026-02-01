@@ -58,6 +58,7 @@ from cli.info_utils import (
     get_recent_activity,
     get_friendly_backend_name,
     get_friendly_model_name,
+    get_display_directory,
 )
 from cli.ui_rendering import (
     PulsingSpinner,
@@ -777,7 +778,7 @@ class YipsAgent:
         backend_key = "claude" if self.use_claude_cli else "lmstudio"
         display_backend = get_friendly_backend_name(backend_key)
         display_model = get_friendly_model_name(self.current_model)
-        cwd = str(Path.home() / "Yips")
+        cwd = get_display_directory()
         logo = generate_yips_logo()
         logo_width = len(logo[0]) if logo else 1
 
@@ -880,7 +881,7 @@ class YipsAgent:
         backend_key = "claude" if self.use_claude_cli else "lmstudio"
         display_backend = get_friendly_backend_name(backend_key)
         display_model = get_friendly_model_name(self.current_model)
-        cwd = str(Path.home() / "Yips")
+        cwd = get_display_directory()
         logo = generate_yips_logo()
         logo_height = len(logo)
         logo_width = len(logo[0]) if logo else 1

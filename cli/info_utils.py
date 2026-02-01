@@ -33,6 +33,36 @@ def get_username() -> str:
     return "Katherine"
 
 
+def get_display_directory() -> str:
+    """Get the current working directory to display in title box with tilde notation.
+
+    Returns the directory where yips was launched from (from YIPS_USER_CWD env var),
+    or falls back to current working directory. Uses ~ notation if under home directory.
+    """
+    import os
+    from pathlib import Path
+
+    # Check for the user's original working directory from launcher
+    user_cwd = os.environ.get('YIPS_USER_CWD')
+    if user_cwd:
+        cwd = Path(user_cwd)
+    else:
+        # Fallback to current working directory
+        cwd = Path.cwd()
+
+    home_path = Path.home()
+
+    # Check if cwd is under home directory
+    try:
+        # relative_to() will raise ValueError if not a subpath
+        relative = cwd.relative_to(home_path)
+        # Return with tilde notation
+        return f"~/{relative}"
+    except ValueError:
+        # Not under home directory, return absolute path
+        return str(cwd)
+
+
 def get_recent_activity(limit: int = 3) -> list[str]:
     """Get recent activity from memories directory."""
     try:

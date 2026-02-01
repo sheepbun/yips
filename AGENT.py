@@ -1461,17 +1461,8 @@ class YipsAgent:
         # Initialize backend after displaying UI
         self.initialize_backend()
 
-        # Show streaming greeting
-        username = get_username()
-        greeting = f"Hey {username}! 👋 How can I help get things done today?"
-        self.stream_text(greeting)
-        self.conversation_history.append({"role": "assistant", "content": greeting})
-
         while True:
             try:
-                # Add a newline before the prompt for better separation
-                self.console.print()
-                
                 # Create custom style for prompt_toolkit input
                 style = PromptStyle.from_dict({
                     '': PROMPT_COLOR,  # Input text color (e.g., #FFCCFF)

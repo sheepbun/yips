@@ -1,0 +1,15 @@
+{
+  "include": ["cli"],
+  "pythonVersion": "3.14",
+  "typeCheckingMode": "strict",
+  "reportMissingParameterType": "error",
+  "reportUnknownParameterType": "warning",
+  "strictListInference": true,
+  "strictDictionaryInference": true,
+  "strictSetInference": true,
+  "reportUnusedImport": "warning",
+  "reportUnusedVariable": "warning",
+  "reportPrivateUsage": "warning",
+  "reportConstantRedefinition": "warning",
+  "reportDeprecated": "warning"
+}

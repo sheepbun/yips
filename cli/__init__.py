@@ -1,14 +1,10 @@
-#!/usr/bin/env python3
 """
-Yips - Fully Autonomous Personal Desktop Agent
+Yips CLI Package
 
 A conversational assistant powered by LM Studio API with persistent memory,
 beautiful gradient CLI output, and autonomous tool execution.
-
-This file is a thin wrapper that delegates to the cli module.
 """
 
 from cli.main import main
 
-if __name__ == "__main__":
-    main()
+__all__ = ["main"]

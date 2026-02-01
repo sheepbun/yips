@@ -1,0 +1,159 @@
+"""
+Slash command handlers for Yips CLI.
+
+Handles built-in commands like /model, /verbose, /stream, /exit, and skill invocation.
+"""
+
+import os
+import subprocess
+import sys
+from typing import Protocol
+
+from rich.console import Console
+from rich.table import Table
+
+from cli.color_utils import console, print_gradient
+from cli.config import load_config, save_config, SKILLS_DIR
+from cli.root import PROJECT_ROOT
+from cli.info_utils import get_friendly_backend_name, get_friendly_model_name
+from cli.lmstudio import get_available_models
+
+
+class YipsAgentProtocol(Protocol):
+    """Interface that commands.py needs from YipsAgent."""
+    use_claude_cli: bool
+    current_model: str
+    verbose_mode: bool
+    streaming_enabled: bool
+    console: Console
+
+    def refresh_display(self) -> None: ...
+    def graceful_exit(self) -> None: ...
+
+
+def handle_model_command(agent: YipsAgentProtocol, args: str) -> None:
+    """Handle the /model command to display or switch models."""
+    args = args.strip()
+
+    # Claude models that switch to Claude CLI
+    claude_models = {"haiku", "sonnet", "opus"}
+
+    # Get available LM Studio models
+    lm_models = get_available_models()
+
+    if not args:
+        # Display model table
+        table = Table(title="Available Models")
+        table.add_column("Model", style="cyan")
+        table.add_column("Backend", style="magenta")
+        table.add_column("Status", style="green")
+
+        # Claude models
+        for model in ["haiku", "sonnet", "opus"]:
+            is_current = agent.use_claude_cli and agent.current_model == model
+            status = "← current" if is_current else ""
+            table.add_row(get_friendly_model_name(model), get_friendly_backend_name("claude"), status)
+
+        # LM Studio models
+        for model in lm_models:
+            is_current = not agent.use_claude_cli and agent.current_model == model
+            status = "← current" if is_current else ""
+            table.add_row(get_friendly_model_name(model), get_friendly_backend_name("lmstudio"), status)
+
+        console.print(table)
+        return
+
+    # Switch model
+    model_name = args.lower()
+
+    if model_name in claude_models:
+        agent.use_claude_cli = True
+        agent.current_model = model_name
+        config = load_config()
+        config.update({"backend": "claude", "model": model_name, "verbose": agent.verbose_mode})
+        save_config(config)
+        console.print(f"[green]Switched to {get_friendly_backend_name('claude')} with model: {get_friendly_model_name(model_name)}[/green]")
+        agent.refresh_display()
+    elif args in lm_models or any(args.lower() in m.lower() for m in lm_models):
+        # Find matching LM Studio model
+        matched = args if args in lm_models else next(
+            (m for m in lm_models if args.lower() in m.lower()), None
+        )
+        if matched:
+            agent.use_claude_cli = False
+            agent.current_model = matched
+            config = load_config()
+            config.update({"backend": "lmstudio", "model": matched, "verbose": agent.verbose_mode})
+            save_config(config)
+            console.print(f"[green]Switched to {get_friendly_backend_name('lmstudio')} with model: {get_friendly_model_name(matched)}[/green]")
+            agent.refresh_display()
+        else:
+            console.print(f"[red]Model not found: {args}[/red]")
+    else:
+        console.print(f"[red]Model not found: {args}[/red]")
+        console.print("[dim]Use /model to see available models[/dim]")
+
+
+def handle_slash_command(agent: YipsAgentProtocol, user_input: str) -> str | bool:
+    """Handle slash commands. Returns 'exit' to quit, True if handled, False otherwise."""
+    if not user_input.startswith("/"):
+        return False
+
+    # Parse command and args
+    parts = user_input[1:].split(maxsplit=1)
+    command = parts[0].lower() if parts else ""
+    args = parts[1] if len(parts) > 1 else ""
+
+    # Built-in commands
+    if command in ("exit", "quit"):
+        agent.graceful_exit()
+        return "exit"
+
+    if command == "model":
+        handle_model_command(agent, args)
+        return True
+
+    if command == "verbose":
+        # Toggle verbose mode
+        agent.verbose_mode = not agent.verbose_mode
+        config = load_config()
+        config["verbose"] = agent.verbose_mode
+        save_config(config)
+        status = "enabled" if agent.verbose_mode else "disabled"
+        console.print(f"[green]Verbose mode (Claude Code tool calls): {status}[/green]")
+        return True
+
+    if command == "stream":
+        # Toggle streaming mode
+        agent.streaming_enabled = not agent.streaming_enabled
+        config = load_config()
+        config["streaming"] = agent.streaming_enabled
+        save_config(config)
+        status = "enabled" if agent.streaming_enabled else "disabled"
+        console.print(f"[green]Streaming mode: {status}[/green]")
+        agent.refresh_display()
+        return True
+
+    # Skill-based commands
+    skill_path = SKILLS_DIR / f"{command.upper()}.py"
+    if skill_path.exists():
+        try:
+            cmd = [sys.executable, str(skill_path)] + (args.split() if args else [])
+            env = {**os.environ, "PYTHONPATH": str(PROJECT_ROOT)}
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env)
+            if result.stdout.strip():
+                print_gradient(result.stdout.strip())
+            if result.stderr.strip():
+                console.print(f"[red]{result.stderr.strip()}[/red]")
+        except subprocess.TimeoutExpired:
+            console.print(f"[red]Command /{command} timed out[/red]")
+        except Exception as e:
+            console.print(f"[red]Error running /{command}: {e}[/red]")
+        return True
+
+    # Unknown command
+    console.print(f"[red]Unknown command: /{command}[/red]")
+    available = [s.stem.lower() for s in SKILLS_DIR.glob("*.py")]
+    available.extend(["exit", "model", "verbose", "stream"])
+    console.print(f"[dim]Available: /{', /'.join(sorted(available))}[/dim]")
+    return True

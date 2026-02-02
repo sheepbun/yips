@@ -409,6 +409,8 @@ class YipsAgent:
                             usage = message_data.get("usage", {})
                             if "input_tokens" in usage:
                                 input_tokens = usage.get("input_tokens")
+                                if self.verbose_mode:
+                                    self.console.print(f"[dim]DEBUG: message_start input_tokens={input_tokens}[/dim]")
                                 spinner.update_tokens(input_tokens=input_tokens)
 
                         # Handle content_block_start event (detect thinking/text blocks)
@@ -499,6 +501,8 @@ class YipsAgent:
                                 # Save final counts for display after streaming
                                 final_output_tokens = output_tokens
                                 final_input_tokens = input_tokens
+                                if self.verbose_mode:
+                                    self.console.print(f"[dim]DEBUG: message_delta input={input_tokens}, output={output_tokens}[/dim]")
                                 spinner.update_tokens(input_tokens=input_tokens, output_tokens=output_tokens)
 
 

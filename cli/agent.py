@@ -618,9 +618,6 @@ class YipsAgent:
         if not self.conversation_history:
             return
 
-        # Track if this is the first session creation for title box refresh
-        should_refresh_display = False
-
         # Create session file on first message if it doesn't exist
         if not self._session_created:
             self._session_created = True
@@ -629,7 +626,6 @@ class YipsAgent:
             safe_name = self._generate_session_name_from_message()
             filename = f"{timestamp}_{safe_name}.md"
             self.session_file_path = MEMORIES_DIR / filename
-            should_refresh_display = True
 
         if not self.session_file_path:
             return
@@ -667,9 +663,6 @@ class YipsAgent:
 
         try:
             self.session_file_path.write_text(memory_content)
-            # Refresh title box only on first session creation
-            if should_refresh_display:
-                self.refresh_display()
         except Exception as e:
             self.console.print(f"[dim]Note: Could not update session file: {e}[/dim]")
 

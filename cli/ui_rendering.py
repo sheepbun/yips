@@ -72,12 +72,15 @@ class PulsingSpinner:
         time_str = self._format_time(elapsed)
         
         # Format tokens (e.g., 5.6k)
-        if self.token_count >= 1000:
-            token_str = f"{self.token_count/1000:.1f}k"
+        # During streaming, show input tokens with ↑ arrow
+        display_count = self.input_tokens if self.input_tokens > 0 else self.token_count
+        if display_count >= 1000:
+            token_str = f"{display_count/1000:.1f}k"
         else:
-            token_str = str(self.token_count)
-            
-        status_text = f" ({time_str} · ↓ {token_str} tokens · {self.model_status})"
+            token_str = str(display_count)
+
+        arrow = "↑" if self.output_tokens == 0 else "↓"
+        status_text = f" ({time_str} · {arrow} {token_str} tokens · {self.model_status})"
         
         full_text = Text.assemble(
             (self.message, f"dim {color}"),

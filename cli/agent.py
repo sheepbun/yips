@@ -520,10 +520,15 @@ class YipsAgent:
                     final_text.append(gradient_text(line))
                 self.console.print(final_text)
 
-            # Display actual token usage from API
-            if final_input_tokens > 0 or final_output_tokens > 0:
+            # Display actual output token count from API
+            if final_output_tokens > 0:
+                # Format tokens (e.g., 1.2k)
+                if final_output_tokens >= 1000:
+                    token_str = f"{final_output_tokens/1000:.1f}k"
+                else:
+                    token_str = str(final_output_tokens)
                 self.console.print(
-                    f"[dim]Tokens: ↓{final_input_tokens} in, ↑{final_output_tokens} out[/dim]",
+                    f"[dim]↓ {token_str} tokens[/dim]",
                     style=TOOL_COLOR
                 )
 

@@ -76,7 +76,7 @@ from cli.type_defs import Message, YipsConfig, StreamingToolCall
 class YipsAgent:
     """Main agent class managing conversation and autonomous tool execution."""
 
-    def __init__(self) -> None:
+    def __init__(self, prompt_session=None) -> None:
         self.conversation_history: list[Message] = []
         self.console = console
         self.backend_initialized = False
@@ -97,6 +97,9 @@ class YipsAgent:
         self.session_file_path: Path | None = None
         self._session_created = False
         self.current_session_name: str | None = None
+
+        # Prompt toolkit session for triggering redraws
+        self.prompt_session = prompt_session
 
         # Register SIGWINCH handler (Unix only)
         if hasattr(signal, 'SIGWINCH'):
@@ -1149,20 +1152,71 @@ class YipsAgent:
         subprocess.run('clear' if os.name != 'nt' else 'cls', shell=True)
         self.render_title_box()
 
-    def refresh_title_box_only(self) -> None:
-        """Re-render the title box in-place without clearing the screen."""
-        # Capture the rendered title box output
-        with self.console.capture() as capture:
-            self.render_title_box()
-        output = capture.get()
+    def _replay_conversation_history(self) -> None:
+        """Re-render all messages from conversation_history to screen.
 
-        # Use ANSI escape codes to update in-place:
-        # \0337   - Save cursor position
-        # \033[H  - Move cursor to home (top-left)
-        # {output}- Print the new title box
-        # \0338   - Restore cursor position
-        sys.stdout.write(f"\0337\033[H{output}\0338")
-        sys.stdout.flush()
+        Reconstructs the visible chat by replaying stored messages.
+        Follows the same formatting as original display:
+        - User messages: Not printed (only appeared in prompt)
+        - Assistant messages: Printed with print_yips() gradient styling
+        - System messages: Printed with TOOL_COLOR
+        """
+        from cli.color_utils import print_yips
+
+        for message in self.conversation_history:
+            role = message.get("role")
+            content = message.get("content", "")
+
+            if role == "user":
+                # User input is never printed to screen (only shows in prompt)
+                continue
+            elif role == "assistant":
+                # Assistant responses use print_yips() for gradient styling
+                # print_yips() already adds blank line before (line 96 in color_utils.py)
+                if content:
+                    print_yips(content)
+            elif role == "system":
+                # Tool execution results use TOOL_COLOR (matches main.py line 115)
+                if content:
+                    self.console.print(content, style=TOOL_COLOR)
+
+        # Add final spacing after conversation (matches main.py line 125)
+        if self.conversation_history:
+            self.console.print()
+
+    def refresh_title_box_only(self) -> None:
+        """Re-render the title box and conversation history.
+
+        Clears screen, re-renders title box with updated session name,
+        replays all conversation messages, and signals prompt_toolkit to redraw.
+        """
+        if self.prompt_session is not None:
+            try:
+                from prompt_toolkit.application import get_app
+
+                # Clear screen to ensure clean redraw
+                subprocess.run('clear' if os.name != 'nt' else 'cls', shell=True)
+
+                # Re-render title box with updated session name and recent activity
+                self.render_title_box()
+
+                # Re-render all conversation messages from memory
+                self._replay_conversation_history()
+
+                # Signal prompt_toolkit to redraw the input prompt
+                app = get_app()
+                app.invalidate()
+
+            except Exception as e:
+                # Fallback if get_app() fails (shouldn't happen in normal usage)
+                subprocess.run('clear' if os.name != 'nt' else 'cls', shell=True)
+                self.render_title_box()
+                self._replay_conversation_history()
+        else:
+            # Fallback for cases where prompt_session isn't set yet
+            subprocess.run('clear' if os.name != 'nt' else 'cls', shell=True)
+            self.render_title_box()
+            self._replay_conversation_history()
 
     def _handle_resize(self, signum: int, frame: "FrameType | None") -> None:
         """Handle SIGWINCH signal with debouncing."""

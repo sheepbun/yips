@@ -200,6 +200,9 @@ def main() -> None:
                 "content": result
             })
 
+        # Add a blank line to separate this turn from the next prompt
+        console.print()
+
         # Update session memory file with current conversation
         agent.update_session_file()
 

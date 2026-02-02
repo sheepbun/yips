@@ -71,6 +71,7 @@ from cli.ui_rendering import (
     show_loading,
     render_top_border,
     render_bottom_border,
+    render_tool_call,
     LOGO_WIDTH,
 )
 from cli.type_defs import Message, YipsConfig, StreamingToolCall
@@ -799,12 +800,16 @@ class YipsAgent:
         except Exception as e:
             self.console.print(f"[dim]Note: Could not update session file: {e}[/dim]")
 
+    def _display_lm_studio_tool_call(self, tool_name: str, tool_input: dict[str, Any]) -> None:
+        """Display LM Studio tool calls in a formatted way using render_tool_call."""
+        console.print()
+        render_tool_call(tool_name, tool_input)
+
     def _display_claude_tool_calls(self, stderr_output: str) -> None:
-        """Parse and display Claude Code tool calls from stderr using Rich Tree."""
+        """Parse and display Claude Code tool calls from stderr."""
         lines = stderr_output.split('\n')
 
-        # Collect tool-related lines to display with Tree
-        tool_lines: list[str] = []
+        # Collect tool-related lines
         for raw_line in lines:
             stripped_line = raw_line.strip()
             if not stripped_line:
@@ -812,37 +817,8 @@ class YipsAgent:
 
             # Look for tool call indicators
             if 'Tool:' in stripped_line or 'tool:' in stripped_line or 'Reading' in stripped_line or 'Writing' in stripped_line or 'Running' in stripped_line:
-                tool_lines.append(stripped_line)
-
-        # If we found tool calls, display them in a tree
-        if tool_lines:
-            tree = Tree(blue_gradient_text("Claude Code Tools"))
-            for tool_line in tool_lines:
-                tree.add(tool_line, style=TOOL_COLOR)
-            panel = Panel(tree, title="Tool Calls", border_style=TOOL_COLOR, expand=False)
-            self.console.print()
-            self.console.print(panel)
-
-    def _display_lm_studio_tool_call(self, tool_name: str, tool_input: dict[str, Any]) -> None:
-        """Display LM Studio tool calls in a formatted way using Rich Tree."""
-        tree = self._format_tool_call_tree(tool_name, tool_input)
-        panel = Panel(tree, title="Tool Call", border_style=TOOL_COLOR, expand=False)
-        self.console.print()
-        self.console.print(panel)
-
-    def _format_tool_call_tree(self, tool_name: str, tool_input: dict[str, Any]) -> Tree:
-        """Build a Rich Tree structure for tool call display."""
-        tree = Tree(blue_gradient_text(tool_name))
-
-        if tool_input:
-            for key, value in tool_input.items():
-                # Truncate long values
-                value_str = str(value)
-                if len(value_str) > 80:
-                    value_str = value_str[:77] + "..."
-                tree.add(Text.assemble((f"{key}: ", "dim"), (value_str, TOOL_COLOR)))
-
-        return tree
+                console.print()
+                render_tool_call("Claude Tool", stripped_line)
 
     def rename_session(self, new_name: str) -> None:
         """Rename the current session and update title box."""

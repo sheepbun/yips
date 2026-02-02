@@ -30,15 +30,15 @@ DESTRUCTIVE_PATTERNS = [
 
 
 def parse_tool_requests(response: str) -> list[ToolRequest]:
-    """Parse tool request tags from response text, excluding those in code blocks."""
-    # Mask out code blocks to avoid parsing example tags
+    """Parse tool request tags from response text, excluding those in large code blocks."""
+    # Mask out triple backtick blocks to avoid parsing example tags
     masked_response = response
     
     # Mask triple backtick blocks
     masked_response = re.sub(r"```.*?```", lambda m: " " * len(m.group(0)), masked_response, flags=re.DOTALL)
     
-    # Mask single backtick inline code
-    masked_response = re.sub(r"`.*?`", lambda m: " " * len(m.group(0)), masked_response)
+    # We NO LONGER mask single backticks because models often wrap their intended actions
+    # in single backticks for emphasis, and we want to allow those to execute.
 
     requests_list: list[ToolRequest] = []
 
@@ -108,11 +108,6 @@ def confirm_action(description: str) -> bool:
     return response in ("y", "yes")
 
 
-def log_action(description: str) -> None:
-    """Log an autonomous action being taken."""
-    console.print(blue_gradient_text(f"[{description}]"))
-
-
 def execute_tool(request: ToolRequest, agent: Any = None) -> str:
     """Execute a tool request (autonomously unless destructive)."""
 
@@ -122,7 +117,6 @@ def execute_tool(request: ToolRequest, agent: Any = None) -> str:
 
         if tool == "read_file":
             path = params.strip()
-            log_action(f"reading: {path}")
             try:
                 content = Path(path).expanduser().read_text()
                 return f"[File contents of {path}]:\n{content}"
@@ -134,7 +128,6 @@ def execute_tool(request: ToolRequest, agent: Any = None) -> str:
             if len(parts) < 2:
                 return "[Error: write_file requires path:content]"
             path, content = parts[0].strip(), parts[1]
-            log_action(f"writing: {path}")
             try:
                 p = Path(path).expanduser()
                 p.parent.mkdir(parents=True, exist_ok=True)
@@ -151,7 +144,6 @@ def execute_tool(request: ToolRequest, agent: Any = None) -> str:
                 if not confirm_action(f"Run: {command}"):
                     return "[Command cancelled by user]"
 
-            log_action(f"running: {command}")
             try:
                 result = subprocess.run(
                     command,
@@ -174,7 +166,6 @@ def execute_tool(request: ToolRequest, agent: Any = None) -> str:
 
     elif request["type"] == "identity":
         reflection: str = str(request["reflection"])
-        log_action("updating identity")
         identity_path = BASE_DIR / "IDENTITY.md"
         try:
             content = identity_path.read_text() if identity_path.exists() else "# Yips Identity\n"
@@ -186,12 +177,15 @@ def execute_tool(request: ToolRequest, agent: Any = None) -> str:
             return f"[Error updating identity: {e}]"
 
     elif request["type"] == "skill":
-        skill_name: str = str(request["skill"])
+        skill_name: str = str(request["skill"]).upper()
         args: str = str(request["args"])
-        log_action(f"invoking skill: {skill_name}")
 
-        # Search for skill in commands/skills/<NAME>/<NAME>.py
-        skill_path = SKILLS_DIR / skill_name.upper() / f"{skill_name.upper()}.py"
+        # Search for skill in commands/skills/<NAME>/<NAME>.py OR commands/tools/<NAME>/<NAME>.py
+        from cli.config import SKILLS_DIR, TOOLS_DIR
+        skill_path = SKILLS_DIR / skill_name / f"{skill_name}.py"
+        if not skill_path.exists():
+            skill_path = TOOLS_DIR / skill_name / f"{skill_name}.py"
+            
         if not skill_path.exists():
             return f"[Error: Skill not found: {skill_name}]"
 

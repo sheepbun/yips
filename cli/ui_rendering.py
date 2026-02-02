@@ -6,11 +6,15 @@ Provides title box rendering, spinner animations, and logo generation.
 
 import math
 import time
+import re
+from typing import Any
 
 from rich.live import Live
 from rich.spinner import Spinner
 from rich._spinners import SPINNERS
 from rich.text import Text
+from rich.tree import Tree
+from rich.panel import Panel
 
 from cli.color_utils import (
     console,
@@ -18,6 +22,8 @@ from cli.color_utils import (
     GRADIENT_PINK,
     GRADIENT_YELLOW,
     GRADIENT_BLUE,
+    TOOL_COLOR,
+    blue_gradient_text,
 )
 from cli.config import APP_VERSION
 
@@ -258,3 +264,66 @@ def render_bottom_border(terminal_width: int, session_name: str | None = None) -
 
     console.print(bottom_text)
     console.print()
+
+
+def render_tool_call(tool_name: str, parameters: dict[str, Any] | str, result: str | None = None, is_running: bool = False) -> Panel:
+    """Render a tool call in a beautiful way using Tree and Panel.
+    Returns the Panel object for use with Live or direct printing.
+    """
+    # Create the root node with a nice icon
+    icon = "⚙️"
+    if "read" in tool_name.lower(): icon = "📖"
+    elif "write" in tool_name.lower(): icon = "📝"
+    elif "command" in tool_name.lower(): icon = "💻"
+    elif "skill" in tool_name.lower(): icon = "⚡"
+    elif "identity" in tool_name.lower(): icon = "👤"
+    
+    tree = Tree(blue_gradient_text(f"{icon} {tool_name}"))
+
+    # Parameters section
+    if isinstance(parameters, dict):
+        if parameters:
+            param_node = tree.add("[dim]Parameters[/dim]")
+            for key, value in parameters.items():
+                value_str = str(value)
+                if len(value_str) > 80:
+                    value_str = value_str[:77] + "..."
+                param_node.add(Text.assemble((f"{key}: ", "dim"), (value_str, TOOL_COLOR)))
+    elif parameters:
+        val = str(parameters).strip()
+        if val:
+            if len(val) > 80:
+                val = val[:77] + "..."
+            tree.add(Text.assemble(("[dim]Input: [/dim]", ""), (val, TOOL_COLOR)))
+
+    # Status/Result section
+    if is_running:
+        # Use a simple pulsing dot or text for running state
+        t = (math.sin(time.time() * 10.0) + 1) / 2
+        r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, t)
+        tree.add(Text("● Executing...", style=f"rgb({r},{g},{b})"))
+    elif result is not None:
+        if result == "":
+            tree.add(Text("✓ Completed", style="dim"))
+        else:
+            res_tree = tree.add(blue_gradient_text("✓ Result"))
+            # Truncate result for preview
+            res_preview = result.strip()
+            
+            # Clean up result preview (remove [Command output]: etc)
+            # Handle various common prefixes
+            res_preview = re.sub(r"^\[(Command output|File contents|File written|Skill output|stderr).*?\]:\s*", "", res_preview, flags=re.IGNORECASE)
+            res_preview = re.sub(r"^\[.*?\]\s*", "", res_preview) # Catch-all for other [Brackets]
+            
+            # Strip leading/trailing whitespace again after regex
+            res_preview = res_preview.strip()
+            
+            if len(res_preview) > 500:
+                res_preview = res_preview[:497] + "..."
+            
+            if not res_preview:
+                res_preview = "Success (no output)"
+                
+            res_tree.add(Text(res_preview, style="dim"))
+
+    return Panel(tree, border_style=TOOL_COLOR, expand=False, padding=(0, 1))

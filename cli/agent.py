@@ -95,6 +95,7 @@ class YipsAgent:
         # Session file tracking for live memory creation
         self.session_file_path: Path | None = None
         self._session_created = False
+        self.current_session_name: str | None = None
 
         # Register SIGWINCH handler (Unix only)
         if hasattr(signal, 'SIGWINCH'):
@@ -619,11 +620,14 @@ class YipsAgent:
             return
 
         # Create session file on first message if it doesn't exist
+        first_creation = False
         if not self._session_created:
             self._session_created = True
+            first_creation = True
             timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
             # Generate meaningful name from first user message
             safe_name = self._generate_session_name_from_message()
+            self.current_session_name = safe_name
             filename = f"{timestamp}_{safe_name}.md"
             self.session_file_path = MEMORIES_DIR / filename
 
@@ -663,6 +667,8 @@ class YipsAgent:
 
         try:
             self.session_file_path.write_text(memory_content)
+            if first_creation:
+                self.refresh_title_box_only()
         except Exception as e:
             self.console.print(f"[dim]Note: Could not update session file: {e}[/dim]")
 
@@ -817,7 +823,7 @@ class YipsAgent:
             self.console.print(styled_line)
 
         # Render bottom border
-        render_bottom_border(terminal_width)
+        render_bottom_border(terminal_width, self.current_session_name)
 
     def _render_single_column_title(self, layout_mode: str) -> None:
         """Render single-column title box for narrow terminals (45-79 chars)."""
@@ -923,7 +929,7 @@ class YipsAgent:
             self.console.print(styled_line)
 
         # Render bottom border
-        render_bottom_border(terminal_width)
+        render_bottom_border(terminal_width, self.current_session_name)
 
     def _render_two_column_title(self) -> None:
         """Render two-column title box for wide terminals (>= 80 chars)."""
@@ -1089,12 +1095,27 @@ class YipsAgent:
             self.console.print(styled_line)
 
         # Render bottom border
-        render_bottom_border(terminal_width)
+        render_bottom_border(terminal_width, self.current_session_name)
 
     def refresh_display(self) -> None:
         """Clear terminal and re-render title box."""
         subprocess.run('clear' if os.name != 'nt' else 'cls', shell=True)
         self.render_title_box()
+
+    def refresh_title_box_only(self) -> None:
+        """Re-render the title box in-place without clearing the screen."""
+        # Capture the rendered title box output
+        with self.console.capture() as capture:
+            self.render_title_box()
+        output = capture.get()
+
+        # Use ANSI escape codes to update in-place:
+        # \0337   - Save cursor position
+        # \033[H  - Move cursor to home (top-left)
+        # {output}- Print the new title box
+        # \0338   - Restore cursor position
+        sys.stdout.write(f"\0337\033[H{output}\0338")
+        sys.stdout.flush()
 
     def _handle_resize(self, signum: int, frame: "FrameType | None") -> None:
         """Handle SIGWINCH signal with debouncing."""

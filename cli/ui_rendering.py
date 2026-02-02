@@ -144,9 +144,20 @@ def render_top_border(terminal_width: int) -> None:
     console.print(top_text)
 
 
-def render_bottom_border(terminal_width: int) -> None:
-    """Render the bottom border with gradient."""
-    bottom_border_str = "╰" + "─" * (terminal_width - 2) + "╯"
+def render_bottom_border(terminal_width: int, session_name: str | None = None) -> None:
+    """Render the bottom border with gradient, optionally containing session name."""
+    border_chars = ["─"] * (terminal_width - 2)
+
+    if session_name:
+        # Format: " name " (replace underscores with spaces for display)
+        display_name = f" {session_name.replace('_', ' ')} "
+        if len(display_name) <= len(border_chars):
+            start_idx = (len(border_chars) - len(display_name)) // 2
+            for i, char in enumerate(display_name):
+                border_chars[start_idx + i] = char
+
+    bottom_border_str = "╰" + "".join(border_chars) + "╯"
+
     bottom_text = Text()
     for i, char in enumerate(bottom_border_str):
         progress = i / max(len(bottom_border_str) - 1, 1)

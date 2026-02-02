@@ -22,6 +22,8 @@ class SlashCommandCompleter(Completer):
             '/quit': 'Exit the application',
             '/model': 'Switch or list AI models',
             '/sessions': 'Interactively select and load a session',
+            '/clear': 'Clear context and start a new session',
+            '/new': 'Start a new session',
             '/verbose': 'Toggle verbose output',
             '/stream': 'Toggle streaming responses'
         }

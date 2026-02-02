@@ -40,6 +40,7 @@ class YipsAgentProtocol(Protocol):
     def refresh_title_box_only(self) -> None: ...
     def graceful_exit(self) -> None: ...
     def load_session(self, file_path: any) -> bool: ...
+    def new_session(self) -> None: ...
 
 
 def handle_sessions_command(agent: YipsAgentProtocol) -> None:
@@ -181,6 +182,10 @@ def handle_slash_command(agent: YipsAgentProtocol, user_input: str) -> str | boo
         handle_sessions_command(agent)
         return True
 
+    if command in ("clear", "new"):
+        agent.new_session()
+        return True
+
     if command == "verbose":
         # Toggle verbose mode
         agent.verbose_mode = not agent.verbose_mode
@@ -283,7 +288,7 @@ def handle_slash_command(agent: YipsAgentProtocol, user_input: str) -> str | boo
         available.extend([d.name.lower() for d in TOOLS_DIR.iterdir() if d.is_dir()])
     if SKILLS_DIR.exists():
         available.extend([d.name.lower() for d in SKILLS_DIR.iterdir() if d.is_dir()])
-    available.extend(["exit", "model", "verbose", "stream"])
+    available.extend(["exit", "model", "verbose", "stream", "sessions", "clear", "new"])
     console.print(f"[dim]Available: /{', /'.join(sorted(list(set(available))))}[/dim]")
     return True
 

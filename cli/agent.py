@@ -934,6 +934,14 @@ class YipsAgent:
             
         return False
 
+    def new_session(self) -> None:
+        """Clear current conversation and start a new session."""
+        self.conversation_history = []
+        self.session_file_path = None
+        self._session_created = False
+        self.current_session_name = None
+        self.refresh_display()
+
     def graceful_exit(self) -> None:
         """Handle graceful exit and finalize session memory."""
         # Cancel any pending resize timer

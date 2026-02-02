@@ -182,6 +182,18 @@ class YipsAgent:
 
         return "\n\n" + "=" * 60 + "\n\n".join(sections)
 
+    def _estimate_tokens(self, system_prompt: str, messages: list[dict] | str) -> int:
+        """Estimate token count for prompt."""
+        if isinstance(messages, str):
+            text = system_prompt + messages
+        else:
+            text = system_prompt
+            for msg in messages:
+                text += str(msg.get("content", ""))
+        
+        # Rough estimate: 1 token ~= 4 chars
+        return len(text) // 4
+
     def call_lm_studio(self, message: str) -> str:
         """Call LM Studio API using Anthropic-compatible endpoint."""
         system_prompt = self.load_context()
@@ -210,8 +222,11 @@ class YipsAgent:
                 # Fall through to non-streaming mode
 
         try:
+            # Calculate tokens for loading spinner
+            est_tokens = self._estimate_tokens(system_prompt, messages)
+
             # Show loading spinner
-            with show_loading("Waiting for LM Studio response..."):
+            with show_loading("Waiting for LM Studio response...", token_count=est_tokens):
                 response = requests.post(
                     f"{LM_STUDIO_URL}/v1/messages",
                     headers=headers,
@@ -230,12 +245,25 @@ class YipsAgent:
             content_blocks = data.get("content", [])
             text_parts: list[str] = []
 
+            # Extract usage data
+            usage = data.get("usage", {})
+            if self.verbose_mode and usage:
+                input_tokens = usage.get("input_tokens", 0)
+                output_tokens = usage.get("output_tokens", 0)
+                self.console.print(
+                    f"[dim]Tokens: ↓{input_tokens} in, ↑{output_tokens} out[/dim]",
+                    style=TOOL_COLOR
+                )
+
             # Process all content blocks
             for block in content_blocks:
                 block_type = block.get("type", "")
 
                 if block_type == "text":
                     text_parts.append(block.get("text", ""))
+                elif block_type == "thinking":
+                    # Thinking blocks are detected but not displayed in non-streaming mode
+                    pass
                 elif block_type == "tool_use" and self.verbose_mode:
                     # Display tool use if verbose mode is enabled
                     tool_name = block.get("name", "unknown")
@@ -288,8 +316,11 @@ class YipsAgent:
             if self.verbose_mode:
                 cmd.append("--verbose")
 
+            # Calculate tokens for loading spinner
+            est_tokens = self._estimate_tokens("", full_prompt)
+
             # Show loading spinner
-            with show_loading("Waiting for Claude response..."):
+            with show_loading("Waiting for Claude response...", token_count=est_tokens):
                 result = subprocess.run(
                     cmd,
                     input=full_prompt,
@@ -319,7 +350,10 @@ class YipsAgent:
         try:
             # Display with Live for real-time updates
             prefix = get_yips_prefix()
-            spinner = PulsingSpinner("Thinking...")
+            
+            # Calculate tokens
+            est_tokens = self._estimate_tokens(system_prompt, messages)
+            spinner = PulsingSpinner("Thinking...", token_count=est_tokens)
 
             response = requests.post(
                 f"{LM_STUDIO_URL}/v1/messages",
@@ -339,6 +373,10 @@ class YipsAgent:
             # Accumulate response text
             accumulated_text = ""
             tool_calls: list[StreamingToolCall] = []
+
+            # State tracking for tokens and model status
+            current_block_type = None
+            in_thinking_block = False
 
             with Live(spinner, console=self.console, refresh_per_second=20, transient=True) as live:
                 for line in response.iter_lines():
@@ -363,7 +401,49 @@ class YipsAgent:
                         data = json.loads(data_str)
                         event_type = data.get("type", "")
 
-                        if event_type == "content_block_delta":
+                        # Handle message_start event (contains input tokens)
+                        if event_type == "message_start":
+                            message_data = data.get("message", {})
+                            usage = message_data.get("usage", {})
+                            input_tokens = usage.get("input_tokens", 0)
+                            if input_tokens > 0:
+                                spinner.update_tokens(input_tokens=input_tokens)
+
+                        # Handle content_block_start event (detect thinking/text blocks)
+                        elif event_type == "content_block_start":
+                            block = data.get("content_block", {})
+                            current_block_type = block.get("type")
+
+                            if current_block_type == "thinking":
+                                in_thinking_block = True
+                                spinner.update_status("reasoning")
+                            elif current_block_type == "text":
+                                in_thinking_block = False
+                                spinner.update_status("generating")
+                            elif current_block_type == "tool_use":
+                                spinner.update_status("using tools")
+                                # Still process tool_use as before
+                                tool_name = block.get("name", "unknown")
+                                tool_calls.append({
+                                    "name": tool_name,
+                                    "input_json": ""
+                                })
+                                display_text = Text()
+                                display_text.append_text(prefix)
+                                if accumulated_text:
+                                    lines = accumulated_text.split('\n')
+                                    for i, text_line in enumerate(lines):
+                                        if i > 0: display_text.append("\n      ")
+                                        display_text.append(apply_gradient_to_text(text_line))
+                                    display_text.append("\n      ")
+                                display_text.append(f"🔧 Using tool: {tool_name}...", style=TOOL_COLOR)
+                                live.update(display_text)
+                            else:
+                                # Fallback for unknown block types
+                                spinner.update_status("processing")
+
+                        # Handle content_block_delta event (accumulate text and count tokens)
+                        elif event_type == "content_block_delta":
                             delta = data.get("delta", {})
                             delta_type = delta.get("type", "")
 
@@ -371,6 +451,11 @@ class YipsAgent:
                                 # Accumulate text tokens
                                 text = delta.get("text", "")
                                 accumulated_text += text
+
+                                # Estimate output tokens based on text length (1 token ~= 4 chars)
+                                estimated_tokens = max(1, len(text) // 4)
+                                spinner.output_tokens += estimated_tokens
+                                spinner.token_count = spinner.input_tokens + spinner.output_tokens
 
                                 # Update display with full gradient (include prefix)
                                 display_text = Text()
@@ -407,28 +492,14 @@ class YipsAgent:
                                 display_text.append(f"🔧 Using tool: {tool_name}...", style=TOOL_COLOR)
                                 live.update(display_text)
 
-                        elif event_type == "content_block_start":
-                            block = data.get("content_block", {})
-                            if block.get("type") == "tool_use":
-                                tool_name = block.get("name", "unknown")
-                                # Initialize tool call object
-                                tool_calls.append({
-                                    "name": tool_name,
-                                    "input_json": ""
-                                })
+                        # Handle message_delta event (contains final output tokens)
+                        elif event_type == "message_delta":
+                            usage = data.get("usage", {})
+                            output_tokens = usage.get("output_tokens", 0)
+                            if output_tokens > 0:
+                                # Use actual token count from API
+                                spinner.update_tokens(output_tokens=output_tokens)
 
-                                # Update display to show tool call started
-                                display_text = Text()
-                                display_text.append_text(prefix)
-                                if accumulated_text:
-                                    lines = accumulated_text.split('\n')
-                                    for i, text_line in enumerate(lines):
-                                        if i > 0: display_text.append("\n      ")
-                                        display_text.append(apply_gradient_to_text(text_line))
-                                    display_text.append("\n      ")
-
-                                display_text.append(f"🔧 Using tool: {tool_name}...", style=TOOL_COLOR)
-                                live.update(display_text)
 
                     except json.JSONDecodeError:
                         continue
@@ -494,7 +565,10 @@ class YipsAgent:
 
             # Display with Live for real-time updates
             prefix = get_yips_prefix()
-            spinner = PulsingSpinner("Thinking...")
+
+            # Calculate tokens
+            est_tokens = self._estimate_tokens("", full_prompt)
+            spinner = PulsingSpinner("Thinking...", token_count=est_tokens, model_status="generating")
 
             # stdout/stderr are guaranteed non-None when stdout=PIPE, stderr=PIPE
             assert process.stdout is not None
@@ -512,6 +586,11 @@ class YipsAgent:
                         continue
 
                     accumulated_text += char
+
+                    # Estimate output tokens based on accumulated text (1 token ~= 4 chars)
+                    # This is a rough estimate since Claude CLI doesn't expose token counts
+                    estimated_total = self._estimate_tokens("", accumulated_text)
+                    spinner.token_count = max(spinner.token_count, estimated_total)
 
                     # Update display with full gradient (include prefix)
                     display_text = Text()

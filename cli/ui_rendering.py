@@ -33,16 +33,55 @@ LOGO_WIDTH = 28  # Width of the ASCII logo
 
 class PulsingSpinner:
     """A Rich renderable that pulses a spinner and text between pink and yellow."""
-    def __init__(self, message: str):
+    def __init__(self, message: str, start_time: float | None = None, token_count: int = 0, model_status: str = "thinking"):
         self.message = message
         self.spinner = Spinner("clockwise_dots_8")
+        self.start_time = start_time if start_time is not None else time.time()
+        self.token_count = token_count
+        self.model_status = model_status
+        self.input_tokens = 0
+        self.output_tokens = 0
+
+    def _format_time(self, seconds: float) -> str:
+        m, s = divmod(int(seconds), 60)
+        return f"{m}m {s}s"
+
+    def update_tokens(self, input_tokens: int = 0, output_tokens: int = 0) -> None:
+        """Update token counts (can be called during streaming)."""
+        if input_tokens > 0:
+            self.input_tokens = input_tokens
+        if output_tokens > 0:
+            self.output_tokens = output_tokens
+        # Total for display
+        self.token_count = self.input_tokens + self.output_tokens
+
+    def update_status(self, status: str) -> None:
+        """Update model status (thinking/generating/reasoning)."""
+        self.model_status = status
 
     def __rich__(self) -> Spinner:
         # Pulse between 0 and 1 over ~3 seconds for a slow effect
         t = (math.sin(time.time() * 2.0) + 1) / 2
         r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, t)
         color = f"rgb({r},{g},{b})"
-        self.spinner.text = Text(self.message, style=f"dim {color}")
+        
+        elapsed = time.time() - self.start_time
+        time_str = self._format_time(elapsed)
+        
+        # Format tokens (e.g., 5.6k)
+        if self.token_count >= 1000:
+            token_str = f"{self.token_count/1000:.1f}k"
+        else:
+            token_str = str(self.token_count)
+            
+        status_text = f" ({time_str} · ↓ {token_str} tokens · {self.model_status})"
+        
+        full_text = Text.assemble(
+            (self.message, f"dim {color}"),
+            (status_text, f"dim {color}")
+        )
+        
+        self.spinner.text = full_text
         self.spinner.style = color
         return self.spinner
 
@@ -66,9 +105,9 @@ def safe_center(text: str, width: int) -> str:
     return text.center(width)
 
 
-def show_loading(message: str = "Waiting for response...") -> Live:
+def show_loading(message: str = "Waiting for response...", token_count: int = 0) -> Live:
     """Create and return a Rich Live context with a pulsing pink->yellow loading spinner."""
-    return Live(PulsingSpinner(message), console=console, transient=True, refresh_per_second=10)
+    return Live(PulsingSpinner(message, token_count=token_count), console=console, transient=True, refresh_per_second=10)
 
 
 def render_top_border(terminal_width: int) -> None:

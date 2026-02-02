@@ -92,6 +92,10 @@ class YipsAgent:
         self.resize_pending: bool = False
         self._resize_timer: threading.Timer | None = None
 
+        # Session file tracking for live memory creation
+        self.session_file_path: Path | None = None
+        self._session_created = False
+
         # Register SIGWINCH handler (Unix only)
         if hasattr(signal, 'SIGWINCH'):
             signal.signal(signal.SIGWINCH, self._handle_resize)
@@ -584,10 +588,90 @@ class YipsAgent:
             if slug:
                 return slug
         except Exception:
+            # If summary generation fails, fall back to timestamp
             pass
 
         # Fallback to timestamp-based name
         return f"session_{datetime.now().strftime('%Y%m%d_%H%M')}"
+
+    def _generate_session_name_from_message(self) -> str:
+        """Generate session name from first user message."""
+        # Find first user message in history
+        for entry in self.conversation_history:
+            if entry.get("role") == "user":
+                message = entry.get("content", "")
+                # Clean and truncate
+                slug = message.lower().strip()
+                # Remove non-alphanumeric (except spaces)
+                slug = re.sub(r'[^a-z0-9\s]', '', slug)
+                # Replace spaces with underscores
+                slug = re.sub(r'\s+', '_', slug)
+                # Truncate to 50 chars
+                slug = slug[:50]
+                # Remove trailing underscores
+                slug = slug.rstrip('_')
+                return slug if slug else "session"
+        return "session"
+
+    def update_session_file(self) -> None:
+        """Create or update the session memory file with current conversation."""
+        if not self.conversation_history:
+            return
+
+        # Track if this is the first session creation for title box refresh
+        should_refresh_display = False
+
+        # Create session file on first message if it doesn't exist
+        if not self._session_created:
+            self._session_created = True
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            # Generate meaningful name from first user message
+            safe_name = self._generate_session_name_from_message()
+            filename = f"{timestamp}_{safe_name}.md"
+            self.session_file_path = MEMORIES_DIR / filename
+            should_refresh_display = True
+
+        if not self.session_file_path:
+            return
+
+        # Ensure directory exists
+        MEMORIES_DIR.mkdir(parents=True, exist_ok=True)
+
+        # Format conversation for file
+        conversation_lines = []
+        for entry in self.conversation_history:
+            role = entry.get("role", "unknown")
+            content = entry.get("content", "")
+
+            if role == "user":
+                conversation_lines.append(f"**Katherine**: {content}")
+            elif role == "assistant":
+                conversation_lines.append(f"**Yips**: {content}")
+            elif role == "system":
+                # Truncate long system messages
+                preview = content[:200] + "..." if len(content) > 200 else content
+                conversation_lines.append(f"*[System: {preview}]*")
+
+        memory_content = f"""# Session Memory
+
+**Created**: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+**Type**: Ongoing Session
+
+## Conversation
+
+{chr(10).join(conversation_lines)}
+
+---
+*Last updated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}*
+"""
+
+        try:
+            self.session_file_path.write_text(memory_content)
+            # Refresh title box only on first session creation
+            if should_refresh_display:
+                self.refresh_display()
+        except Exception as e:
+            self.console.print(f"[dim]Note: Could not update session file: {e}[/dim]")
 
     def _display_claude_tool_calls(self, stderr_output: str) -> None:
         """Parse and display Claude Code tool calls from stderr using Rich Tree."""
@@ -633,24 +717,10 @@ class YipsAgent:
         return tree
 
     def graceful_exit(self) -> None:
-        """Handle graceful exit with memory save via EXIT skill."""
-        exit_skill = SKILLS_DIR / "EXIT.py"
-
-        if exit_skill.exists() and self.conversation_history:
-            # Generate a meaningful session name from the conversation
-            session_name = self.generate_session_summary()
-            history_json = json.dumps(self.conversation_history)
-            try:
-                result = subprocess.run(
-                    [sys.executable, str(exit_skill), history_json, session_name],
-                    capture_output=True,
-                    text=True,
-                    timeout=30
-                )
-                if result.stdout.strip():
-                    print_gradient(result.stdout.strip())
-            except Exception as e:
-                self.console.print(f"[dim]Exit error: {e}[/dim]")
+        """Handle graceful exit and finalize session memory."""
+        # Ensure the session file is updated one last time before exit
+        if self.conversation_history:
+            self.update_session_file()
 
         self.console.print()
         print_gradient("Goodbye!")
@@ -885,7 +955,7 @@ class YipsAgent:
         logo = generate_yips_logo()
         logo_height = len(logo)
         logo_width = len(logo[0]) if logo else 1
-        activity = get_recent_activity(3)
+        activity = get_recent_activity()
 
         # Build left column (12 lines)
         left_col = [

@@ -28,7 +28,14 @@ class IdentityToolRequest(TypedDict):
     reflection: str
 
 
-ToolRequest = ActionToolRequest | IdentityToolRequest
+class SkillToolRequest(TypedDict):
+    """A tool request for invoking a skill."""
+    type: Literal["skill"]
+    skill: str
+    args: str
+
+
+ToolRequest = ActionToolRequest | IdentityToolRequest | SkillToolRequest
 
 
 # Configuration

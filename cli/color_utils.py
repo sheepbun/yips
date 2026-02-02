@@ -18,6 +18,9 @@ GRADIENT_BLUE = (137, 207, 240)     # #89CFF0
 # User prompt color
 PROMPT_COLOR = "#FFCCFF"
 
+# Tool and system message color
+TOOL_COLOR = f"rgb({GRADIENT_BLUE[0]},{GRADIENT_BLUE[1]},{GRADIENT_BLUE[2]})"
+
 # Global console instance
 console = Console()
 

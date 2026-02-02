@@ -14,9 +14,9 @@
          ▼                 ▼                   ▼
 ┌─────────────────┐ ┌─────────────┐  ┌─────────────────┐
 │  .md Documents  │ │  Claude CLI │  │   Skills (*.py) │
-│  (personality,  │ │  subprocess │  │   (MEMORIZE,    │
-│   identity,     │ │  --print    │  │    future...)   │
-│   memories)     │ │  --resume   │  │                 │
+│  (personality,  │ │  subprocess │  │   (RENAME,      │
+│   identity,     │ │  --print    │  │    MEMORIZE,    │
+│   memories)     │ │  --resume   │  │    future...)   │
 └─────────────────┘ └─────────────┘  └─────────────────┘
 ```
 
@@ -31,35 +31,14 @@ Reads and assembles the system prompt from:
 
 ### Conversation Loop
 1. Display prompt, accept user input
-2. Send message to Claude CLI via subprocess
+2. Send message to backend (LM Studio or Claude CLI)
 3. Parse response for tool requests
 4. Display response to user
-5. Handle any tool requests with confirmation
+5. Handle any tool requests autonomously (unless destructive)
 6. Continue until user exits
 
 ### Tool Request Handler
-Parses response text for protocol tags, confirms with user, executes approved actions.
-
-## Claude CLI Integration
-
-**Base command:**
-```bash
-claude --print --output-format json --system-prompt "..."
-```
-
-**With session persistence:**
-```bash
-claude --print --output-format json --system-prompt "..." --resume {session_id}
-```
-
-**Response format (JSON):**
-```json
-{
-  "result": "response text here",
-  "session_id": "abc123...",
-  ...
-}
-```
+Parses response text for protocol tags and executes actions.
 
 ## Tool Use Protocol
 
@@ -90,7 +69,7 @@ Yips requests actions using tagged format embedded in response text:
 
 Example:
 ```
-{INVOKE_SKILL:MEMORIZE:save conversation_name}
+{INVOKE_SKILL:RENAME:new_session_title}
 ```
 
 ### Identity Update
@@ -101,48 +80,19 @@ Example:
 
 ## Confirmation Flow
 
-All tool requests follow this flow:
-
-1. AGENT.py detects protocol tag in response
-2. Displays action details to user:
-   ```
-   [Yips wants to: run_command]
-   Command: ls -la /home/katherine
-
-   Allow? (y/N):
-   ```
-3. Waits for user input
-4. Only executes on explicit `y` or `yes`
-5. Reports result back to conversation context
-
-## Memory Format
-
-Memory files are stored as:
-```
-memories/{TIMESTAMP}_{NAME}.md
-```
-
-Example: `memories/20260131_143022_project_discussion.md`
-
-### Memory File Structure
-```markdown
-# Memory: {name}
-
-**Created**: {timestamp}
-**Session ID**: {session_id}
-
-## Summary
-{AI-generated summary of conversation}
-
-## Key Points
-- Point 1
-- Point 2
-
-## Context
-{Any relevant context}
-```
+Routine tool requests (file read/write, skills) are executed **autonomously** without asking.
+Only **destructive commands** (matching certain patterns) require explicit user confirmation.
 
 ## Available Skills
+
+### RENAME
+Located at `skills/RENAME.py`
+Renames the current session and updates the UI title box and footer in-place.
+
+**Usage in conversation:**
+```
+{INVOKE_SKILL:RENAME:Cool New Title}
+```
 
 ### MEMORIZE
 Located at `skills/MEMORIZE.py`
@@ -157,38 +107,11 @@ Located at `skills/MEMORIZE.py`
 {INVOKE_SKILL:MEMORIZE:save project_planning}
 ```
 
-## Security Considerations
+## Memory Format
 
-- All file operations restricted to confirmation flow
-- Commands executed via subprocess with shell=False where possible
-- No automatic execution of any system-modifying action
-- User must explicitly approve each action
+Memory files are stored as:
+```
+memories/{TIMESTAMP}_{NAME}.md
+```
 
-## Configuration
-
-### Session Persistence
-Sessions are persisted via Claude CLI's `--resume` flag using stored session IDs.
-
-### Memory Limits
-- Recent memories loaded: 5 most recent by default
-- Memory file size: No hard limit, but summarization encouraged
-
-## Error Handling
-
-- Claude CLI errors: Display to user, continue conversation
-- File operation errors: Report error, don't crash
-- Skill errors: Capture stderr, report to user
-- Invalid protocol tags: Ignore, treat as regular text
-
-## Future Extensibility
-
-### Adding New Skills
-1. Create `skills/SKILLNAME.py`
-2. Implement CLI interface: `python SKILLNAME.py <command> [args]`
-3. Document in skill file
-4. Yips automatically discovers available skills
-
-### Adding New Tools
-1. Add handler in AGENT.py `execute_tool()` method
-2. Document protocol in this specification
-3. Update AGENT.md if behavior guidance needed
+Example: `memories/2026-02-01_14-30-22_project_discussion.md`

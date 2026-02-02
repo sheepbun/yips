@@ -34,6 +34,7 @@ from cli.color_utils import (
     GRADIENT_PINK,
     GRADIENT_YELLOW,
     GRADIENT_BLUE,
+    TOOL_COLOR,
     interpolate_color,
 )
 from cli.config import (
@@ -400,7 +401,7 @@ class YipsAgent:
                                     display_text.append("\n      ")
 
                                 tool_name = tool_calls[-1].get("name", "tool")
-                                display_text.append(f"🔧 Using tool: {tool_name}...", style="cyan dim")
+                                display_text.append(f"🔧 Using tool: {tool_name}...", style=TOOL_COLOR)
                                 live.update(display_text)
 
                         elif event_type == "content_block_start":
@@ -423,7 +424,7 @@ class YipsAgent:
                                         display_text.append(apply_gradient_to_text(text_line))
                                     display_text.append("\n      ")
 
-                                display_text.append(f"🔧 Using tool: {tool_name}...", style="cyan dim")
+                                display_text.append(f"🔧 Using tool: {tool_name}...", style=TOOL_COLOR)
                                 live.update(display_text)
 
                     except json.JSONDecodeError:
@@ -689,21 +690,21 @@ class YipsAgent:
 
         # If we found tool calls, display them in a tree
         if tool_lines:
-            tree = Tree("[cyan]Claude Code Tools[/cyan]")
+            tree = Tree(f"[{TOOL_COLOR}]Claude Code Tools[/{TOOL_COLOR}]")
             for tool_line in tool_lines:
-                tree.add(f"[dim]{tool_line}[/dim]")
-            panel = Panel(tree, title="Tool Calls", border_style="cyan dim", expand=False)
+                tree.add(tool_line, style=TOOL_COLOR)
+            panel = Panel(tree, title="Tool Calls", border_style=TOOL_COLOR, expand=False)
             self.console.print(panel)
 
     def _display_lm_studio_tool_call(self, tool_name: str, tool_input: dict[str, Any]) -> None:
         """Display LM Studio tool calls in a formatted way using Rich Tree."""
         tree = self._format_tool_call_tree(tool_name, tool_input)
-        panel = Panel(tree, title="Tool Call", border_style="cyan dim", expand=False)
+        panel = Panel(tree, title="Tool Call", border_style=TOOL_COLOR, expand=False)
         self.console.print(panel)
 
     def _format_tool_call_tree(self, tool_name: str, tool_input: dict[str, Any]) -> Tree:
         """Build a Rich Tree structure for tool call display."""
-        tree = Tree(f"[cyan]{tool_name}[/cyan]")
+        tree = Tree(f"[{TOOL_COLOR}]{tool_name}[/{TOOL_COLOR}]")
 
         if tool_input:
             for key, value in tool_input.items():
@@ -711,12 +712,58 @@ class YipsAgent:
                 value_str = str(value)
                 if len(value_str) > 80:
                     value_str = value_str[:77] + "..."
-                tree.add(f"[dim]{key}:[/dim] {value_str}")
+                tree.add(Text.assemble((f"{key}: ", "dim"), (value_str, TOOL_COLOR)))
 
         return tree
 
+    def rename_session(self, new_name: str) -> None:
+        """Rename the current session and update title box."""
+        # Sanitize new name
+        slug = new_name.lower().strip()
+        slug = re.sub(r'[^a-z0-9_\s-]', '', slug)
+        slug = re.sub(r'[\s]+', '_', slug)
+        slug = slug[:50]
+
+        if not slug:
+            self.console.print("[red]Invalid session name.[/red]")
+            return
+
+        self.current_session_name = slug
+
+        # Rename file if it exists
+        if self.session_file_path and self.session_file_path.exists():
+            try:
+                # Expected format: YYYY-MM-DD_HH-MM-SS_slug.md
+                # Split by underscore to preserve timestamp parts
+                name_parts = self.session_file_path.name.split('_', 2)
+                
+                if len(name_parts) >= 2:
+                    # Reconstruct timestamp part (first two components)
+                    timestamp_part = f"{name_parts[0]}_{name_parts[1]}"
+                    new_filename = f"{timestamp_part}_{slug}.md"
+                    new_path = self.session_file_path.parent / new_filename
+                    
+                    self.session_file_path.rename(new_path)
+                    self.session_file_path = new_path
+                    self.console.print(f"[green]Session renamed to: {slug}[/green]")
+                else:
+                    # Fallback for unexpected filename format
+                    new_filename = f"{slug}.md"
+                    new_path = self.session_file_path.parent / new_filename
+                    self.session_file_path.rename(new_path)
+                    self.session_file_path = new_path
+                    
+            except Exception as e:
+                self.console.print(f"[red]Failed to rename session file: {e}[/red]")
+
+        self.refresh_title_box_only()
+
     def graceful_exit(self) -> None:
         """Handle graceful exit and finalize session memory."""
+        # Cancel any pending resize timer
+        if self._resize_timer is not None:
+            self._resize_timer.cancel()
+
         # Ensure the session file is updated one last time before exit
         if self.conversation_history:
             self.update_session_file()

@@ -5,6 +5,7 @@ Provides functions for retrieving user info, activity history, and display names
 """
 
 import re
+from datetime import datetime
 
 from cli.config import BASE_DIR, MEMORIES_DIR
 
@@ -63,39 +64,154 @@ def get_display_directory() -> str:
         return str(cwd)
 
 
-def get_recent_activity(limit: int = 3) -> list[str]:
-    """Get recent activity from memories directory."""
+def get_recent_activity(limit: int = 5) -> list[str]:
+    """Get recent activity from memories directory.
+
+    Supports both filename formats:
+    - New format: 2026-01-31_03-56-21_title.md (YYYY-MM-DD_HH-MM-SS_title)
+    - Old format: 20260131_023835_title.md (YYYYMMDD_HHMMSS_title)
+
+    Returns list of formatted strings: "YYYY-MM-DD @ HH:MM XM: Title"
+    """
     try:
         if not MEMORIES_DIR.exists():
             return ["No recent activity"]
 
-        memory_files = sorted(
-            MEMORIES_DIR.glob("*.md"),
-            key=lambda f: f.stat().st_mtime,
-            reverse=True
-        )[:limit]
+        # Build list of (datetime, filepath) tuples by parsing filenames
+        dated_files: list[tuple[datetime, any]] = []
+        for f in MEMORIES_DIR.glob("*.md"):
+            try:
+                name = f.stem  # Remove .md extension
+                parts = name.split('_', 2)
 
-        if not memory_files:
+                if len(parts) >= 3:
+                    date_part = parts[0]
+                    time_part = parts[1]
+
+                    # Detect format by checking for hyphens in date part
+                    if '-' in date_part:
+                        # New format: YYYY-MM-DD_HH-MM-SS
+                        try:
+                            dt_str = f"{date_part} {time_part.replace('-', ':')}"
+                            dt = datetime.strptime(dt_str, '%Y-%m-%d %H:%M:%S')
+                            dated_files.append((dt, f))
+                        except ValueError:
+                            # Fallback to st_mtime if parsing fails
+                            dt = datetime.fromtimestamp(f.stat().st_mtime)
+                            dated_files.append((dt, f))
+                    else:
+                        # Old format: YYYYMMDD_HHMMSS
+                        try:
+                            dt_str = f"{date_part} {time_part}"
+                            dt = datetime.strptime(dt_str, '%Y%m%d %H%M%S')
+                            dated_files.append((dt, f))
+                        except ValueError:
+                            # Fallback to st_mtime if parsing fails
+                            dt = datetime.fromtimestamp(f.stat().st_mtime)
+                            dated_files.append((dt, f))
+                else:
+                    # Fallback for malformed filenames
+                    dt = datetime.fromtimestamp(f.stat().st_mtime)
+                    dated_files.append((dt, f))
+            except Exception:
+                # Skip files that cause exceptions
+                continue
+
+        if not dated_files:
             return ["No recent activity"]
+
+        # Sort by datetime descending (most recent first)
+        dated_files.sort(key=lambda x: x[0], reverse=True)
+        memory_files = [f for _, f in dated_files[:limit]]
 
         activities: list[str] = []
         for f in memory_files:
-            # Parse filename format: 2026-01-31_03-56-21_file_editing_and_logging.md
-            name = f.stem  # Remove .md extension
-            parts = name.split('_', 2)
+            try:
+                name = f.stem  # Remove .md extension
+                parts = name.split('_', 2)
 
-            if len(parts) >= 3:
-                date_part = parts[0]  # YYYY-MM-DD
-                # Rest is the title (parts[2] onwards, join with _)
-                title = '_'.join(parts[2:])
-                # Convert underscores to spaces and title case
-                title = title.replace('_', ' ').title()
-            else:
-                # Fallback for old format
-                date_part = f.stat().st_mtime
-                title = name
+                if len(parts) >= 3:
+                    date_part = parts[0]
+                    time_part = parts[1]
+                    title = '_'.join(parts[2:])
+                    title = title.replace('_', ' ').title()
 
-            activities.append(f"{date_part}: {title}")
+                    # Detect format by checking for hyphens in date part
+                    if '-' in date_part:
+                        # New format: YYYY-MM-DD_HH-MM-SS
+                        try:
+                            dt = datetime.strptime(date_part, '%Y-%m-%d')
+                            # Extract hour and minute from HH-MM-SS format
+                            time_parts = time_part.split('-')
+                            if len(time_parts) >= 2:
+                                hour_int = int(time_parts[0])
+                                minute = time_parts[1]
+                                # Convert to 12-hour format with AM/PM
+                                if hour_int == 0:
+                                    display_hour = 12
+                                    am_pm = "AM"
+                                elif hour_int < 12:
+                                    display_hour = hour_int
+                                    am_pm = "AM"
+                                elif hour_int == 12:
+                                    display_hour = 12
+                                    am_pm = "PM"
+                                else:
+                                    display_hour = hour_int - 12
+                                    am_pm = "PM"
+                                display = f"{dt.strftime('%Y-%m-%d')} @ {display_hour:02d}:{minute} {am_pm}: {title}"
+                            else:
+                                display = f"{dt.strftime('%Y-%m-%d')}: {title}"
+                        except (ValueError, IndexError):
+                            display = f"{date_part}: {title}"
+                    else:
+                        # Old format: YYYYMMDD_HHMMSS
+                        try:
+                            dt = datetime.strptime(date_part, '%Y%m%d')
+                            # Extract hour and minute from HHMMSS (first 4 chars: HHMM)
+                            if len(time_part) >= 4:
+                                hour_int = int(time_part[:2])
+                                minute = time_part[2:4]
+                                # Convert to 12-hour format with AM/PM
+                                if hour_int == 0:
+                                    display_hour = 12
+                                    am_pm = "AM"
+                                elif hour_int < 12:
+                                    display_hour = hour_int
+                                    am_pm = "AM"
+                                elif hour_int == 12:
+                                    display_hour = 12
+                                    am_pm = "PM"
+                                else:
+                                    display_hour = hour_int - 12
+                                    am_pm = "PM"
+                                display = f"{dt.strftime('%Y-%m-%d')} @ {display_hour:02d}:{minute} {am_pm}: {title}"
+                            else:
+                                display = f"{dt.strftime('%Y-%m-%d')}: {title}"
+                        except (ValueError, IndexError):
+                            display = f"{date_part}: {title}"
+                else:
+                    # Fallback for malformed filenames
+                    dt = datetime.fromtimestamp(f.stat().st_mtime)
+                    hour_int = dt.hour
+                    if hour_int == 0:
+                        display_hour = 12
+                        am_pm = "AM"
+                    elif hour_int < 12:
+                        display_hour = hour_int
+                        am_pm = "AM"
+                    elif hour_int == 12:
+                        display_hour = 12
+                        am_pm = "PM"
+                    else:
+                        display_hour = hour_int - 12
+                        am_pm = "PM"
+                    display = f"{dt.strftime('%Y-%m-%d')} @ {display_hour:02d}:{dt.strftime('%M')} {am_pm}: {name}"
+
+                activities.append(display)
+            except Exception:
+                # If parsing fails for a specific file, skip it
+                continue
 
         return activities if activities else ["No recent activity"]
     except Exception:

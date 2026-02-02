@@ -5,6 +5,7 @@ Provides the main() function that initializes and runs the YipsAgent.
 """
 
 import os
+import sys
 import subprocess
 
 from prompt_toolkit import prompt as prompt_toolkit_prompt
@@ -12,7 +13,7 @@ from prompt_toolkit.formatted_text import HTML as HTMLText
 from prompt_toolkit.styles import Style as PromptStyle
 
 from cli.agent import YipsAgent
-from cli.color_utils import console, print_yips, PROMPT_COLOR
+from cli.color_utils import console, print_yips, PROMPT_COLOR, TOOL_COLOR
 from cli.commands import handle_slash_command
 from cli.tool_execution import parse_tool_requests, execute_tool, clean_response
 
@@ -49,7 +50,7 @@ def main() -> None:
             ).strip()
         except (EOFError, KeyboardInterrupt):
             agent.graceful_exit()
-            break
+            sys.exit(0)
 
         if not user_input:
             continue
@@ -57,7 +58,7 @@ def main() -> None:
         # Handle slash commands first
         slash_result = handle_slash_command(agent, user_input)
         if slash_result == "exit":
-            break
+            sys.exit(0)
         if slash_result:
             continue
 
@@ -88,12 +89,17 @@ def main() -> None:
 
         # Execute tool requests autonomously
         for request in tool_requests:
-            result = execute_tool(request)
-            console.print(f"[dim]{result}[/dim]")
+            result = execute_tool(request, agent)
+            if result == "::YIPS_EXIT::":
+                sys.exit(0)
+            console.print(result, style=TOOL_COLOR)
             agent.conversation_history.append({
                 "role": "system",
                 "content": result
             })
+
+        # Update session memory file with current conversation
+        agent.update_session_file()
 
         # Final break line after response
         console.print()

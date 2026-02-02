@@ -4,14 +4,18 @@ Tool parsing and execution for Yips CLI.
 Handles parsing tool requests from responses and executing them autonomously.
 """
 
+import os
 import re
 import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
-from cli.color_utils import console, PROMPT_COLOR
-from cli.config import BASE_DIR
-from cli.type_defs import ToolRequest, ActionToolRequest, IdentityToolRequest
+from cli.color_utils import console, PROMPT_COLOR, print_gradient
+from cli.config import BASE_DIR, SKILLS_DIR
+from cli.root import PROJECT_ROOT
+from cli.type_defs import ToolRequest, ActionToolRequest, IdentityToolRequest, SkillToolRequest
 
 # Destructive commands that require confirmation
 DESTRUCTIVE_PATTERNS = [
@@ -26,27 +30,63 @@ DESTRUCTIVE_PATTERNS = [
 
 
 def parse_tool_requests(response: str) -> list[ToolRequest]:
-    """Parse tool request tags from response text."""
+    """Parse tool request tags from response text, excluding those in code blocks."""
+    # Mask out code blocks to avoid parsing example tags
+    masked_response = response
+    
+    # Mask triple backtick blocks
+    masked_response = re.sub(r"```.*?```", lambda m: " " * len(m.group(0)), masked_response, flags=re.DOTALL)
+    
+    # Mask single backtick inline code
+    masked_response = re.sub(r"`.*?`", lambda m: " " * len(m.group(0)), masked_response)
+
     requests_list: list[ToolRequest] = []
 
     # Pattern: {ACTION:tool:params}
     action_pattern = r"\{ACTION:(\w+):([^}]*)\}"
-    for match in re.finditer(action_pattern, response):
-        action_request: ActionToolRequest = {
-            "type": "action",
-            "tool": match.group(1),
-            "params": match.group(2)
-        }
-        requests_list.append(action_request)
+    for match in re.finditer(action_pattern, masked_response):
+        # Extract parameters from the ORIGINAL response to preserve content
+        # But wait, using masked_response indices is safer
+        start, end = match.span()
+        original_match = response[start:end]
+        
+        # We need to re-parse from the original match to get groups correctly
+        # because the regex above might have matched simplified whitespace
+        m = re.match(action_pattern, original_match)
+        if m:
+            action_request: ActionToolRequest = {
+                "type": "action",
+                "tool": m.group(1),
+                "params": m.group(2)
+            }
+            requests_list.append(action_request)
 
     # Pattern: {UPDATE_IDENTITY:reflection}
     identity_pattern = r"\{UPDATE_IDENTITY:([^}]*)\}"
-    for match in re.finditer(identity_pattern, response):
-        identity_request: IdentityToolRequest = {
-            "type": "identity",
-            "reflection": match.group(1)
-        }
-        requests_list.append(identity_request)
+    for match in re.finditer(identity_pattern, masked_response):
+        start, end = match.span()
+        original_match = response[start:end]
+        m = re.match(identity_pattern, original_match)
+        if m:
+            identity_request: IdentityToolRequest = {
+                "type": "identity",
+                "reflection": m.group(1)
+            }
+            requests_list.append(identity_request)
+
+    # Pattern: {INVOKE_SKILL:skill:args} or {INVOKE_SKILL:skill}
+    skill_pattern = r"\{INVOKE_SKILL:(\w+)(?::([^}]*))?\}"
+    for match in re.finditer(skill_pattern, masked_response):
+        start, end = match.span()
+        original_match = response[start:end]
+        m = re.match(skill_pattern, original_match)
+        if m:
+            skill_request: SkillToolRequest = {
+                "type": "skill",
+                "skill": m.group(1),
+                "args": m.group(2) if m.group(2) is not None else ""
+            }
+            requests_list.append(skill_request)
 
     return requests_list
 
@@ -73,7 +113,7 @@ def log_action(description: str) -> None:
     console.print(f"  [dim italic][{description}][/dim italic]")
 
 
-def execute_tool(request: ToolRequest) -> str:
+def execute_tool(request: ToolRequest, agent: Any = None) -> str:
     """Execute a tool request (autonomously unless destructive)."""
 
     if request["type"] == "action":
@@ -145,12 +185,76 @@ def execute_tool(request: ToolRequest) -> str:
         except Exception as e:
             return f"[Error updating identity: {e}]"
 
+    elif request["type"] == "skill":
+        skill_name: str = str(request["skill"])
+        args: str = str(request["args"])
+        log_action(f"invoking skill: {skill_name}")
+
+        skill_path = SKILLS_DIR / f"{skill_name.upper()}.py"
+        if not skill_path.exists():
+            return f"[Error: Skill not found: {skill_name}]"
+
+        try:
+            cmd = [sys.executable, str(skill_path)] + (args.split() if args else [])
+            env = {**os.environ, "PYTHONPATH": str(PROJECT_ROOT)}
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env)
+            
+            output = result.stdout
+            
+            # Check for control commands in output
+            # Pattern: ::YIPS_COMMAND::COMMAND::ARGS
+            command_pattern = r'::YIPS_COMMAND::(\w+)::(.*)'
+            for match in re.finditer(command_pattern, output):
+                cmd_name = match.group(1).upper()
+                cmd_args = match.group(2).strip()
+                
+                if cmd_name == "RENAME":
+                    if agent and hasattr(agent, 'rename_session'):
+                        agent.rename_session(cmd_args)
+                elif cmd_name == "EXIT":
+                    if agent and hasattr(agent, 'graceful_exit'):
+                        agent.graceful_exit()
+                    return "::YIPS_EXIT::"
+                
+                # Filter out the command line
+                output = output.replace(match.group(0), "")
+            
+            output = output.strip()
+
+            final_output = output
+            if result.stderr.strip():
+                final_output += f"\n[stderr]: {result.stderr.strip()}"
+                
+            return f"[Skill output]:\n{final_output}" if final_output else "[Skill completed (no output)]"
+        except subprocess.TimeoutExpired:
+            return f"[Error: Skill /{skill_name} timed out]"
+        except Exception as e:
+            return f"[Error running skill /{skill_name}: {e}]"
+
     return "[Unknown request type]"
 
 
 def clean_response(response: str) -> str:
-    """Remove tool request tags from response for display."""
-    cleaned = response
-    cleaned = re.sub(r"\{ACTION:\w+:[^}]*\}", "", cleaned)
-    cleaned = re.sub(r"\{UPDATE_IDENTITY:[^}]*\}", "", cleaned)
+    """Remove tool request tags from response for display, but keep those in code blocks."""
+    # Find all tags
+    action_pattern = r"\{ACTION:\w+:[^}]*\}"
+    identity_pattern = r"\{UPDATE_IDENTITY:[^}]*\}"
+    skill_pattern = r"\{INVOKE_SKILL:\w+(?::[^}]*)?\}"
+    
+    combined_pattern = f"({action_pattern})|({identity_pattern})|({skill_pattern})"
+    
+    # We want to remove tags that are NOT inside backticks
+    # A simple way is to use a regex that matches backtick blocks OR the tags
+    # and only replace the tags if they were matched outside backticks.
+    
+    # Pattern to match code blocks or tags
+    pattern = r"(```.*?```|`.*?`|\{ACTION:\w+:[^}]*\}|\{UPDATE_IDENTITY:[^}]*\}|\{INVOKE_SKILL:\w+(?::[^}]*)?\})"
+    
+    def replace_fn(match):
+        text = match.group(0)
+        if text.startswith('`') or text.startswith('```'):
+            return text  # Keep code blocks as is
+        return ""  # Remove tags
+        
+    cleaned = re.sub(pattern, replace_fn, response, flags=re.DOTALL)
     return cleaned.strip()

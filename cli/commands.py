@@ -5,6 +5,7 @@ Handles built-in commands like /model, /verbose, /stream, /exit, and skill invoc
 """
 
 import os
+import re
 import subprocess
 import sys
 from typing import Protocol
@@ -141,10 +142,38 @@ def handle_slash_command(agent: YipsAgentProtocol, user_input: str) -> str | boo
             cmd = [sys.executable, str(skill_path)] + (args.split() if args else [])
             env = {**os.environ, "PYTHONPATH": str(PROJECT_ROOT)}
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env)
-            if result.stdout.strip():
-                print_gradient(result.stdout.strip())
+            
+            # Check for control commands in output
+            output = result.stdout
+            
+            # Pattern: ::YIPS_COMMAND::COMMAND::ARGS
+            command_pattern = r'::YIPS_COMMAND::(\w+)::(.*)'
+            should_exit = False
+            
+            for match in re.finditer(command_pattern, output):
+                cmd_name = match.group(1).upper()
+                cmd_args = match.group(2).strip()
+                
+                if cmd_name == "RENAME":
+                    if hasattr(agent, 'rename_session'):
+                        agent.rename_session(cmd_args)
+                elif cmd_name == "EXIT":
+                    if hasattr(agent, 'graceful_exit'):
+                        agent.graceful_exit()
+                        should_exit = True
+                
+                # Filter out the command line
+                output = output.replace(match.group(0), "")
+            
+            output = output.strip()
+            if output:
+                print_gradient(output)
+                
             if result.stderr.strip():
                 console.print(f"[red]{result.stderr.strip()}[/red]")
+                
+            if should_exit:
+                return "exit"
         except subprocess.TimeoutExpired:
             console.print(f"[red]Command /{command} timed out[/red]")
         except Exception as e:

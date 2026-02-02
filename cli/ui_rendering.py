@@ -43,6 +43,16 @@ class PulsingSpinner:
         self.output_tokens = 0
         self.token_count = self.input_tokens + self.output_tokens
 
+        # Animation state
+        self.target_input_tokens = token_count
+        self.target_output_tokens = 0
+        self.animated_input = 0  # Current animated value (starts at 0)
+        self.animated_output = 0
+        self.animation_start_time: float | None = None
+        self.input_animation_duration = 0.5  # 500ms to count up input
+        self.is_animating_input = False
+        self.is_animating_output = False
+
     def _format_time(self, seconds: float) -> str:
         m, s = divmod(int(seconds), 60)
         if m == 0:
@@ -62,31 +72,67 @@ class PulsingSpinner:
         """Update model status (thinking/generating/reasoning)."""
         self.model_status = status
 
+    def start_input_animation(self, target: int) -> None:
+        """Start animating input tokens from 0 to target."""
+        self.target_input_tokens = target
+        self.animated_input = 0
+        self.is_animating_input = True
+        self.animation_start_time = time.time()
+
+    def update_output_animation(self, current: int) -> None:
+        """Update output token count (incremental during streaming)."""
+        self.target_output_tokens = current
+        self.animated_output = current  # For output, we show real-time value
+        self.is_animating_output = True
+        self.is_animating_input = False  # Stop input animation
+
     def __rich__(self) -> Spinner:
         # Pulse between 0 and 1 over ~3 seconds for a slow effect
         t = (math.sin(time.time() * 2.0) + 1) / 2
         r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, t)
         color = f"rgb({r},{g},{b})"
-        
+
         elapsed = time.time() - self.start_time
         time_str = self._format_time(elapsed)
-        
-        # Format tokens (e.g., 5.6k)
-        # During streaming, show input tokens with ↑ arrow
-        display_count = self.input_tokens if self.input_tokens > 0 else self.token_count
+
+        # Calculate current animated token count
+        if self.is_animating_input and self.animation_start_time:
+            # Animate input tokens counting up rapidly
+            anim_elapsed = time.time() - self.animation_start_time
+            progress = min(1.0, anim_elapsed / self.input_animation_duration)
+            # Ease-out animation for smooth finish
+            progress = 1 - (1 - progress) ** 2
+            display_count = int(self.animated_input +
+                              (self.target_input_tokens - self.animated_input) * progress)
+            arrow = "↑"
+
+            # Check if animation complete
+            if progress >= 1.0:
+                self.is_animating_input = False
+                display_count = self.target_input_tokens
+
+        elif self.is_animating_output:
+            # Show real-time output tokens (already animated by streaming)
+            display_count = self.animated_output
+            arrow = "↓"
+        else:
+            # Fallback: show whatever we have
+            display_count = self.input_tokens if self.input_tokens > 0 else 0
+            arrow = "↑"
+
+        # Format tokens (5.6k for thousands)
         if display_count >= 1000:
             token_str = f"{display_count/1000:.1f}k"
         else:
             token_str = str(display_count)
 
-        arrow = "↑" if self.output_tokens == 0 else "↓"
         status_text = f" ({time_str} · {arrow} {token_str} tokens · {self.model_status})"
-        
+
         full_text = Text.assemble(
             (self.message, f"dim {color}"),
             (status_text, f"dim {color}")
         )
-        
+
         self.spinner.text = full_text
         self.spinner.style = color
         return self.spinner

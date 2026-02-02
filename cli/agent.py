@@ -415,6 +415,8 @@ class YipsAgent:
                             if "input_tokens" in usage:
                                 input_tokens = usage.get("input_tokens")
                                 spinner.update_tokens(input_tokens=input_tokens)
+                                # Trigger input animation (counts up quickly)
+                                spinner.start_input_animation(input_tokens)
 
                         # Handle content_block_start event (detect thinking/text blocks)
                         elif event_type == "content_block_start":
@@ -458,6 +460,11 @@ class YipsAgent:
                                 # Accumulate text
                                 text = delta.get("text", "")
                                 accumulated_text += text
+
+                                # Estimate output tokens and update animation
+                                # This makes it count up smoothly as text streams
+                                estimated_output = max(1, len(accumulated_text) // 4)
+                                spinner.update_output_animation(estimated_output)
 
                                 # Update display with full gradient (include prefix)
                                 display_text = Text()
@@ -505,6 +512,8 @@ class YipsAgent:
                                 final_output_tokens = output_tokens
                                 final_input_tokens = input_tokens
                                 spinner.update_tokens(input_tokens=input_tokens, output_tokens=output_tokens)
+                                # Update to actual final count
+                                spinner.update_output_animation(output_tokens)
 
 
                     except json.JSONDecodeError:
@@ -520,18 +529,6 @@ class YipsAgent:
                         final_text.append("\n      ")
                     final_text.append(gradient_text(line))
                 self.console.print(final_text)
-
-            # Display actual output token count from API
-            if final_output_tokens > 0:
-                # Format tokens (e.g., 1.2k)
-                if final_output_tokens >= 1000:
-                    token_str = f"{final_output_tokens/1000:.1f}k"
-                else:
-                    token_str = str(final_output_tokens)
-                self.console.print(
-                    f"[dim]↓ {token_str} tokens[/dim]",
-                    style=TOOL_COLOR
-                )
 
             # Display tool calls after streaming completes
             if self.verbose_mode and tool_calls:

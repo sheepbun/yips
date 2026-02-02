@@ -6,6 +6,7 @@ Provides gradient text rendering, color interpolation, and styled output functio
 
 from rich.console import Console
 from rich.text import Text
+from datetime import datetime
 
 # Type alias
 RGBColor = tuple[int, int, int]
@@ -78,10 +79,12 @@ def apply_gradient_to_text(text: str) -> Text:
 
 
 def get_yips_prefix() -> Text:
-    """Create the 'Yips:' prefix with gradient on name and solid yellow on colon."""
+    """Create the 'Yips:' prefix with gradient on name and solid blue on timestamp/colon."""
     prefix = gradient_text("Yips")
-    yellow = f"rgb({GRADIENT_YELLOW[0]},{GRADIENT_YELLOW[1]},{GRADIENT_YELLOW[2]})"
-    prefix.append(":", style=yellow)
+    blue = f"rgb({GRADIENT_BLUE[0]},{GRADIENT_BLUE[1]},{GRADIENT_BLUE[2]})"
+    
+    timestamp = datetime.now().strftime(" [%-I:%M %p]:")
+    prefix.append(timestamp, style=blue)
     prefix.append(" ")
     return prefix
 
@@ -96,6 +99,7 @@ def print_yips(text: str) -> None:
     console.print()  # Blank line before response
 
     prefix = get_yips_prefix()
+    indent = " " * len(prefix)
 
     final_text = Text()
     final_text.append_text(prefix)
@@ -104,7 +108,7 @@ def print_yips(text: str) -> None:
     lines = text.split('\n')
     for i, line in enumerate(lines):
         if i > 0:
-            final_text.append("\n      ")
+            final_text.append("\n" + indent)
         final_text.append(gradient_text(line))
 
     console.print(final_text)

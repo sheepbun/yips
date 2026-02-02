@@ -14,7 +14,7 @@ from prompt_toolkit.styles import Style as PromptStyle
 from prompt_toolkit.key_binding import KeyBindings
 
 from cli.agent import YipsAgent
-from cli.color_utils import console, print_yips, PROMPT_COLOR, TOOL_COLOR
+from cli.color_utils import console, print_yips, PROMPT_COLOR, TOOL_COLOR, blue_gradient_text
 from cli.commands import handle_command
 from cli.config import COMMANDS_DIR
 from cli.tool_execution import parse_tool_requests, execute_tool, clean_response
@@ -136,7 +136,8 @@ def main() -> None:
         # Execute tool requests autonomously
         total_requests = len(tool_requests)
         if total_requests > 0:
-            console.print(f"[{TOOL_COLOR}]Queued {total_requests} tool call{'s' if total_requests != 1 else ''}[/{TOOL_COLOR}]")
+            console.print()
+            console.print(blue_gradient_text(f"Queued {total_requests} tool call{'s' if total_requests != 1 else ''}"))
 
         for i, request in enumerate(tool_requests, 1):
             # Get tool name for display
@@ -149,9 +150,9 @@ def main() -> None:
                 tool_name = f"skill:{request['skill']}"
 
             remaining = total_requests - i
-            console.print(f"[{TOOL_COLOR}]{tool_name}[/{TOOL_COLOR}]")
+            console.print(blue_gradient_text(tool_name))
             if remaining > 0:
-                console.print(f"[{TOOL_COLOR}](+ {remaining} tool call{'s' if remaining != 1 else ''})[/{TOOL_COLOR}]")
+                console.print(blue_gradient_text(f"(+ {remaining} tool call{'s' if remaining != 1 else ''})"))
 
             result = execute_tool(request, agent)
             if result == "::YIPS_EXIT::":

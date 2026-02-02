@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from cli.color_utils import console, PROMPT_COLOR, print_gradient
+from cli.color_utils import console, PROMPT_COLOR, print_gradient, blue_gradient_text
 from cli.config import BASE_DIR, SKILLS_DIR
 from cli.root import PROJECT_ROOT
 from cli.type_defs import ToolRequest, ActionToolRequest, IdentityToolRequest, SkillToolRequest
@@ -110,7 +110,7 @@ def confirm_action(description: str) -> bool:
 
 def log_action(description: str) -> None:
     """Log an autonomous action being taken."""
-    console.print(f"  [dim italic][{description}][/dim italic]")
+    console.print(blue_gradient_text(f"[{description}]"))
 
 
 def execute_tool(request: ToolRequest, agent: Any = None) -> str:

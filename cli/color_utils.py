@@ -15,6 +15,7 @@ RGBColor = tuple[int, int, int]
 GRADIENT_PINK = (255, 20, 147)      # #FF1493
 GRADIENT_YELLOW = (255, 225, 53)    # #FFE135
 GRADIENT_BLUE = (137, 207, 240)     # #89CFF0
+GRADIENT_BLUE_DARK = (0, 102, 204)  # #0066CC
 
 # User prompt color
 PROMPT_COLOR = "#FFCCFF"
@@ -35,8 +36,8 @@ def interpolate_color(c1: RGBColor, c2: RGBColor, t: float) -> RGBColor:
     )
 
 
-def gradient_text(text: str) -> Text:
-    """Create gradient-colored text: pink -> yellow. Skips leading/trailing whitespace."""
+def gradient_text(text: str, colors: tuple[RGBColor, RGBColor] = (GRADIENT_PINK, GRADIENT_YELLOW)) -> Text:
+    """Create gradient-colored text. Skips leading/trailing whitespace."""
     styled = Text()
 
     if not text:
@@ -62,15 +63,21 @@ def gradient_text(text: str) -> Text:
     styled.append(leading_ws)
 
     # Apply gradient to content
+    start_color, end_color = colors
     for i, char in enumerate(content):
         progress = i / max(length - 1, 1)
-        r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, progress)
+        r, g, b = interpolate_color(start_color, end_color, progress)
         styled.append(char, style=f"rgb({r},{g},{b})")
 
     # Append trailing whitespace
     styled.append(trailing_ws)
 
     return styled
+
+
+def blue_gradient_text(text: str) -> Text:
+    """Create blue gradient-colored text."""
+    return gradient_text(text, (GRADIENT_BLUE_DARK, GRADIENT_BLUE))
 
 
 def apply_gradient_to_text(text: str) -> Text:

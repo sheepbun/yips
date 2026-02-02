@@ -1,0 +1,2 @@
+Input: '/mod' | Event: CompleteEvent(text_inserted=False, completion_requested=False)
+Input: '/' | Event: CompleteEvent(text_inserted=False, completion_requested=False)

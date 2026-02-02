@@ -28,6 +28,7 @@ from rich.tree import Tree
 from cli.color_utils import (
     console,
     gradient_text,
+    blue_gradient_text,
     apply_gradient_to_text,
     get_yips_prefix,
     print_gradient,
@@ -457,7 +458,7 @@ class YipsAgent:
                                         if i > 0: display_text.append("\n      ")
                                         display_text.append(apply_gradient_to_text(text_line))
                                     display_text.append("\n      ")
-                                display_text.append(f"🔧 Using tool: {tool_name}...", style=TOOL_COLOR)
+                                display_text.append(blue_gradient_text(f"🔧 Using tool: {tool_name}..."))
                                 live.update(display_text)
                             else:
                                 # Fallback for unknown block types
@@ -510,7 +511,8 @@ class YipsAgent:
                                     display_text.append("\n      ")
 
                                 tool_name = tool_calls[-1].get("name", "tool")
-                                display_text.append(f"🔧 Using tool: {tool_name}...", style=TOOL_COLOR)
+                                display_text.append("\n      ")
+                                display_text.append(blue_gradient_text(f"🔧 Using tool: {tool_name}..."))
                                 live.update(display_text)
 
                         # Handle message_delta event (contains output tokens)
@@ -814,21 +816,23 @@ class YipsAgent:
 
         # If we found tool calls, display them in a tree
         if tool_lines:
-            tree = Tree(f"[{TOOL_COLOR}]Claude Code Tools[/{TOOL_COLOR}]")
+            tree = Tree(blue_gradient_text("Claude Code Tools"))
             for tool_line in tool_lines:
                 tree.add(tool_line, style=TOOL_COLOR)
             panel = Panel(tree, title="Tool Calls", border_style=TOOL_COLOR, expand=False)
+            self.console.print()
             self.console.print(panel)
 
     def _display_lm_studio_tool_call(self, tool_name: str, tool_input: dict[str, Any]) -> None:
         """Display LM Studio tool calls in a formatted way using Rich Tree."""
         tree = self._format_tool_call_tree(tool_name, tool_input)
         panel = Panel(tree, title="Tool Call", border_style=TOOL_COLOR, expand=False)
+        self.console.print()
         self.console.print(panel)
 
     def _format_tool_call_tree(self, tool_name: str, tool_input: dict[str, Any]) -> Tree:
         """Build a Rich Tree structure for tool call display."""
-        tree = Tree(f"[{TOOL_COLOR}]{tool_name}[/{TOOL_COLOR}]")
+        tree = Tree(blue_gradient_text(tool_name))
 
         if tool_input:
             for key, value in tool_input.items():
@@ -1328,11 +1332,20 @@ class YipsAgent:
                     styled_line.append(char, style=f"rgb({r},{g},{b}) bold")
             elif 1 <= line_num <= 4:  # Commands - gradient
                 padded_text = truncate_right(right_text)
+                # Match /command (starts with / followed by letters)
+                command_match = re.search(r'(/[a-z]+)', padded_text)
+                command_range = command_match.span() if command_match else (-1, -1)
+
                 for i, char in enumerate(padded_text):
-                    char_position = right_col_start_position + i
-                    progress = char_position / max(terminal_width - 1, 1)
-                    r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, progress)
-                    styled_line.append(char, style=f"rgb({r},{g},{b})")
+                    if command_range[0] <= i < command_range[1]:
+                        # Commands in pink
+                        styled_line.append(char, style="#ffccff")
+                    else:
+                        # Rest of the description with gradient
+                        char_position = right_col_start_position + i
+                        progress = char_position / max(terminal_width - 1, 1)
+                        r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, progress)
+                        styled_line.append(char, style=f"rgb({r},{g},{b})")
             elif line_num == 5:  # Divider line - gradient
                 padded_text = truncate_right(right_text)
                 for i, char in enumerate(padded_text):

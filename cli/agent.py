@@ -248,12 +248,17 @@ class YipsAgent:
             # Extract usage data
             usage = data.get("usage", {})
             if self.verbose_mode and usage:
-                input_tokens = usage.get("input_tokens", 0)
                 output_tokens = usage.get("output_tokens", 0)
-                self.console.print(
-                    f"[dim]Tokens: ↓{input_tokens} in, ↑{output_tokens} out[/dim]",
-                    style=TOOL_COLOR
-                )
+                if output_tokens > 0:
+                    # Format tokens (e.g., 1.2k)
+                    if output_tokens >= 1000:
+                        token_str = f"{output_tokens/1000:.1f}k"
+                    else:
+                        token_str = str(output_tokens)
+                    self.console.print(
+                        f"[dim]↓ {token_str} tokens[/dim]",
+                        style=TOOL_COLOR
+                    )
 
             # Process all content blocks
             for block in content_blocks:
@@ -409,8 +414,6 @@ class YipsAgent:
                             usage = message_data.get("usage", {})
                             if "input_tokens" in usage:
                                 input_tokens = usage.get("input_tokens")
-                                if self.verbose_mode:
-                                    self.console.print(f"[dim]DEBUG: message_start input_tokens={input_tokens}[/dim]")
                                 spinner.update_tokens(input_tokens=input_tokens)
 
                         # Handle content_block_start event (detect thinking/text blocks)
@@ -501,8 +504,6 @@ class YipsAgent:
                                 # Save final counts for display after streaming
                                 final_output_tokens = output_tokens
                                 final_input_tokens = input_tokens
-                                if self.verbose_mode:
-                                    self.console.print(f"[dim]DEBUG: message_delta input={input_tokens}, output={output_tokens}[/dim]")
                                 spinner.update_tokens(input_tokens=input_tokens, output_tokens=output_tokens)
 
 

@@ -40,7 +40,9 @@ from cli.color_utils import (
 from cli.config import (
     BASE_DIR,
     MEMORIES_DIR,
+    COMMANDS_DIR,
     SKILLS_DIR,
+    TOOLS_DIR,
     load_config,
     LAYOUT_FULL_MIN_WIDTH,
     LAYOUT_SINGLE_MIN_WIDTH,
@@ -97,6 +99,11 @@ class YipsAgent:
         self.session_file_path: Path | None = None
         self._session_created = False
         self.current_session_name: str | None = None
+
+        # Interactive session selection state
+        self.session_selection_active = False
+        self.session_selection_idx = 0
+        self.session_list: list[dict] = []
 
         # Prompt toolkit session for triggering redraws
         self.prompt_session = prompt_session
@@ -171,14 +178,18 @@ class YipsAgent:
                     mem_content.append(f"## {mem.stem}\n{mem.read_text()}")
                 sections.append(f"# RECENT MEMORIES\n\n" + "\n\n".join(mem_content))
 
-        # Available skills
+        # Available commands
+        available_cmds = []
+        if TOOLS_DIR.exists():
+            available_cmds.extend([d.name.lower() for d in TOOLS_DIR.iterdir() if d.is_dir()])
         if SKILLS_DIR.exists():
-            skills = list(SKILLS_DIR.glob("*.py"))
-            if skills:
-                skill_names = [s.stem for s in skills]
-                sections.append(
-                    f"# AVAILABLE SKILLS\n\nYou can invoke: {', '.join(skill_names)}"
-                )
+            available_cmds.extend([d.name.lower() for d in SKILLS_DIR.iterdir() if d.is_dir()])
+            
+        if available_cmds:
+            cmd_names = [f"/{c}" for c in sorted(list(set(available_cmds)))]
+            sections.append(
+                f"# AVAILABLE COMMANDS\n\nYou can invoke: {', '.join(cmd_names)}"
+            )
 
         return "\n\n" + "=" * 60 + "\n\n".join(sections)
 
@@ -871,6 +882,58 @@ class YipsAgent:
 
         self.refresh_title_box_only()
 
+    def load_session(self, file_path: Path) -> bool:
+        """Load a conversation from a session memory file."""
+        if not file_path.exists():
+            return False
+
+        try:
+            content = file_path.read_text()
+            
+            # Extract conversation part
+            conv_section = content.split("## Conversation")[-1].split("---")[0].strip()
+            lines = conv_section.split('\n')
+            
+            new_history: list[Message] = []
+            
+            for line in lines:
+                line = line.strip()
+                if not line:
+                    continue
+                
+                if line.startswith("**Katherine**:"):
+                    new_history.append({"role": "user", "content": line[len("**Katherine**:") :].strip()})
+                elif line.startswith("**Yips**:"):
+                    new_history.append({"role": "assistant", "content": line[len("**Yips**:") :].strip()})
+                elif line.startswith("*[System:"):
+                    # Remove *[System: and ]*
+                    sys_content = line[9:-2].strip()
+                    new_history.append({"role": "system", "content": sys_content})
+                elif new_history:
+                    # Append to previous message if it's a multi-line response
+                    new_history[-1]["content"] += "\n" + line
+
+            if new_history:
+                self.conversation_history = new_history
+                self.session_file_path = file_path
+                self._session_created = True
+                
+                # Extract session name from filename
+                name = file_path.stem
+                parts = name.split('_', 2)
+                if len(parts) >= 3:
+                    self.current_session_name = parts[2]
+                else:
+                    self.current_session_name = name
+                
+                self.refresh_display()
+                return True
+                
+        except Exception as e:
+            self.console.print(f"[red]Error loading session: {e}[/red]")
+            
+        return False
+
     def graceful_exit(self) -> None:
         """Handle graceful exit and finalize session memory."""
         # Cancel any pending resize timer
@@ -1116,7 +1179,22 @@ class YipsAgent:
         logo = generate_yips_logo()
         logo_height = len(logo)
         logo_width = len(logo[0]) if logo else 1
-        activity = get_recent_activity()
+        
+        if self.session_selection_active:
+            # Show interactive session list in the right column
+            # We have about 5-6 slots depending on layout
+            max_slots = 5
+            start_idx = max(0, min(self.session_selection_idx - max_slots // 2, len(self.session_list) - max_slots))
+            visible_sessions = self.session_list[start_idx : start_idx + max_slots]
+            activity = []
+            for i, s in enumerate(visible_sessions):
+                actual_idx = start_idx + i
+                is_selected = (actual_idx == self.session_selection_idx)
+                prefix = "> " if is_selected else "  "
+                # We'll handle the styling in the render loop below
+                activity.append((prefix + s['display'], is_selected))
+        else:
+            activity = [(a, False) for a in get_recent_activity()]
 
         # Build left column (12 lines)
         left_col = [
@@ -1132,18 +1210,19 @@ class YipsAgent:
         # Build right column
         verbose_status = "on" if self.verbose_mode else "off"
         streaming_status = "on" if self.streaming_enabled else "off"
-        right_col = [
-            "Tips for getting started",  # [0]
-            "Type /model to switch models",  # [1]
-            f"Type /verbose to toggle tool calls ({verbose_status})",  # [2]
-            f"Type /stream to toggle streaming ({streaming_status})",  # [3]
-            "Type /exit to leave",  # [4]
-            "─" * right_width,  # [5] divider
-            "Recent activity",  # [6]
+        right_col_data = [
+            ("Tips for getting started", False),  # [0]
+            ("Type /model to switch models", False),  # [1]
+            (f"Type /verbose to toggle tool calls ({verbose_status})", False),  # [2]
+            (f"Type /stream to toggle streaming ({streaming_status})", False),  # [3]
+            ("Type /exit to leave", False),  # [4]
+            ("─" * right_width, False),  # [5] divider
+            ("Recent activity", False),  # [6]
         ]
-        right_col.extend(activity)
-        while len(right_col) < len(left_col):
-            right_col.append("")
+        right_col_data.extend(activity)
+        
+        while len(right_col_data) < len(left_col):
+            right_col_data.append(("", False))
 
         # Blank line before title box
         self.console.print()
@@ -1152,7 +1231,7 @@ class YipsAgent:
         render_top_border(terminal_width)
 
         # Render content lines
-        max_lines = max(len(left_col), len(right_col))
+        max_lines = max(len(left_col), len(right_col_data))
 
         # Calculate border styles
         r_left, g_left, b_left = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, 0.0)
@@ -1168,7 +1247,8 @@ class YipsAgent:
         total_logo_cells = logo_height * logo_width
         for line_num in range(max_lines):
             left_text = left_col[line_num] if line_num < len(left_col) else ""
-            right_text = right_col[line_num] if line_num < len(right_col) else ""
+            right_item = right_col_data[line_num] if line_num < len(right_col_data) else ("", False)
+            right_text, is_highlighted = right_item
 
             styled_line = Text()
             styled_line.append("│", style=left_bar_style)
@@ -1223,7 +1303,15 @@ class YipsAgent:
 
             right_col_start_position = left_width + 2
 
-            if line_num == 0:  # Tips header - gradient, bold
+            if is_highlighted:
+                # Highlighted session: pink bold
+                padded_text = truncate_right(right_text)
+                # First two chars might be "> "
+                cursor_part = padded_text[:2]
+                text_part = padded_text[2:]
+                styled_line.append(cursor_part, style="bold #ffccff")
+                styled_line.append(text_part, style="bold #ffccff")
+            elif line_num == 0:  # Tips header - gradient, bold
                 padded_text = truncate_right(right_text)
                 for i, char in enumerate(padded_text):
                     char_position = right_col_start_position + i

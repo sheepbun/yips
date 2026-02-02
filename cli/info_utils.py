@@ -218,6 +218,81 @@ def get_recent_activity(limit: int = 5) -> list[str]:
         return ["No recent activity"]
 
 
+def get_session_list() -> list[dict]:
+    """Get list of session files with formatted display names and full paths.
+    
+    Returns a list of dicts: {'path': Path, 'display': str}
+    Sorted by date descending (newest first).
+    """
+    try:
+        if not MEMORIES_DIR.exists():
+            return []
+
+        # Build list of (datetime, filepath) tuples
+        dated_files: list[tuple[datetime, any]] = []
+        for f in MEMORIES_DIR.glob("*.md"):
+            try:
+                name = f.stem
+                parts = name.split('_', 2)
+
+                if len(parts) >= 3:
+                    date_part = parts[0]
+                    time_part = parts[1]
+                    if '-' in date_part:
+                        dt_str = f"{date_part} {time_part.replace('-', ':')}"
+                        dt = datetime.strptime(dt_str, '%Y-%m-%d %H:%M:%S')
+                    else:
+                        dt_str = f"{date_part} {time_part}"
+                        dt = datetime.strptime(dt_str, '%Y%m%d %H%M%S')
+                    dated_files.append((dt, f))
+                else:
+                    dt = datetime.fromtimestamp(f.stat().st_mtime)
+                    dated_files.append((dt, f))
+            except Exception:
+                dt = datetime.fromtimestamp(f.stat().st_mtime)
+                dated_files.append((dt, f))
+
+        # Sort by datetime descending
+        dated_files.sort(key=lambda x: x[0], reverse=True)
+
+        sessions = []
+        for dt, f in dated_files:
+            try:
+                name = f.stem
+                parts = name.split('_', 2)
+                if len(parts) >= 3:
+                    date_part = parts[0]
+                    time_part = parts[1]
+                    title = '_'.join(parts[2:])
+                    title = title.replace('_', ' ').title()
+                    
+                    if '-' in date_part:
+                        # Convert HH-MM-SS to 12h format
+                        time_parts = time_part.split('-')
+                        hour = int(time_parts[0])
+                        minute = time_parts[1]
+                        period = "AM" if hour < 12 else "PM"
+                        hour = 12 if hour == 0 else (hour if hour <= 12 else hour - 12)
+                        display = f"{dt.strftime('%Y-%-m-%-d')} @ {hour}:{minute} {period}: {title}"
+                    else:
+                        # Old format
+                        hour = int(time_part[:2])
+                        minute = time_part[2:4]
+                        period = "AM" if hour < 12 else "PM"
+                        hour = 12 if hour == 0 else (hour if hour <= 12 else hour - 12)
+                        display = f"{dt.strftime('%Y-%-m-%-d')} @ {hour}:{minute} {period}: {title}"
+                else:
+                    display = f"{dt.strftime('%Y-%-m-%-d %H:%M')}: {f.stem}"
+                
+                sessions.append({'path': f, 'display': display})
+            except Exception:
+                sessions.append({'path': f, 'display': f.name})
+
+        return sessions
+    except Exception:
+        return []
+
+
 def get_friendly_backend_name(backend_name: str) -> str:
     """Convert internal backend name to display-friendly name."""
     mapping = {

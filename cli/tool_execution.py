@@ -190,7 +190,8 @@ def execute_tool(request: ToolRequest, agent: Any = None) -> str:
         args: str = str(request["args"])
         log_action(f"invoking skill: {skill_name}")
 
-        skill_path = SKILLS_DIR / f"{skill_name.upper()}.py"
+        # Search for skill in commands/skills/<NAME>/<NAME>.py
+        skill_path = SKILLS_DIR / skill_name.upper() / f"{skill_name.upper()}.py"
         if not skill_path.exists():
             return f"[Error: Skill not found: {skill_name}]"
 

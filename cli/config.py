@@ -12,7 +12,9 @@ from cli.type_defs import YipsConfig
 # Directory paths
 BASE_DIR = PROJECT_ROOT
 MEMORIES_DIR = BASE_DIR / "memories"
-SKILLS_DIR = BASE_DIR / "skills"
+COMMANDS_DIR = BASE_DIR / "commands"
+SKILLS_DIR = COMMANDS_DIR / "skills"
+TOOLS_DIR = COMMANDS_DIR / "tools"
 CONFIG_FILE = BASE_DIR / ".yips_config.json"
 
 # Application info

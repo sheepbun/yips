@@ -15,8 +15,8 @@ from prompt_toolkit.key_binding import KeyBindings
 
 from cli.agent import YipsAgent
 from cli.color_utils import console, print_yips, PROMPT_COLOR, TOOL_COLOR
-from cli.commands import handle_slash_command
-from cli.config import SKILLS_DIR
+from cli.commands import handle_command
+from cli.config import COMMANDS_DIR
 from cli.tool_execution import parse_tool_requests, execute_tool, clean_response
 from cli.completer import SlashCommandCompleter
 
@@ -44,7 +44,7 @@ def main() -> None:
     @bindings.add('s-tab')
     def _(event):
         """Toggle Virtual Terminal with Shift+Tab"""
-        vt_path = SKILLS_DIR / "VT.py"
+        vt_path = COMMANDS_DIR / "VT" / "VT.py"
         if vt_path.exists():
             try:
                 # Suspend the current application to run the subprocess
@@ -94,18 +94,18 @@ def main() -> None:
             continue
 
         # Handle slash commands first
-        slash_result = handle_slash_command(agent, user_input)
-        if slash_result == "exit":
+        command_result = handle_command(agent, user_input)
+        if command_result == "exit":
             sys.exit(0)
-        if isinstance(slash_result, str) and slash_result.startswith("::YIPS_REPROMPT::"):
+        if isinstance(command_result, str) and command_result.startswith("::YIPS_REPROMPT::"):
             # Extract reprompt message and process it as a new user input
-            reprompt_msg = slash_result[17:]  # Remove "::YIPS_REPROMPT::" prefix
+            reprompt_msg = command_result[17:]  # Remove "::YIPS_REPROMPT::" prefix
             if reprompt_msg:
                 user_input = reprompt_msg
                 # Fall through to process as normal message
             else:
                 continue
-        elif slash_result:
+        elif command_result:
             continue
 
         # Store user message

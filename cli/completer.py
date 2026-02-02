@@ -1,38 +1,51 @@
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.formatted_text import FormattedText
-from cli.config import SKILLS_DIR
+from cli.config import COMMANDS_DIR, SKILLS_DIR, TOOLS_DIR
 from cli.color_utils import GRADIENT_PINK, GRADIENT_YELLOW, interpolate_color, PROMPT_COLOR
 
 
 class SlashCommandCompleter(Completer):
     """
-    Completer for Yips slash commands with gradient styling.
+    Completer for Yips commands with gradient styling.
     Provides pink command text and pink-to-yellow gradient descriptions.
+    All commands use the / prefix.
     """
 
     def _get_words_and_meta(self):
         """
-        Discover skills and build the word list and meta dict.
+        Discover commands from SKILLS_DIR, TOOLS_DIR and built-ins.
         Returns: (list of words, meta_dict)
         """
-        # 1. Built-in commands (with slashes)
-        builtins = {
+        # 1. Built-in commands
+        all_items = {
             '/exit': 'Exit the application',
             '/quit': 'Exit the application',
             '/model': 'Switch or list AI models',
+            '/sessions': 'Interactively select and load a session',
             '/verbose': 'Toggle verbose output',
             '/stream': 'Toggle streaming responses'
         }
 
-        # 2. Discover skills
-        skills = {}
-        if SKILLS_DIR.exists():
-            for file in SKILLS_DIR.glob("*.py"):
-                if file.stem != "__init__":
-                    skills[f"/{file.stem.lower()}"] = "Skill command"
-
-        # Merge
-        all_items = {**builtins, **skills}
+        # 2. Discover commands from directories
+        for parent_dir in [TOOLS_DIR, SKILLS_DIR]:
+            if parent_dir.exists():
+                for d in parent_dir.iterdir():
+                    if d.is_dir():
+                        name = d.name.lower()
+                        
+                        has_py = (d / f"{d.name}.py").exists()
+                        has_md = (d / f"{d.name}.md").exists()
+                        
+                        if has_py and has_md:
+                            desc = "Tool & Skill"
+                        elif has_py:
+                            desc = "Tool command"
+                        elif has_md:
+                            desc = "Markdown skill"
+                        else:
+                            desc = "Command"
+                            
+                        all_items[f"/{name}"] = desc
 
         words = sorted(all_items.keys())
         meta_dict = all_items
@@ -60,7 +73,7 @@ class SlashCommandCompleter(Completer):
         return FormattedText(parts)
 
     def get_completions(self, document, complete_event):
-        """Get completions for slash commands with styling."""
+        """Get completions for commands with styling."""
         # Get text before cursor (lstrip for leading whitespace)
         text_before_cursor = document.text_before_cursor.lstrip()
 

@@ -37,10 +37,11 @@ class PulsingSpinner:
         self.message = message
         self.spinner = Spinner("clockwise_dots_8")
         self.start_time = start_time if start_time is not None else time.time()
-        self.token_count = token_count
         self.model_status = model_status
-        self.input_tokens = 0
+        # Initialize with estimated token count until real data arrives
+        self.input_tokens = token_count  # Start with estimate
         self.output_tokens = 0
+        self.token_count = self.input_tokens + self.output_tokens
 
     def _format_time(self, seconds: float) -> str:
         m, s = divmod(int(seconds), 60)

@@ -377,6 +377,8 @@ class YipsAgent:
             # State tracking for tokens and model status
             current_block_type = None
             in_thinking_block = False
+            final_input_tokens = 0
+            final_output_tokens = 0
 
             with Live(spinner, console=self.console, refresh_per_second=20, transient=True) as live:
                 for line in response.iter_lines():
@@ -405,8 +407,8 @@ class YipsAgent:
                         if event_type == "message_start":
                             message_data = data.get("message", {})
                             usage = message_data.get("usage", {})
-                            input_tokens = usage.get("input_tokens", 0)
-                            if input_tokens > 0:
+                            if "input_tokens" in usage:
+                                input_tokens = usage.get("input_tokens")
                                 spinner.update_tokens(input_tokens=input_tokens)
 
                         # Handle content_block_start event (detect thinking/text blocks)
@@ -493,7 +495,11 @@ class YipsAgent:
                             if "output_tokens" in usage:
                                 # Use actual token count from API
                                 output_tokens = usage.get("output_tokens", 0)
-                                spinner.update_tokens(output_tokens=output_tokens)
+                                input_tokens = usage.get("input_tokens", 0)
+                                # Save final counts for display after streaming
+                                final_output_tokens = output_tokens
+                                final_input_tokens = input_tokens
+                                spinner.update_tokens(input_tokens=input_tokens, output_tokens=output_tokens)
 
 
                     except json.JSONDecodeError:
@@ -509,6 +515,13 @@ class YipsAgent:
                         final_text.append("\n      ")
                     final_text.append(gradient_text(line))
                 self.console.print(final_text)
+
+            # Display actual token usage from API
+            if final_input_tokens > 0 or final_output_tokens > 0:
+                self.console.print(
+                    f"[dim]Tokens: ↓{final_input_tokens} in, ↑{final_output_tokens} out[/dim]",
+                    style=TOOL_COLOR
+                )
 
             # Display tool calls after streaming completes
             if self.verbose_mode and tool_calls:

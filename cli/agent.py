@@ -408,6 +408,7 @@ class YipsAgent:
                         data = json.loads(data_str)
                         event_type = data.get("type", "")
 
+
                         # Handle message_start event (contains input tokens)
                         if event_type == "message_start":
                             message_data = data.get("message", {})
@@ -503,7 +504,13 @@ class YipsAgent:
 
                         # Handle message_delta event (contains output tokens)
                         elif event_type == "message_delta":
+                            # Try multiple paths - Anthropic API has usage at top level,
+                            # but LM Studio might nest it differently
                             usage = data.get("usage", {})
+                            if not usage:
+                                usage = data.get("message", {}).get("usage", {})
+                            if not usage:
+                                usage = data.get("delta", {}).get("usage", {})
                             if "output_tokens" in usage:
                                 # Use actual token count from API
                                 output_tokens = usage.get("output_tokens", 0)
@@ -515,6 +522,19 @@ class YipsAgent:
                                 # Update to actual final count
                                 spinner.update_output_animation(output_tokens)
 
+                        # Handle message_stop event (LM Studio may send usage here)
+                        elif event_type == "message_stop":
+                            # Try multiple paths for usage data
+                            usage = data.get("usage", {})
+                            if not usage:
+                                usage = data.get("message", {}).get("usage", {})
+                            if "output_tokens" in usage:
+                                output_tokens = usage.get("output_tokens", 0)
+                                input_tokens = usage.get("input_tokens", input_tokens)
+                                final_output_tokens = output_tokens
+                                final_input_tokens = input_tokens
+                                spinner.update_tokens(input_tokens=input_tokens, output_tokens=output_tokens)
+                                spinner.update_output_animation(output_tokens)
 
                     except json.JSONDecodeError:
                         continue
@@ -930,17 +950,18 @@ class YipsAgent:
 
                 for i, char in enumerate(centered_text):
                     col_index = i - padding_left
-                    if 0 <= col_index < logo_width:
-                        cell_index = (logo_line_index * logo_width) + col_index
-                        progress = cell_index / max(total_logo_cells - 1, 1)
-                        if not char.isspace():
-                            r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, progress)
-                            styled_line.append(char, style=f"rgb({r},{g},{b})")
-                        else:
-                            styled_line.append(char)
+                    overall_progress = i / max(content_width - 1, 1)
+                    
+                    if 0 <= col_index <= logo_width:
+                        # Diagonal gradient: Top-Left (Pink) to Bottom-Right (Yellow)
+                        vertical_p = logo_line_index / max(logo_height - 1, 1)
+                        horizontal_p = col_index / max(logo_width - 1, 1)
+                        logo_progress = (vertical_p + horizontal_p) / 2
+                        
+                        r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, logo_progress)
+                        styled_line.append(char, style=f"rgb({r},{g},{b})")
                     else:
                         # Padding: extend gradient based on overall position in content_width
-                        overall_progress = i / max(content_width - 1, 1)
                         r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, overall_progress)
                         styled_line.append(char, style=f"rgb({r},{g},{b})")
             elif not show_logo and line_num == 1:
@@ -1028,17 +1049,18 @@ class YipsAgent:
 
                 for i, char in enumerate(centered_text):
                     col_index = i - padding_left
-                    if 0 <= col_index < logo_width:
-                        cell_index = (logo_line_index * logo_width) + col_index
-                        progress = cell_index / max(total_logo_cells - 1, 1)
-                        if not char.isspace():
-                            r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, progress)
-                            styled_line.append(char, style=f"rgb({r},{g},{b})")
-                        else:
-                            styled_line.append(char)
+                    overall_progress = i / max(content_width - 1, 1)
+                    
+                    if 0 <= col_index <= logo_width:
+                        # Diagonal gradient: Top-Left (Pink) to Bottom-Right (Yellow)
+                        vertical_p = logo_line_index / max(logo_height - 1, 1)
+                        horizontal_p = col_index / max(logo_width - 1, 1)
+                        logo_progress = (vertical_p + horizontal_p) / 2
+                        
+                        r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, logo_progress)
+                        styled_line.append(char, style=f"rgb({r},{g},{b})")
                     else:
                         # Padding: extend gradient based on overall position in content_width
-                        overall_progress = i / max(content_width - 1, 1)
                         r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, overall_progress)
                         styled_line.append(char, style=f"rgb({r},{g},{b})")
             elif not show_logo and line_num == 3:
@@ -1157,18 +1179,18 @@ class YipsAgent:
 
                 for i, char in enumerate(centered_text):
                     col_index = i - padding_left
-                    if 0 <= col_index < logo_width:
-                        cell_index = (logo_line_index * logo_width) + col_index
-                        progress = cell_index / max(total_logo_cells - 1, 1)
+                    overall_progress = i / max(left_width - 1, 1)
 
-                        if not char.isspace():
-                            r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, progress)
-                            styled_line.append(char, style=f"rgb({r},{g},{b})")
-                        else:
-                            styled_line.append(char)
+                    if 0 <= col_index <= logo_width:  # Allow equal to handle edge cases
+                        # Diagonal gradient: Top-Left (Pink) to Bottom-Right (Yellow)
+                        vertical_p = logo_line_index / max(logo_height - 1, 1)
+                        horizontal_p = col_index / max(logo_width - 1, 1)
+                        logo_progress = (vertical_p + horizontal_p) / 2
+                        
+                        r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, logo_progress)
+                        styled_line.append(char, style=f"rgb({r},{g},{b})")
                     else:
                         # Padding: extend gradient based on overall position in left_width
-                        overall_progress = i / max(left_width - 1, 1)
                         r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, overall_progress)
                         styled_line.append(char, style=f"rgb({r},{g},{b})")
             elif line_num == 1:  # Welcome message - gradient, bold

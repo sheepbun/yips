@@ -113,11 +113,12 @@ class PulsingSpinner:
 
         elif self.is_animating_output:
             # Show real-time output tokens (already animated by streaming)
-            display_count = self.animated_output
+            # Include input tokens to show total context
+            display_count = self.input_tokens + self.animated_output
             arrow = "↓"
         else:
             # Fallback: show whatever we have
-            display_count = self.input_tokens if self.input_tokens > 0 else 0
+            display_count = self.input_tokens + self.output_tokens if self.token_count > 0 else 0
             arrow = "↑"
 
         # Format tokens (5.6k for thousands)
@@ -126,7 +127,7 @@ class PulsingSpinner:
         else:
             token_str = str(display_count)
 
-        status_text = f" ({time_str} · {arrow} {token_str} tokens · {self.model_status})"
+        status_text = f" ({time_str})"
 
         full_text = Text.assemble(
             (self.message, f"dim {color}"),

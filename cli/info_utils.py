@@ -159,9 +159,9 @@ def get_recent_activity(limit: int = 5) -> list[str]:
                                 else:
                                     display_hour = hour_int - 12
                                     am_pm = "PM"
-                                display = f"{dt.strftime('%Y-%m-%d')} @ {display_hour:02d}:{minute} {am_pm}: {title}"
+                                display = f"{dt.strftime('%Y-%-m-%-d')} @ {display_hour}:{minute} {am_pm}: {title}"
                             else:
-                                display = f"{dt.strftime('%Y-%m-%d')}: {title}"
+                                display = f"{dt.strftime('%Y-%-m-%-d')}: {title}"
                         except (ValueError, IndexError):
                             display = f"{date_part}: {title}"
                     else:
@@ -185,9 +185,9 @@ def get_recent_activity(limit: int = 5) -> list[str]:
                                 else:
                                     display_hour = hour_int - 12
                                     am_pm = "PM"
-                                display = f"{dt.strftime('%Y-%m-%d')} @ {display_hour:02d}:{minute} {am_pm}: {title}"
+                                display = f"{dt.strftime('%Y-%-m-%-d')} @ {display_hour}:{minute} {am_pm}: {title}"
                             else:
-                                display = f"{dt.strftime('%Y-%m-%d')}: {title}"
+                                display = f"{dt.strftime('%Y-%-m-%-d')}: {title}"
                         except (ValueError, IndexError):
                             display = f"{date_part}: {title}"
                 else:
@@ -206,7 +206,7 @@ def get_recent_activity(limit: int = 5) -> list[str]:
                     else:
                         display_hour = hour_int - 12
                         am_pm = "PM"
-                    display = f"{dt.strftime('%Y-%m-%d')} @ {display_hour:02d}:{dt.strftime('%M')} {am_pm}: {name}"
+                    display = f"{dt.strftime('%Y-%-m-%-d')} @ {display_hour}:{dt.strftime('%M')} {am_pm}: {name}"
 
                 activities.append(display)
             except Exception:

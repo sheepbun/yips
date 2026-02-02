@@ -161,7 +161,10 @@ def handle_slash_command(agent: YipsAgentProtocol, user_input: str) -> str | boo
                     if hasattr(agent, 'graceful_exit'):
                         agent.graceful_exit()
                         should_exit = True
-                
+                elif cmd_name == "REPROMPT":
+                    # Return special signal for reprompt
+                    return f"::YIPS_REPROMPT::{cmd_args}"
+
                 # Filter out the command line
                 output = output.replace(match.group(0), "")
             

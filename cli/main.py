@@ -8,7 +8,7 @@ import os
 import sys
 import subprocess
 
-from prompt_toolkit import prompt as prompt_toolkit_prompt
+from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import HTML as HTMLText
 from prompt_toolkit.styles import Style as PromptStyle
 
@@ -16,11 +16,35 @@ from cli.agent import YipsAgent
 from cli.color_utils import console, print_yips, PROMPT_COLOR, TOOL_COLOR
 from cli.commands import handle_slash_command
 from cli.tool_execution import parse_tool_requests, execute_tool, clean_response
+from cli.completer import SlashCommandCompleter
 
 
 def main() -> None:
     """Main entry point for Yips CLI."""
-    agent = YipsAgent()
+    completer = SlashCommandCompleter()
+
+    # Create custom style for prompt_toolkit input
+    style = PromptStyle.from_dict({
+        '': PROMPT_COLOR,  # Input text color (e.g., #FFCCFF)
+        'completion-menu': 'noinherit',
+        'completion-menu.completion': 'noinherit',
+        'completion-menu.completion.current': 'noinherit reverse',
+        'completion-menu.meta': 'noinherit',
+        'completion-menu.meta.completion': 'noinherit',
+        'completion-menu.meta.completion.current': 'noinherit reverse',
+        'scrollbar.background': 'noinherit',
+        'scrollbar.button': 'noinherit',
+    })
+
+    # Initialize PromptSession
+    session = PromptSession(
+        style=style,
+        completer=completer,
+        complete_while_typing=True
+    )
+
+    # Create agent and pass session reference
+    agent = YipsAgent(prompt_session=session)
 
     # Clear terminal
     subprocess.run('clear' if os.name != 'nt' else 'cls', shell=True)
@@ -39,14 +63,10 @@ def main() -> None:
             agent.refresh_display()
 
         try:
-            # Create custom style for prompt_toolkit input
-            style = PromptStyle.from_dict({
-                '': PROMPT_COLOR,  # Input text color (e.g., #FFCCFF)
-            })
-            # Use prompt_toolkit for styled input
-            user_input = prompt_toolkit_prompt(
+            # Use PromptSession for input
+            user_input = session.prompt(
                 HTMLText(f'<style fg="{PROMPT_COLOR}">>>> </style>'),
-                style=style
+                complete_while_typing=True
             ).strip()
         except (EOFError, KeyboardInterrupt):
             agent.graceful_exit()
@@ -59,7 +79,15 @@ def main() -> None:
         slash_result = handle_slash_command(agent, user_input)
         if slash_result == "exit":
             sys.exit(0)
-        if slash_result:
+        if isinstance(slash_result, str) and slash_result.startswith("::YIPS_REPROMPT::"):
+            # Extract reprompt message and process it as a new user input
+            reprompt_msg = slash_result[17:]  # Remove "::YIPS_REPROMPT::" prefix
+            if reprompt_msg:
+                user_input = reprompt_msg
+                # Fall through to process as normal message
+            else:
+                continue
+        elif slash_result:
             continue
 
         # Store user message
@@ -88,10 +116,65 @@ def main() -> None:
                 print_yips(cleaned)
 
         # Execute tool requests autonomously
-        for request in tool_requests:
+        total_requests = len(tool_requests)
+        if total_requests > 0:
+            console.print(f"[{TOOL_COLOR}]Queued {total_requests} tool call{'s' if total_requests != 1 else ''}[/{TOOL_COLOR}]")
+
+        for i, request in enumerate(tool_requests, 1):
+            # Get tool name for display
+            tool_name = "unknown"
+            if request["type"] == "action":
+                tool_name = request["tool"]
+            elif request["type"] == "identity":
+                tool_name = "update_identity"
+            elif request["type"] == "skill":
+                tool_name = f"skill:{request['skill']}"
+
+            remaining = total_requests - i
+            console.print(f"[{TOOL_COLOR}]{tool_name}[/{TOOL_COLOR}]")
+            if remaining > 0:
+                console.print(f"[{TOOL_COLOR}](+ {remaining} tool call{'s' if remaining != 1 else ''})[/{TOOL_COLOR}]")
+
             result = execute_tool(request, agent)
             if result == "::YIPS_EXIT::":
                 sys.exit(0)
+            if isinstance(result, str) and result.startswith("::YIPS_REPROMPT::"):
+                # Extract reprompt message and queue it for processing
+                reprompt_msg = result[17:]  # Remove "::YIPS_REPROMPT::" prefix
+                if reprompt_msg:
+                    # Add to conversation history
+                    agent.conversation_history.append({
+                        "role": "system",
+                        "content": f"[Reprompt requested: {reprompt_msg}]"
+                    })
+                    # Process the reprompt as a new message
+                    agent.conversation_history.append({
+                        "role": "user",
+                        "content": reprompt_msg
+                    })
+                    response = agent.get_response(reprompt_msg)
+                    agent.conversation_history.append({
+                        "role": "assistant",
+                        "content": response
+                    })
+                    # Parse and display the reprompt response
+                    new_tool_requests = parse_tool_requests(response)
+                    cleaned = clean_response(response)
+                    if cleaned:
+                        if not agent.streaming_enabled or response.startswith("["):
+                            print_yips(cleaned)
+                    # Execute any tool requests from the reprompt response
+                    for new_request in new_tool_requests:
+                        new_result = execute_tool(new_request, agent)
+                        if new_result == "::YIPS_EXIT::":
+                            sys.exit(0)
+                        if not new_result.startswith("::YIPS_"):
+                            console.print(new_result, style=TOOL_COLOR)
+                            agent.conversation_history.append({
+                                "role": "system",
+                                "content": new_result
+                            })
+                continue
             console.print(result, style=TOOL_COLOR)
             agent.conversation_history.append({
                 "role": "system",

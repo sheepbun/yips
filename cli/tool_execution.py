@@ -215,7 +215,10 @@ def execute_tool(request: ToolRequest, agent: Any = None) -> str:
                     if agent and hasattr(agent, 'graceful_exit'):
                         agent.graceful_exit()
                     return "::YIPS_EXIT::"
-                
+                elif cmd_name == "REPROMPT":
+                    # Return special signal with the reprompt message
+                    return f"::YIPS_REPROMPT::{cmd_args}"
+
                 # Filter out the command line
                 output = output.replace(match.group(0), "")
             

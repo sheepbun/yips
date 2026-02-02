@@ -44,13 +44,15 @@ class PulsingSpinner:
 
     def _format_time(self, seconds: float) -> str:
         m, s = divmod(int(seconds), 60)
+        if m == 0:
+            return f"{s}s"
         return f"{m}m {s}s"
 
-    def update_tokens(self, input_tokens: int = 0, output_tokens: int = 0) -> None:
+    def update_tokens(self, input_tokens: int | None = None, output_tokens: int | None = None) -> None:
         """Update token counts (can be called during streaming)."""
-        if input_tokens > 0:
+        if input_tokens is not None:
             self.input_tokens = input_tokens
-        if output_tokens > 0:
+        if output_tokens is not None:
             self.output_tokens = output_tokens
         # Total for display
         self.token_count = self.input_tokens + self.output_tokens

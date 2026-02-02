@@ -448,14 +448,9 @@ class YipsAgent:
                             delta_type = delta.get("type", "")
 
                             if delta_type == "text_delta":
-                                # Accumulate text tokens
+                                # Accumulate text
                                 text = delta.get("text", "")
                                 accumulated_text += text
-
-                                # Estimate output tokens based on text length (1 token ~= 4 chars)
-                                estimated_tokens = max(1, len(text) // 4)
-                                spinner.output_tokens += estimated_tokens
-                                spinner.token_count = spinner.input_tokens + spinner.output_tokens
 
                                 # Update display with full gradient (include prefix)
                                 display_text = Text()
@@ -492,12 +487,12 @@ class YipsAgent:
                                 display_text.append(f"🔧 Using tool: {tool_name}...", style=TOOL_COLOR)
                                 live.update(display_text)
 
-                        # Handle message_delta event (contains final output tokens)
+                        # Handle message_delta event (contains output tokens)
                         elif event_type == "message_delta":
                             usage = data.get("usage", {})
-                            output_tokens = usage.get("output_tokens", 0)
-                            if output_tokens > 0:
+                            if "output_tokens" in usage:
                                 # Use actual token count from API
+                                output_tokens = usage.get("output_tokens", 0)
                                 spinner.update_tokens(output_tokens=output_tokens)
 
 
@@ -566,9 +561,8 @@ class YipsAgent:
             # Display with Live for real-time updates
             prefix = get_yips_prefix()
 
-            # Calculate tokens
-            est_tokens = self._estimate_tokens("", full_prompt)
-            spinner = PulsingSpinner("Thinking...", token_count=est_tokens, model_status="generating")
+            # Claude CLI doesn't expose token counts, so show 0 (no fake data)
+            spinner = PulsingSpinner("Thinking...", token_count=0, model_status="generating")
 
             # stdout/stderr are guaranteed non-None when stdout=PIPE, stderr=PIPE
             assert process.stdout is not None
@@ -586,11 +580,6 @@ class YipsAgent:
                         continue
 
                     accumulated_text += char
-
-                    # Estimate output tokens based on accumulated text (1 token ~= 4 chars)
-                    # This is a rough estimate since Claude CLI doesn't expose token counts
-                    estimated_total = self._estimate_tokens("", accumulated_text)
-                    spinner.token_count = max(spinner.token_count, estimated_total)
 
                     # Update display with full gradient (include prefix)
                     display_text = Text()

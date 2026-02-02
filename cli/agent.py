@@ -543,7 +543,8 @@ class YipsAgent:
             if accumulated_text:
                 final_text = Text()
                 final_text.append_text(prefix)
-                lines = accumulated_text.split('\n')
+                # Strip trailing newlines to avoid double-spacing with console.print()
+                lines = accumulated_text.strip().split('\n')
                 for i, line in enumerate(lines):
                     if i > 0:
                         final_text.append("\n      ")
@@ -637,7 +638,8 @@ class YipsAgent:
             if accumulated_text:
                 final_text = Text()
                 final_text.append_text(prefix)
-                lines = accumulated_text.split('\n')
+                # Strip trailing newlines to avoid double-spacing with console.print()
+                lines = accumulated_text.strip().split('\n')
                 for i, line in enumerate(lines):
                     if i > 0:
                         final_text.append("\n      ")
@@ -1258,31 +1260,31 @@ class YipsAgent:
         render_bottom_border(terminal_width, self.current_session_name)
 
     def refresh_display(self) -> None:
-        """Clear terminal and re-render title box."""
+        """Clear terminal and re-render title box and history."""
         subprocess.run('clear' if os.name != 'nt' else 'cls', shell=True)
         self.render_title_box()
+        self._replay_conversation_history()
 
     def _replay_conversation_history(self) -> None:
         """Re-render all messages from conversation_history to screen.
 
         Reconstructs the visible chat by replaying stored messages.
         Follows the same formatting as original display:
-        - User messages: Not printed (only appeared in prompt)
+        - User messages: Printed with PROMPT_COLOR and >>> prefix
         - Assistant messages: Printed with print_yips() gradient styling
         - System messages: Printed with TOOL_COLOR
         """
-        from cli.color_utils import print_yips
+        from cli.color_utils import print_yips, PROMPT_COLOR
 
-        for message in self.conversation_history:
+        for i, message in enumerate(self.conversation_history):
             role = message.get("role")
             content = message.get("content", "")
 
             if role == "user":
-                # User input is never printed to screen (only shows in prompt)
-                continue
+                # User messages need to be re-printed during replay
+                self.console.print(f">>> {content}", style=PROMPT_COLOR)
             elif role == "assistant":
                 # Assistant responses use print_yips() for gradient styling
-                # print_yips() already adds blank line before (line 96 in color_utils.py)
                 if content:
                     print_yips(content)
             elif role == "system":
@@ -1290,9 +1292,11 @@ class YipsAgent:
                 if content:
                     self.console.print(content, style=TOOL_COLOR)
 
-        # Add final spacing after conversation (matches main.py line 125)
-        if self.conversation_history:
-            self.console.print()
+            # Add turn-separating blank line if:
+            # 1. The next message is a new user prompt (start of new turn)
+            # 2. OR this is the very last message (separating from active prompt)
+            if (i + 1 < len(self.conversation_history) and self.conversation_history[i+1]["role"] == "user") or (i + 1 == len(self.conversation_history)):
+                self.console.print()
 
     def refresh_title_box_only(self) -> None:
         """Re-render the title box and conversation history.

@@ -70,6 +70,15 @@ def ensure_lmstudio_running() -> bool:
         )
         # Wait for daemon to initialize
         time.sleep(8)
+        # Try to hide the window if xdotool is available
+        try:
+            subprocess.run(
+                ["xdotool", "search", "--class", "LM Studio", "windowunmap"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+        except (subprocess.SubprocessError, FileNotFoundError):
+            pass
 
     # Start headless server via lms CLI
     try:

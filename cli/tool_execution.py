@@ -197,6 +197,12 @@ def execute_tool(request: ToolRequest, agent: Any = None) -> str:
         try:
             cmd = [sys.executable, str(skill_path)] + (args.split() if args else [])
             env = {**os.environ, "PYTHONPATH": str(PROJECT_ROOT)}
+            
+            # Special handling for interactive VT skill
+            if skill_name.upper() == "VT":
+                subprocess.run(cmd, env=env) # Interactive, no capture, no timeout
+                return "[Virtual Terminal session ended]"
+
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env)
             
             output = result.stdout

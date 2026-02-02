@@ -96,8 +96,6 @@ def print_gradient(text: str) -> None:
 
 def print_yips(text: str) -> None:
     """Print Yips' response with gradient styling."""
-    console.print()  # Blank line before response
-
     prefix = get_yips_prefix()
     indent = " " * len(prefix)
 

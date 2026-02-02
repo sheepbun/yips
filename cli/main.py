@@ -11,10 +11,12 @@ import subprocess
 from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import HTML as HTMLText
 from prompt_toolkit.styles import Style as PromptStyle
+from prompt_toolkit.key_binding import KeyBindings
 
 from cli.agent import YipsAgent
 from cli.color_utils import console, print_yips, PROMPT_COLOR, TOOL_COLOR
 from cli.commands import handle_slash_command
+from cli.config import SKILLS_DIR
 from cli.tool_execution import parse_tool_requests, execute_tool, clean_response
 from cli.completer import SlashCommandCompleter
 
@@ -36,11 +38,27 @@ def main() -> None:
         'scrollbar.button': 'noinherit',
     })
 
+    # Define key bindings
+    bindings = KeyBindings()
+
+    @bindings.add('s-tab')
+    def _(event):
+        """Toggle Virtual Terminal with Shift+Tab"""
+        vt_path = SKILLS_DIR / "VT.py"
+        if vt_path.exists():
+            try:
+                # Suspend the current application to run the subprocess
+                with event.app.suspend_to_background():
+                    subprocess.run([sys.executable, str(vt_path)])
+            except Exception as e:
+                console.print(f"[Error launching VT: {e}]")
+
     # Initialize PromptSession
     session = PromptSession(
         style=style,
         completer=completer,
-        complete_while_typing=True
+        complete_while_typing=True,
+        key_bindings=bindings
     )
 
     # Create agent and pass session reference
@@ -183,10 +201,6 @@ def main() -> None:
 
         # Update session memory file with current conversation
         agent.update_session_file()
-
-        # Final break line after response
-        console.print()
-
 
 if __name__ == "__main__":
     main()

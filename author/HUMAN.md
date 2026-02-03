@@ -4,8 +4,8 @@
 
 ## Basic Information
 
-**Name**: Katherine Michelle North
-**Preferred name/nickname**: Katie
+**Full Name**: Katherine Michelle North
+**Nickname**: Katie
 **Timezone**: MST
 
 ## Communication Preferences

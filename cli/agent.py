@@ -576,13 +576,16 @@ class YipsAgent:
                                     # Find the last thinking block and render it
                                     start_idx = accumulated_text.rfind("<think>")
                                     end_idx = accumulated_text.rfind("</think>") + 8
+                                    
+                                    # Set status first to avoid "thinking" appearing in next Live update
+                                    in_thinking_block = False
+                                    spinner.update_status("generating")
+
                                     if start_idx != -1 and end_idx != -1:
                                         thinking_part = accumulated_text[start_idx:end_idx]
                                         self.console.print(render_thinking_block(thinking_part))
-                                        time.sleep(1.5) # Pause to let the user read the summary
+                                        time.sleep(1.0) # Pause briefly to let the user read the summary
                                         
-                                    in_thinking_block = False
-                                    spinner.update_status("generating")
                                 accumulated_text += text
                             
                         # Update display
@@ -620,18 +623,21 @@ class YipsAgent:
                                 input_tokens=usage.get("prompt_tokens"),
                                 output_tokens=usage.get("completion_tokens")
                             )
-                    except json.JSONDecodeError:
+                    except Exception:
                         continue
-
             if in_thinking_block:
                 accumulated_text += "\n</think>"
                 # Find the last thinking block and render it
                 start_idx = accumulated_text.rfind("<think>")
                 end_idx = accumulated_text.rfind("</think>") + 8
+                
+                # Close the thinking block state
+                in_thinking_block = False
+                
                 if start_idx != -1 and end_idx != -1:
                     thinking_part = accumulated_text[start_idx:end_idx]
                     self.console.print(render_thinking_block(thinking_part))
-                    time.sleep(1.5) # Pause to let the user read the summary
+                    time.sleep(1.0) # Pause briefly to let the user read the summary
             
             cleaned_text = clean_response(accumulated_text)
             if cleaned_text:
@@ -818,6 +824,8 @@ class YipsAgent:
                             event_type = data.get("type", "")
                         except json.JSONDecodeError:
                             continue
+                        except Exception:
+                            continue
 
                         # Handle message_start event (contains input tokens)
                         if event_type == "message_start":
@@ -875,13 +883,16 @@ class YipsAgent:
                                     # Find the last thinking block and render it
                                     start_idx = accumulated_text.rfind("<think>")
                                     end_idx = accumulated_text.rfind("</think>") + 8
+                                    
+                                    # Set status first to avoid "thinking" appearing in next Live update
+                                    in_thinking_block = False
+                                    spinner.update_status("generating")
+
                                     if start_idx != -1 and end_idx != -1:
                                         thinking_part = accumulated_text[start_idx:end_idx]
                                         self.console.print(render_thinking_block(thinking_part))
-                                        time.sleep(1.5) # Pause to let the user read the summary
+                                        time.sleep(1.0) # Pause briefly to let the user read the summary
                                         
-                                    in_thinking_block = False
-                                    spinner.update_status("generating")
                                 text = delta.get("text", "")
                                 accumulated_text += text
 
@@ -1007,11 +1018,14 @@ class YipsAgent:
                 # Find the last thinking block and render it
                 start_idx = accumulated_text.rfind("<think>")
                 end_idx = accumulated_text.rfind("</think>") + 8
+                
+                # Close the thinking block state
+                in_thinking_block = False
+
                 if start_idx != -1 and end_idx != -1:
                     thinking_part = accumulated_text[start_idx:end_idx]
                     self.console.print(render_thinking_block(thinking_part))
-                    time.sleep(1.5) # Pause to let the user read the summary
-                in_thinking_block = False
+                    time.sleep(1.0) # Pause briefly to let the user read the summary
                 
             cleaned_text = clean_response(accumulated_text)
             if cleaned_text:

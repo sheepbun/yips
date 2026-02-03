@@ -392,28 +392,26 @@ def render_thinking_block(thinking_text: str, is_streaming: bool = False) -> Pan
 
     # UI Styles
     blue_style = f"rgb({GRADIENT_BLUE[0]},{GRADIENT_BLUE[1]},{GRADIENT_BLUE[2]})"
+    header = blue_gradient_text("🧠 Thinking Process")
 
     if is_streaming:
-        # List all identified points "without removing them"
-        tree = Tree(blue_gradient_text("🧠 Summarized Reasoning Steps"))
+        # List all identified points
+        tree = Tree(header)
         
         # Limit to last 5 points to keep it from taking over the screen
         MAX_DISPLAY = 5
         start_idx = max(0, len(summarized_points) - MAX_DISPLAY)
         
-        if start_idx > 0:
-            tree.add(Text("...", style="dim"))
-
         for i, point in enumerate(summarized_points[start_idx:]):
             actual_idx = start_idx + i
             # The very last point is considered active/streaming
             is_active = (actual_idx == len(summarized_points) - 1) and not text.endswith(('.', '!', '?', '\n'))
             
             # Truncate points to keep them punchy
-            if len(point) > 70:
-                point = point[:67] + "..."
+            if len(point) > 80:
+                point = point[:77] + "..."
                 
-            point_text = blue_gradient_text(f"• {point}")
+            point_text = Text(f"• {point}", style=blue_style)
             if not is_active:
                 point_text.stylize("dim")
             
@@ -422,18 +420,15 @@ def render_thinking_block(thinking_text: str, is_streaming: bool = False) -> Pan
         return Panel(tree, border_style=blue_style, expand=False, padding=(0, 1))
     else:
         # Final summary: show top 3 points for clear retrospective
-        tree = Tree(blue_gradient_text("🧠 Thinking Process"))
+        tree = Tree(header)
         MAX_FINAL_POINTS = 3
         for point in summarized_points[:MAX_FINAL_POINTS]:
             if len(point) > 80:
                 point = point[:77] + "..."
-            point_text = blue_gradient_text(f"• {point}")
+            point_text = Text(f"• {point}", style=blue_style)
             point_text.stylize("dim")
             tree.add(point_text)
             
-        if len(summarized_points) > MAX_FINAL_POINTS:
-            tree.add(Text("  ...", style=blue_style))
-
         return Panel(tree, border_style=blue_style, expand=False, padding=(0, 1))
 
 

@@ -49,6 +49,7 @@ from cli.config import (
     LAYOUT_SINGLE_MIN_WIDTH,
     LAYOUT_COMPACT_MIN_WIDTH,
 )
+from cli.tool_execution import clean_response
 from cli.lmstudio import (
     LM_STUDIO_URL,
     LM_STUDIO_MODEL,
@@ -190,7 +191,9 @@ class YipsAgent:
         if available_cmds:
             cmd_names = [f"/{c}" for c in sorted(list(set(available_cmds)))]
             sections.append(
-                f"# AVAILABLE COMMANDS\n\nYou can invoke: {', '.join(cmd_names)}"
+                f"# USER COMMANDS\n\nKatherine can use these slash commands in the terminal: {', '.join(cmd_names)}\n\n"
+                "IMPORTANT: As an agent, you MUST NOT use slash commands. To use a tool or skill yourself, "
+                "you MUST use the {INVOKE_SKILL:SKILL_NAME:args} or {ACTION:TOOL_NAME:params} syntax as defined in your soul document."
             )
 
         return "\n\n" + "=" * 60 + "\n\n".join(sections)
@@ -554,11 +557,12 @@ class YipsAgent:
                         continue
 
             # Print final output after Live exits (so it persists)
-            if accumulated_text:
+            cleaned_text = clean_response(accumulated_text)
+            if cleaned_text:
                 final_text = Text()
                 final_text.append_text(prefix)
                 # Strip trailing newlines to avoid double-spacing with console.print()
-                lines = accumulated_text.strip().split('\n')
+                lines = cleaned_text.strip().split('\n')
                 for i, line in enumerate(lines):
                     if i > 0:
                         final_text.append("\n      ")
@@ -649,11 +653,12 @@ class YipsAgent:
                     live.update(display_text)
 
             # Print final output after Live exits (so it persists)
-            if accumulated_text:
+            cleaned_text = clean_response(accumulated_text)
+            if cleaned_text:
                 final_text = Text()
                 final_text.append_text(prefix)
                 # Strip trailing newlines to avoid double-spacing with console.print()
-                lines = accumulated_text.strip().split('\n')
+                lines = cleaned_text.strip().split('\n')
                 for i, line in enumerate(lines):
                     if i > 0:
                         final_text.append("\n      ")
@@ -931,9 +936,6 @@ class YipsAgent:
         # Ensure the session file is updated one last time before exit
         if self.conversation_history:
             self.update_session_file()
-
-        self.console.print()
-        print_gradient("Goodbye!")
 
     def render_title_box(self) -> None:
         """Render the title box with responsive layout."""

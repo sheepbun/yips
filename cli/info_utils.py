@@ -298,12 +298,21 @@ def get_friendly_backend_name(backend_name: str) -> str:
     mapping = {
         "claude": "Claude Pro",
         "lmstudio": "LM Studio",
+        "llamacpp": "llama.cpp",
     }
     return mapping.get(backend_name, backend_name)
 
 
 def get_friendly_model_name(model_name: str) -> str:
     """Convert internal model name to display-friendly name."""
+    if not model_name: return "Default"
+    
+    # Handle long paths in llamacpp
+    if "/" in model_name:
+        model_name = model_name.split("/")[-1]
+    if model_name.endswith(".gguf"):
+        model_name = model_name[:-5]
+
     mapping = {
         "haiku": "4.5 Haiku",
         "sonnet": "4.5 Sonnet",
@@ -314,5 +323,7 @@ def get_friendly_model_name(model_name: str) -> str:
         "openai/gpt-oss-20b": "gpt-oss",
         "lmstudio-community/Qwen3-4B-Thinking-2507-GGUF": "qwen-3",
         "qwen/qwen3-4b-thinking": "qwen-3",
+        "Qwen3-4B-Thinking-2507-Q4_K_M": "qwen-3",
+        "gemma-3-12b-it-Q4_K_M": "gemma-3",
     }
     return mapping.get(model_name, model_name)

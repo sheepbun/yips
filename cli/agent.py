@@ -59,6 +59,13 @@ from cli.lmstudio import (
     is_lmstudio_running,
     ensure_lmstudio_running,
 )
+from cli.llamacpp import (
+    LLAMA_SERVER_URL,
+    LLAMA_DEFAULT_MODEL,
+    is_llamacpp_running,
+    start_llamacpp,
+    stop_llamacpp,
+)
 from cli.info_utils import (
     get_username,
     get_recent_activity,
@@ -74,6 +81,7 @@ from cli.ui_rendering import (
     render_top_border,
     render_bottom_border,
     render_tool_call,
+    render_thinking_block,
     LOGO_WIDTH,
 )
 from cli.type_defs import Message, YipsConfig, StreamingToolCall, SessionState
@@ -124,17 +132,23 @@ class YipsAgent:
             signal.signal(signal.SIGWINCH, self._handle_resize)
 
         # Determine backend and model from saved config or defaults
-        # Do NOT start LM Studio here - that happens in initialize_backend() after title box display
-        if saved_backend == "claude" and saved_model:
+        # Do NOT start backends here - that happens in initialize_backend() after title box display
+        self.backend = saved_backend or "llamacpp"
+        self.current_model = saved_model
+
+        if self.backend == "claude":
             self.use_claude_cli = True
-            self.current_model = saved_model
-        elif saved_backend == "lmstudio" and saved_model:
+            if not self.current_model:
+                self.current_model = CLAUDE_CLI_MODEL
+        elif self.backend == "lmstudio":
             self.use_claude_cli = False
-            self.current_model = saved_model
-        else:
-            # No saved config - use defaults
+            if not self.current_model:
+                self.current_model = LM_STUDIO_MODEL
+        else: # Default or explicitly llamacpp
+            self.backend = "llamacpp"
             self.use_claude_cli = False
-            self.current_model = LM_STUDIO_MODEL
+            if not self.current_model:
+                self.current_model = LLAMA_DEFAULT_MODEL
 
     @property
     def is_gui(self) -> bool:
@@ -162,13 +176,25 @@ class YipsAgent:
             self.backend_initialized = True
             return
 
-        # LM Studio backend - ensure it's running
-        if not is_lmstudio_running():
-            self.console.print(f"[dim]Starting {get_friendly_backend_name('lmstudio')}...[/dim]")
-            if not ensure_lmstudio_running():
-                self.console.print(f"[yellow]{get_friendly_backend_name('lmstudio')} unavailable, using {get_friendly_backend_name('claude')}.[/yellow]")
-                self.use_claude_cli = True
-                self.current_model = CLAUDE_CLI_MODEL
+        # llama.cpp backend
+        if self.backend == "llamacpp":
+            if not is_llamacpp_running():
+                if not start_llamacpp(self.current_model):
+                    self.console.print(f"[yellow]{get_friendly_backend_name('llamacpp')} unavailable, trying {get_friendly_backend_name('lmstudio')}...[/yellow]")
+                    self.backend = "lmstudio"
+                    if not self.current_model or "GGUF" not in self.current_model:
+                        self.current_model = LM_STUDIO_MODEL
+            else:
+                self.backend_initialized = True
+                return
+
+        # LM Studio backend
+        if self.backend == "lmstudio":
+            if not is_lmstudio_running():
+                if not ensure_lmstudio_running():
+                    self.console.print(f"[yellow]{get_friendly_backend_name('lmstudio')} unavailable, using {get_friendly_backend_name('claude')}.[/yellow]")
+                    self.use_claude_cli = True
+                    self.current_model = CLAUDE_CLI_MODEL
 
         self.backend_initialized = True
 
@@ -378,7 +404,7 @@ class YipsAgent:
                     thinking_content = block.get("thinking", "")
                     if thinking_content:
                         if self.verbose_mode:
-                            self.console.print(f"[dim]Thought: {thinking_content}[/dim]")
+                            self.console.print(render_thinking_block(thinking_content))
                         # For models that use thinking blocks instead of text tags,
                         # we want to keep the thinking for context/parsing.
                         text_parts.append(f"<think>\n{thinking_content}\n</think>")
@@ -403,6 +429,179 @@ class YipsAgent:
             return "[Error: Request timed out after 120 seconds]"
         except Exception as e:
             return f"[Error calling LM Studio: {e}]"
+
+    def call_llamacpp(self, message: str) -> str:
+        """Call llama-server API using OpenAI-compatible endpoint."""
+        system_prompt = self.load_context()
+
+        # Build messages (OpenAI format)
+        messages = [{"role": "system", "content": system_prompt}]
+        for msg in self.conversation_history:
+            if msg["role"] == "system":
+                messages.append({"role": "user", "content": f"[Observation]: {msg['content']}"})
+            else:
+                messages.append({"role": msg["role"], "content": msg["content"]})
+        
+        if not messages or messages[-1]["content"] != message:
+            messages.append({"role": "user", "content": message})
+
+        if self.streaming_enabled:
+            try:
+                return self._stream_llamacpp(messages)
+            except Exception as e:
+                self.console.print(f"[yellow]Streaming failed ({e}), using non-streaming mode[/yellow]")
+
+        try:
+            est_tokens = self._estimate_tokens(system_prompt, messages)
+            with show_loading("Waiting for llama.cpp response...", token_count=est_tokens):
+                response = requests.post(
+                    f"{LLAMA_SERVER_URL}/v1/chat/completions",
+                    json={
+                        "model": self.current_model,
+                        "messages": messages,
+                        "max_tokens": 2048,
+                        "temperature": 0.7,
+                    },
+                    timeout=120
+                )
+                
+                if response.status_code != 200:
+                    return f"[Error from llama.cpp ({response.status_code}): {response.text}]"
+
+                data = response.json()
+                msg_data = data.get("choices", [{}])[0].get("message", {})
+                content = msg_data.get("content", "")
+                reasoning = msg_data.get("reasoning_content", "")
+
+                if reasoning and self.verbose_mode:
+                    self.console.print(render_thinking_block(reasoning))
+                
+                if reasoning and not content.startswith("<think>"):
+                    content = f"<think>\n{reasoning}\n</think>\n{content}"
+                
+                usage = data.get("usage", {})
+                if self.verbose_mode and usage:
+                    output_tokens = usage.get("completion_tokens", 0)
+                    if output_tokens > 0:
+                        token_str = f"{output_tokens/1000:.1f}k" if output_tokens >= 1000 else str(output_tokens)
+                        self.console.print(f"[dim]↓ {token_str} tokens[/dim]", style=TOOL_COLOR)
+
+                return content
+
+        except Exception as e:
+            return f"[Error calling llama.cpp: {e}]"
+
+    def _stream_llamacpp(self, messages: list[dict]) -> str:
+        """Stream response from llama-server API with real-time display."""
+        try:
+            prefix = get_yips_prefix()
+            indent = " " * len(prefix)
+            
+            # Estimate tokens from all messages
+            all_content = "".join([m["content"] for m in messages])
+            est_tokens = len(all_content) // 4
+            spinner = PulsingSpinner("Thinking...", token_count=est_tokens)
+
+            response = requests.post(
+                f"{LLAMA_SERVER_URL}/v1/chat/completions",
+                json={
+                    "model": self.current_model,
+                    "messages": messages,
+                    "max_tokens": 2048,
+                    "stream": True,
+                },
+                timeout=120,
+                stream=True
+            )
+            
+            if response.status_code != 200:
+                return f"[Error from llama.cpp ({response.status_code}): {response.text}]"
+
+            accumulated_text = ""
+            in_thinking_block = False
+            
+            with Live(spinner, console=self.console, refresh_per_second=20, transient=True) as live:
+                for line in response.iter_lines():
+                    if not line:
+                        continue
+
+                    line_str = line.decode('utf-8').strip()
+                    if not line_str.startswith('data:'):
+                        continue
+
+                    data_str = line_str[5:].strip()
+                    if data_str == '[DONE]':
+                        break
+
+                    try:
+                        data = json.loads(data_str)
+                        delta = data.get("choices", [{}])[0].get("delta", {})
+                        
+                        # Handle reasoning_content (OpenAI extension for thinking models)
+                        if "reasoning_content" in delta:
+                            reasoning = delta["reasoning_content"]
+                            if reasoning: # Ensure it's not None
+                                if not in_thinking_block:
+                                    accumulated_text += "<think>\n"
+                                    in_thinking_block = True
+                                    spinner.update_status("reasoning")
+                                accumulated_text += reasoning
+                        
+                        if "content" in delta:
+                            text = delta["content"]
+                            if text: # Ensure it's not None
+                                if in_thinking_block:
+                                    # When transitioning from thinking to content, close the tag and render the block
+                                    accumulated_text += "\n</think>\n"
+                                    
+                                    # Find the last thinking block and render it
+                                    start_idx = accumulated_text.rfind("<think>")
+                                    end_idx = accumulated_text.rfind("</think>") + 8
+                                    if start_idx != -1 and end_idx != -1:
+                                        thinking_part = accumulated_text[start_idx:end_idx]
+                                        self.console.print(render_thinking_block(thinking_part))
+                                        
+                                    in_thinking_block = False
+                                    spinner.update_status("generating")
+                                accumulated_text += text                            
+                        # Update display
+                        if accumulated_text:
+                            display_accumulated = clean_response(accumulated_text)
+                            display_text = Text()
+                            display_text.append_text(prefix)
+                            lines = display_accumulated.split('\n')
+                            for i, text_line in enumerate(lines):
+                                if i > 0: display_text.append("\n" + indent)
+                                display_text.append(apply_gradient_to_text(text_line))
+                            live.update(display_text)
+                            
+                        # Handle token usage if provided in stream
+                        usage = data.get("usage")
+                        if usage:
+                            spinner.update_tokens(
+                                input_tokens=usage.get("prompt_tokens"),
+                                output_tokens=usage.get("completion_tokens")
+                            )
+                    except json.JSONDecodeError:
+                        continue
+
+            if in_thinking_block:
+                accumulated_text += "\n</think>"
+            
+            cleaned_text = clean_response(accumulated_text)
+            if cleaned_text:
+                final_text = Text()
+                final_text.append_text(prefix)
+                lines = cleaned_text.strip().split('\n')
+                for i, line in enumerate(lines):
+                    if i > 0: final_text.append("\n" + indent)
+                    final_text.append(gradient_text(line))
+                self.console.print(final_text)
+
+            return accumulated_text
+
+        except Exception as e:
+            return f"[Error streaming from llama.cpp: {e}]"
 
     def call_claude_cli(self, message: str) -> str:
         """Fallback: Call Claude Code CLI (Priority 1)."""
@@ -615,12 +814,19 @@ class YipsAgent:
                             delta_type = delta.get("type", "")
 
                             if delta_type == "text_delta":
-                                # If we were thinking, close the tag
+                                # If we were thinking, close the tag and render the block
                                 if in_thinking_block:
                                     accumulated_text += "\n</think>\n"
+                                    
+                                    # Find the last thinking block and render it
+                                    start_idx = accumulated_text.rfind("<think>")
+                                    end_idx = accumulated_text.rfind("</think>") + 8
+                                    if start_idx != -1 and end_idx != -1:
+                                        thinking_part = accumulated_text[start_idx:end_idx]
+                                        self.console.print(render_thinking_block(thinking_part))
+                                        
                                     in_thinking_block = False
-
-                                # Accumulate text
+                                    spinner.update_status("generating")
                                 text = delta.get("text", "")
                                 accumulated_text += text
 
@@ -868,7 +1074,7 @@ class YipsAgent:
             return f"[Error streaming from Claude CLI: {e}]"
 
     def get_response(self, message: str) -> str:
-        """Get response using available backend (LM Studio or Claude CLI)."""
+        """Get response using available backend (llamacpp, LM Studio, or Claude CLI)."""
         if not self.backend_initialized:
             return "[Error: Backend not initialized]"
 
@@ -876,7 +1082,14 @@ class YipsAgent:
 
         if self.use_claude_cli:
             response = self.call_claude_cli(message)
-        else:
+        elif self.backend == "llamacpp":
+            response = self.call_llamacpp(message)
+            # If llama.cpp fails, fall back to LM Studio then Claude CLI
+            if response.startswith("[Error: Could not connect") or response.startswith("[Error calling llama.cpp"):
+                self.console.print(f"[yellow]{get_friendly_backend_name('llamacpp')} disconnected, trying {get_friendly_backend_name('lmstudio')}...[/yellow]")
+                self.backend = "lmstudio"
+                response = self.get_response(message)
+        else: # lmstudio
             response = self.call_lm_studio(message)
             # If LM Studio fails mid-session, fall back to CLI
             if response.startswith("[Error: Could not connect"):
@@ -1122,6 +1335,15 @@ class YipsAgent:
 
     def graceful_exit(self) -> None:
         """Handle graceful exit and finalize session memory."""
+        # Unload models and stop servers
+        if not self.use_claude_cli:
+            if self.backend == "llamacpp":
+                from cli.llamacpp import stop_llamacpp
+                stop_llamacpp()
+            else:
+                from cli.lmstudio import unload_all_models
+                unload_all_models()
+
         # Cancel any pending resize timer
         if self._resize_timer is not None:
             self._resize_timer.cancel()
@@ -1161,7 +1383,7 @@ class YipsAgent:
         right_bar_style = f"rgb({r_right},{g_right},{b_right})"
 
         # Get info
-        backend_key = "claude" if self.use_claude_cli else "lmstudio"
+        backend_key = "claude" if self.use_claude_cli else self.backend
         display_backend = get_friendly_backend_name(backend_key)
         display_model = get_friendly_model_name(self.current_model)
         logo = generate_yips_logo()
@@ -1251,7 +1473,7 @@ class YipsAgent:
 
         # Gather content
         username = get_username()
-        backend_key = "claude" if self.use_claude_cli else "lmstudio"
+        backend_key = "claude" if self.use_claude_cli else self.backend
         display_backend = get_friendly_backend_name(backend_key)
         display_model = get_friendly_model_name(self.current_model)
         cwd = get_display_directory()
@@ -1355,7 +1577,7 @@ class YipsAgent:
 
         # Gather content
         username = get_username()
-        backend_key = "claude" if self.use_claude_cli else "lmstudio"
+        backend_key = "claude" if self.use_claude_cli else self.backend
         display_backend = get_friendly_backend_name(backend_key)
         display_model = get_friendly_model_name(self.current_model)
         cwd = get_display_directory()

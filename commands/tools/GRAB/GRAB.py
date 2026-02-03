@@ -1,0 +1,1 @@
+Yips searches through the current working directory to gather and find which parts of the project are needed

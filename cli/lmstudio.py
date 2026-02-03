@@ -92,6 +92,21 @@ def ensure_lmstudio_running() -> bool:
     return False
 
 
+def unload_all_models() -> bool:
+    """Unload all models from LM Studio using the CLI."""
+    try:
+        subprocess.run(
+            [LMS_CLI_PATH, "unload", "--all"],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=10
+        )
+        return True
+    except Exception:
+        return False
+
+
 def get_available_models() -> list[str]:
     """Scan LM Studio for available models using the CLI."""
     try:

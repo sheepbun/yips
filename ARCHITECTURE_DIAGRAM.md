@@ -12,6 +12,28 @@ User Input
         │
         ├─> get_response(message)
             │
+            ├─ Backend: llama.cpp
+            │   │
+            │   └─> call_llamacpp(message)
+            │       │
+            │       ├─ Streaming Enabled?
+            │       │   │
+            │       │   ├─ YES → _stream_llamacpp()
+            │       │   │         │
+            │       │   │         ├─ Show "Yips: " prefix
+            │       │   │         ├─ POST to /v1/chat/completions with stream=true
+            │       │   │         ├─ Parse OpenAI-style SSE events
+            │       │   │         ├─ Live display: Update gradient per token
+            │       │   │         └─ Return text
+            │       │   │
+            │       │   └─ NO → Non-streaming mode
+            │       │             │
+            │       │             ├─ Show loading spinner
+            │       │             ├─ POST to /v1/chat/completions
+            │       │             └─ Return text
+            │       │
+            │       └─ On Error → Fallback to LM Studio or Claude CLI
+            │
             ├─ Backend: LM Studio
             │   │
             │   └─> call_lm_studio(message)
@@ -113,10 +135,10 @@ Each update recalculates full gradient:
 
 ```json
 {
-  "backend": "lmstudio" | "claude",
+  "backend": "llamacpp" | "lmstudio" | "claude",
   "model": "model-name",
   "verbose": true | false,
-  "streaming": true | false  // NEW
+  "streaming": true | false
 }
 ```
 

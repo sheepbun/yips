@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=Yips
+Exec=/home/katherine/Yips/yips-launcher.sh
+Icon=utilities-terminal
+Type=Application
+Categories=Development;Utility;
+Terminal=false
+Comment=Agentic Desktop Agent
+Path=/home/katherine/Yips

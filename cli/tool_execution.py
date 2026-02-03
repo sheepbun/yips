@@ -440,5 +440,8 @@ def clean_response(response: str) -> str:
         except:
             pass
             
-    # Also handle <think> blocks - if it's the only thing there, don't hide it
+    # Also handle <think> blocks - hide them from display
+    cleaned = re.sub(r"<think>.*?</think>", "", cleaned, flags=re.DOTALL)
+    cleaned = re.sub(r"<think>.*$", "", cleaned, flags=re.DOTALL) # Handle open thinking blocks
+            
     return cleaned.strip()

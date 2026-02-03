@@ -322,8 +322,8 @@ def render_tool_call(tool_name: str, parameters: dict[str, Any] | str, result: s
             
             # Clean up result preview (remove [Command output]: etc)
             # Handle various common prefixes
-            res_preview = re.sub(r"^\[(Command output|File contents|File written|Skill output|stderr).*?\]:\s*", "", res_preview, flags=re.IGNORECASE)
-            res_preview = re.sub(r"^\[.*?\]\s*", "", res_preview) # Catch-all for other [Brackets]
+            res_preview = re.sub(r"^[(Command output|File contents|File written|Skill output|stderr).*?]:\s*", "", res_preview, flags=re.IGNORECASE)
+            res_preview = re.sub(r"^[(.*?)]\s*", "", res_preview) # Catch-all for other [Brackets]
             
             # Strip leading/trailing whitespace again after regex
             res_preview = res_preview.strip()
@@ -337,3 +337,68 @@ def render_tool_call(tool_name: str, parameters: dict[str, Any] | str, result: s
             res_tree.add(Text(res_preview, style="dim"))
 
     return Panel(tree, border_style=TOOL_COLOR, expand=False, padding=(0, 1))
+
+
+def render_thinking_block(thinking_text: str) -> Panel:
+    """Render a thinking block in a summarized bullet point box."""
+    # Clean up the thinking text
+    text = thinking_text.strip()
+    if text.startswith("<think>"):
+        text = text[7:].strip()
+    if text.endswith("</think>"):
+        text = text[:-8].strip()
+
+    # Create a tree for the thinking summary
+    # Use a brain emoji or similar
+    tree = Tree(blue_gradient_text("🧠 Thinking Process"))
+    
+    # Split into paragraphs/lines and try to find bullet points or meaningful chunks
+    lines = text.split('\n')
+    bullets = []
+    current_bullet = ""
+    
+    for line in lines:
+        line = line.strip()
+        if not line:
+            if current_bullet:
+                bullets.append(current_bullet)
+                current_bullet = ""
+            continue
+            
+        # Check if it's already a bullet point
+        if line.startswith(('-', '*', '•', '1.', '2.', '3.')):
+            if current_bullet:
+                bullets.append(current_bullet)
+            current_bullet = line.lstrip('-*•123456789. ').strip()
+        else:
+            if current_bullet:
+                current_bullet += " " + line
+            else:
+                current_bullet = line
+                
+    if current_bullet:
+        bullets.append(current_bullet)
+        
+    # If no bullets found (all one big block), split by sentences or just show first few lines
+    if not bullets and text:
+        # Split by sentence or just take first 3 meaningful lines
+        meaningful_lines = [l.strip() for l in lines if l.strip()]
+        bullets = meaningful_lines[:5]
+        if len(meaningful_lines) > 5:
+            bullets.append("...")
+
+    # Limit the number of bullets to keep it a "summary"
+    MAX_BULLETS = 5
+    display_bullets = bullets[:MAX_BULLETS]
+    
+    for bullet in display_bullets:
+        if not bullet: continue
+        # Truncate long bullets
+        if len(bullet) > 120:
+            bullet = bullet[:117] + "..."
+        tree.add(Text(f"• {bullet}", style="dim"))
+        
+    if len(bullets) > MAX_BULLETS:
+        tree.add(Text("  ...", style="dim"))
+
+    return Panel(tree, border_style="dim white", expand=False, padding=(0, 1))

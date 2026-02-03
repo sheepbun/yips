@@ -6,6 +6,7 @@ __pycache__/
 .Python
 
 # Virtual environments
+.venv/
 venv/
 env/
 ENV/
@@ -18,6 +19,8 @@ ENV/
 *~
 
 # Yips runtime
+.yips/
+author/
 .yips_config.json
 .directory
 

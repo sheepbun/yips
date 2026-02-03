@@ -1,0 +1,153 @@
+"""
+YipsAgent - Core agent class for Yips CLI.
+
+Manages conversation, backend communication, and session state.
+Refactored to use modular mixins for specialized functionality.
+"""
+
+import json
+import os
+import signal
+import sys
+import threading
+import time
+from pathlib import Path
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from types import FrameType
+
+from cli.color_utils import console
+from cli.config import (
+    load_config,
+)
+from cli.lmstudio import (
+    LM_STUDIO_MODEL,
+    CLAUDE_CLI_MODEL,
+)
+from cli.llamacpp import (
+    LLAMA_DEFAULT_MODEL,
+)
+from cli.type_defs import Message, YipsConfig, SessionState
+
+# Import modular mixins from the agent package
+from .context import AgentContextMixin
+from .session import AgentSessionMixin
+from .ui import AgentUIMixin
+from .backend import AgentBackendMixin
+
+
+class YipsAgent(
+    AgentContextMixin,
+    AgentSessionMixin,
+    AgentUIMixin,
+    AgentBackendMixin
+):
+    """Main agent class managing conversation and autonomous tool execution."""
+
+    def __init__(self, prompt_session=None) -> None:
+        self.conversation_history: list[Message] = []
+        self.console = console
+        self.backend_initialized = False
+        
+        # Initialize loop state
+        self.session_state: SessionState = {
+            "thought_signature": "",
+            "error_count": 0,
+            "last_action": ""
+        }
+
+        # Load saved configuration
+        config: YipsConfig = load_config()
+        saved_model = config.get("model")
+        saved_backend = config.get("backend")
+        self.verbose_mode = config.get("verbose", True)
+        self.streaming_enabled = config.get("streaming", True)
+
+        # Terminal resize handling
+        self.last_width: int | None = None
+        self.resize_pending: bool = False
+        self._resize_timer: threading.Timer | None = None
+
+        # Session file tracking
+        self.session_file_path: Path | None = None
+        self._session_created = False
+        self.current_session_name: str | None = None
+
+        # Interactive session selection state
+        self.session_selection_active = False
+        self.session_selection_idx = 0
+        self.session_list: list[dict] = []
+
+        # Prompt toolkit session for triggering redraws
+        self.prompt_session = prompt_session
+
+        # Register SIGWINCH handler (Unix only)
+        if hasattr(signal, 'SIGWINCH'):
+            signal.signal(signal.SIGWINCH, self._handle_resize)
+
+        # Determine backend and model
+        self.backend = saved_backend or "llamacpp"
+        self.current_model = saved_model
+
+        if self.backend == "claude":
+            self.use_claude_cli = True
+            if not self.current_model:
+                self.current_model = CLAUDE_CLI_MODEL
+        elif self.backend == "lmstudio":
+            self.use_claude_cli = False
+            if not self.current_model:
+                self.current_model = LM_STUDIO_MODEL
+        else: # llamacpp
+            self.backend = "llamacpp"
+            self.use_claude_cli = False
+            if not self.current_model:
+                self.current_model = LLAMA_DEFAULT_MODEL
+
+    @property
+    def is_gui(self) -> bool:
+        return os.environ.get("YIPS_GUI_MODE") == "1"
+
+    def emit_gui_event(self, event_type: str, data: Any) -> None:
+        """Emit a structured JSON event for the Electron frontend."""
+        if self.is_gui:
+            event = {
+                "type": event_type,
+                "data": data,
+                "timestamp": time.time()
+            }
+            print(f"__YIPS_JSON__{json.dumps(event)}")
+            sys.stdout.flush()
+
+    def graceful_exit(self) -> None:
+        """Handle graceful exit and finalize session memory."""
+        # Unload models and stop servers
+        if not getattr(self, 'use_claude_cli', False):
+            if self.backend == "llamacpp":
+                from cli.llamacpp import stop_llamacpp
+                stop_llamacpp()
+            else:
+                from cli.lmstudio import unload_all_models
+                unload_all_models()
+
+        # Cancel any pending resize timer
+        if self._resize_timer is not None:
+            self._resize_timer.cancel()
+
+        # Ensure the session file is updated one last time before exit
+        if self.conversation_history:
+            self.update_session_file()
+
+    def _handle_resize(self, signum: int, frame: "FrameType | None") -> None:
+        """Handle SIGWINCH signal with debouncing."""
+        # Immediately clear screen to prevent line wrapping during resize
+        print("\033[2J\033[H", end="", flush=True)
+
+        if self._resize_timer is not None:
+            self._resize_timer.cancel()
+        self._resize_timer = threading.Timer(0.1, self._trigger_resize)
+        self._resize_timer.start()
+
+    def _trigger_resize(self) -> None:
+        """Set flag to trigger resize on next main loop iteration."""
+        self.resize_pending = True

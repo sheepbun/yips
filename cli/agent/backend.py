@@ -331,9 +331,22 @@ class AgentBackendMixin:
                                     in_thinking_block = False
                                     spinner.update_status("generating")
                                     if start_idx != -1 and end_idx != -1:
+                                        # Clear thinking from live display before printing final
                                         thinking_part = accumulated_text[start_idx:end_idx]
+                                        display_accumulated = clean_response(accumulated_text)
+                                        if display_accumulated:
+                                            display_text = Text()
+                                            display_text.append_text(prefix)
+                                            lines = display_accumulated.split('\n')
+                                            for i, text_line in enumerate(lines):
+                                                if i > 0: display_text.append("\n" + indent)
+                                                display_text.append(apply_gradient_to_text(text_line))
+                                            live.update(display_text)
+                                        else:
+                                            live.update(spinner)
+                                            
                                         self.console.print(render_thinking_block(thinking_part))
-                                        time.sleep(1.0)
+                                        time.sleep(1.5)
                                 accumulated_text += text
                         if accumulated_text:
                             renderables = []
@@ -369,7 +382,7 @@ class AgentBackendMixin:
                 if start_idx != -1 and end_idx != -1:
                     thinking_part = accumulated_text[start_idx:end_idx]
                     self.console.print(render_thinking_block(thinking_part))
-                    time.sleep(1.0)
+                    time.sleep(1.5)
             cleaned_text = clean_response(accumulated_text)
             if cleaned_text:
                 final_text = Text()
@@ -530,9 +543,22 @@ class AgentBackendMixin:
                                         in_thinking_block = False
                                         spinner.update_status("generating")
                                         if start_idx != -1 and end_idx != -1:
+                                            # Clear thinking from live display before printing final
                                             thinking_part = accumulated_text[start_idx:end_idx]
+                                            display_accumulated = clean_response(accumulated_text)
+                                            if display_accumulated:
+                                                display_text = Text()
+                                                display_text.append_text(prefix)
+                                                lines = display_accumulated.split('\n')
+                                                for i, text_line in enumerate(lines):
+                                                    if i > 0: display_text.append("\n" + indent)
+                                                    display_text.append(apply_gradient_to_text(text_line))
+                                                live.update(display_text)
+                                            else:
+                                                live.update(spinner)
+                                            
                                             self.console.print(render_thinking_block(thinking_part))
-                                            time.sleep(1.0)
+                                            time.sleep(1.5)
                                     text = delta.get("text", "")
                                     accumulated_text += text
                                     spinner.update_output_animation(max(1, len(accumulated_text) // 4))
@@ -604,7 +630,7 @@ class AgentBackendMixin:
                 if start_idx != -1 and end_idx != -1:
                     thinking_part = accumulated_text[start_idx:end_idx]
                     self.console.print(render_thinking_block(thinking_part))
-                    time.sleep(1.0)
+                    time.sleep(1.5)
             cleaned_text = clean_response(accumulated_text)
             if cleaned_text:
                 final_text = Text()
@@ -681,7 +707,6 @@ class AgentBackendMixin:
 
     def _display_lm_studio_tool_call(self, tool_name: str, tool_input: dict) -> None:
         """Display LM Studio tool calls."""
-        console.print()
         panel = render_tool_call(tool_name, tool_input)
         self.console.print(panel)
 
@@ -692,6 +717,5 @@ class AgentBackendMixin:
             stripped_line = raw_line.strip()
             if not stripped_line: continue
             if any(k in stripped_line for k in ['Tool:', 'tool:', 'Reading', 'Writing', 'Running']):
-                console.print()
                 panel = render_tool_call("Claude Tool", stripped_line)
                 self.console.print(panel)

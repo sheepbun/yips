@@ -22,6 +22,7 @@ from cli.ui_rendering import (
     render_top_border,
     render_bottom_border,
     render_tool_call,
+    render_tool_batch,
 )
 from cli.color_utils import (
     console,
@@ -63,49 +64,65 @@ def process_response_and_tools(agent: YipsAgent, response: str, depth: int = 0) 
     # 3. Execute tool requests
     total_requests = len(tool_requests)
     
-    # Show a summary line for the batch
+    # Batch tracking for UI
+    tool_history: list[dict] = []
+    summary_text = ""
     if depth == 0:
-        console.print()
-        console.print(blue_gradient_text(f"⚡ Executing {total_requests} tool call{'s' if total_requests != 1 else ''}..."))
+        summary_text = f"⚡ Executing {total_requests} tool call{'s' if total_requests != 1 else ''}..."
+    else:
+        summary_text = f"↻ Executing {total_requests} additional tool call{'s' if total_requests != 1 else ''}..."
 
     has_reprompt = False
     reprompt_msg = ""
     
-    for i, request in enumerate(tool_requests, 1):
-        # Handle pseudo-tool THOUGHT (updates agent state)
-        if request["type"] == "thought":
-            agent.session_state["thought_signature"] = request["signature"]
-            continue
+    with Live(render_tool_batch(tool_history, summary_text, compact=True), console=console, refresh_per_second=10, transient=False) as live:
+        for i, request in enumerate(tool_requests, 1):
+            # ... (lines omitted for brevity but logic remains same)
+            # Handle pseudo-tool THOUGHT (updates agent state)
+            if request["type"] == "thought":
+                agent.session_state["thought_signature"] = request["signature"]
+                continue
 
-        # Get tool name and params
-        tool_name = "unknown"
-        params: Any = ""
-        if request["type"] == "action":
-            tool_name = request["tool"]
-            params = request["params"]
-        elif request["type"] == "identity":
-            tool_name = "update_identity"
-            params = request["reflection"]
-        elif request["type"] == "skill":
-            tool_name = f"skill:{request['skill']}"
-            params = request["args"]
+            # Get tool name and params
+            tool_name = "unknown"
+            params: Any = ""
+            if request["type"] == "action":
+                tool_name = request["tool"]
+                params = request["params"]
+            elif request["type"] == "identity":
+                tool_name = "update_identity"
+                params = request["reflection"]
+            elif request["type"] == "skill":
+                tool_name = request["skill"]
+                params = request["args"]
 
-        # Display tool with Live for running state
-        prefix = f"({i}/{total_requests})" if total_requests > 1 else "▶"
-        if depth > 0:
-            prefix = f"↻ {prefix}"
+            # Display tool with prefix
+            prefix = f"({i}/{total_requests})" if total_requests > 1 else "▶"
+            display_name = f"{prefix} {tool_name}"
             
-        display_name = f"{prefix} {tool_name}"
-        
-        # Add a tiny delay before starting next tool for visual separation
-        if i > 1:
-            time.sleep(0.3)
+            # Add to history for batch rendering
+            current_tool_info = {
+                "name": display_name,
+                "params": params,
+                "is_running": True,
+                "result": None
+            }
+            tool_history.append(current_tool_info)
+            live.update(render_tool_batch(tool_history, summary_text, compact=True))
+            
+            # Add a tiny delay before starting next tool for visual separation
+            if i > 1:
+                time.sleep(0.3)
 
-        console.print()
-        with Live(render_tool_call(display_name, params, is_running=True), console=console, refresh_per_second=10, transient=True) as live:
             # Execute the tool
             result = execute_tool(request, agent)
             
+            # Update tool info with result
+            current_tool_info["is_running"] = False
+            current_tool_info["result"] = result
+            live.update(render_tool_batch(tool_history, summary_text, compact=True))
+            
+            # ... (rest of the loop)
             # Update error tracking
             if isinstance(result, str) and ("[Error" in result or "failed" in result.lower()):
                 agent.session_state["error_count"] = agent.session_state.get("error_count", 0) + 1
@@ -128,35 +145,29 @@ def process_response_and_tools(agent: YipsAgent, response: str, depth: int = 0) 
             except Exception:
                 pass
             
-            # Update with final result
-            final_panel = render_tool_call(display_name, params, result=result)
-        
-        # Print the final persistent panel
-        if agent.is_gui:
-            agent.emit_gui_event("tool_result", final_panel)
-        else:
-            console.print(final_panel)
-        
-        # Handle special command results
-        if result == "::YIPS_EXIT::":
-            sys.exit(0)
-            
-        # Store structured tool call in history
-        import json
-        metadata = {
-            "tool": tool_name,
-            "params": params,
-            "result": str(result)
-        }
-        agent.conversation_history.append({
-            "role": "system",
-            "content": json.dumps(metadata)
-        })
+            # Handle special command results
+            if result == "::YIPS_EXIT::":
+                sys.exit(0)
+                
+            # Store structured tool call in history
+            import json
+            metadata = {
+                "tool": tool_name,
+                "params": params,
+                "result": str(result)
+            }
+            agent.conversation_history.append({
+                "role": "system",
+                "content": json.dumps(metadata)
+            })
 
-        # Check for REPROMPT (special case)
-        if isinstance(result, str) and result.startswith("::YIPS_REPROMPT::"):
-            has_reprompt = True
-            reprompt_msg = result[17:]
+            # Check for REPROMPT (special case)
+            if isinstance(result, str) and result.startswith("::YIPS_REPROMPT::"):
+                has_reprompt = True
+                reprompt_msg = result[17:]
+
+        # Final update to show all tools in the batch once completed
+        live.update(render_tool_batch(tool_history, summary_text, compact=False))
 
     # Standardized ReAct loop: Always trigger next turn if tools were called
     if not has_reprompt:
@@ -278,7 +289,10 @@ def main() -> None:
 
         # Process response and any tools (recursively)
         process_response_and_tools(agent, response)
-        
+
+        # Add a blank line to separate this turn from the next prompt
+        console.print()
+
         # Update session memory file
         agent.update_session_file()
         

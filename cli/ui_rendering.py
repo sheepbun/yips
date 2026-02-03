@@ -22,6 +22,7 @@ from cli.color_utils import (
     GRADIENT_PINK,
     GRADIENT_YELLOW,
     GRADIENT_BLUE,
+    GRADIENT_BLUE_DARK,
     TOOL_COLOR,
     blue_gradient_text,
 )
@@ -263,7 +264,101 @@ def render_bottom_border(terminal_width: int, session_name: str | None = None) -
         bottom_text.append(char, style=f"rgb({r},{g},{b})")
 
     console.print(bottom_text)
-    console.print()
+
+
+def _add_tool_node_to_tree(tree: Tree, tool_name: str, parameters: Any, result: str | None = None, is_running: bool = False) -> None:
+    """Helper to add a tool node to an existing tree in a concise, project-consistent style."""
+    # Strip prefix like (1/4) or ↻ to find the actual tool name for icon selection
+    clean_name = re.sub(r"^[↻\s\d\(\)/▶]+", "", tool_name).strip()
+    
+    icon = "⚙️"
+    if "read" in clean_name.lower(): icon = "📖"
+    elif "write" in clean_name.lower(): icon = "📝"
+    elif "command" in clean_name.lower(): icon = "💻"
+    elif "skill" in clean_name.lower() or (clean_name.isupper() and len(clean_name) > 1): icon = "⚡"
+    elif "identity" in clean_name.lower(): icon = "👤"
+    elif "git" in clean_name.lower(): icon = "🐙"
+    elif "ls" in clean_name.lower() or "dir" in clean_name.lower(): icon = "📁"
+    elif "grep" in clean_name.lower() or "search" in clean_name.lower(): icon = "🔍"
+    
+    # Build a concise header: Icon Name: Input
+    header = Text.assemble((f"{icon} ", ""), (tool_name, f"rgb({GRADIENT_BLUE_DARK[0]},{GRADIENT_BLUE_DARK[1]},{GRADIENT_BLUE_DARK[2]})"))
+    
+    # Process parameters into a short string - hide redundant keys
+    param_str = ""
+    if isinstance(parameters, dict):
+        if parameters:
+            # If there's only one parameter, or specific keys like query/args/command, just show the value
+            if len(parameters) == 1:
+                param_str = str(next(iter(parameters.values()))).strip()
+            else:
+                items = []
+                for k, v in parameters.items():
+                    if k.lower() in ('query', 'args', 'command', 'params'):
+                        items.append(str(v).strip())
+                    else:
+                        v_str = str(v).strip()
+                        if len(v_str) > 30: v_str = v_str[:27] + "..."
+                        items.append(f"{k}={v_str}")
+                param_str = ", ".join(items)
+    elif parameters:
+        param_str = str(parameters).strip()
+        # Remove common internal tags from string inputs too
+        param_str = re.sub(r"^(query|args|command|params)=\s*", "", param_str, flags=re.IGNORECASE)
+        
+    if param_str:
+        if len(param_str) > 60: param_str = param_str[:57] + "..."
+        header.append(f": {param_str}", style="dim")
+        
+    node = tree.add(header)
+
+    # Status/Result section
+    if is_running:
+        t = (math.sin(time.time() * 10.0) + 1) / 2
+        r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, t)
+        node.add(Text("● Executing...", style=f"rgb({r},{g},{b})"))
+    elif result is not None:
+        if result == "":
+            node.add(Text("✓ Completed", style="dim"))
+        else:
+            # Truncate result for preview
+            res_preview = result.strip()
+            
+            # Aggressive prefix cleaning
+            res_preview = re.sub(r"^\[(?:Command output|File contents|File written|Skill output|stderr|Grep matches|Git output|Sed output|Directory listing).*?\]:?\s*", "", res_preview, flags=re.IGNORECASE)
+            
+            # Tool-specific relevance logic
+            tool_lower = clean_name.lower()
+            if "search" in tool_lower:
+                title_match = re.search(r"Title: (.*?)(?:\n|$)", res_preview)
+                if title_match:
+                    res_preview = title_match.group(1).strip()
+            elif "read" in tool_lower:
+                # Instead of showing contents, show line count or size
+                lines = res_preview.splitlines()
+                if len(lines) > 1:
+                    res_preview = f"Read {len(lines)} lines ({len(result)} bytes)"
+                else:
+                    res_preview = f"Read {len(result)} bytes"
+            elif "ls" in tool_lower or "dir" in tool_lower:
+                items = res_preview.splitlines()
+                res_preview = f"Found {len(items)} items"
+            elif "write" in tool_lower:
+                # Keep it simple: "Success" or the brief path
+                res_preview = "File saved"
+            
+            # General cleaning
+            cleaned = re.sub(r"^\[.*?\]\s*", "", res_preview)
+            if cleaned.strip(): res_preview = cleaned
+            
+            res_preview = res_preview.replace("\n", " ").strip()
+            if len(res_preview) > 100:
+                res_preview = res_preview[:97] + "..."
+            
+            if not res_preview:
+                res_preview = "Success"
+                
+            node.add(Text(f"✓ {res_preview}", style="dim"))
 
 
 def render_tool_call(tool_name: str, parameters: dict[str, Any] | str, result: str | None = None, is_running: bool = False) -> Any:
@@ -280,62 +375,28 @@ def render_tool_call(tool_name: str, parameters: dict[str, Any] | str, result: s
             "is_running": is_running
         }
 
-    # Create the root node with a nice icon
-    icon = "⚙️"
-    if "read" in tool_name.lower(): icon = "📖"
-    elif "write" in tool_name.lower(): icon = "📝"
-    elif "command" in tool_name.lower(): icon = "💻"
-    elif "skill" in tool_name.lower(): icon = "⚡"
-    elif "identity" in tool_name.lower(): icon = "👤"
+    tree = Tree(blue_gradient_text("Tool Execution"))
+    _add_tool_node_to_tree(tree, tool_name, parameters, result, is_running)
+    return Panel(tree, border_style=TOOL_COLOR, expand=False, padding=(0, 1))
+
+
+def render_tool_batch(tools: list[dict], title: str | None = None, compact: bool = False) -> Any:
+    """Render a batch of tools in a single panel. If compact is True, only shows the most recent tool."""
+    import os
+    if os.environ.get("YIPS_GUI_MODE") == "1":
+        return {"type": "batch", "title": title, "tools": tools, "compact": compact}
+
+    root_text = blue_gradient_text(title) if title else blue_gradient_text("Batch Execution")
+    tree = Tree(root_text)
     
-    tree = Tree(blue_gradient_text(f"{icon} {tool_name}"))
-
-    # Parameters section
-    if isinstance(parameters, dict):
-        if parameters:
-            param_node = tree.add(Text("Parameters", style="dim"))
-            for key, value in parameters.items():
-                value_str = str(value)
-                if len(value_str) > 80:
-                    value_str = value_str[:77] + "..."
-                param_node.add(Text.assemble((f"{key}: ", "dim"), (value_str, TOOL_COLOR)))
-    elif parameters:
-        val = str(parameters).strip()
-        if val:
-            if len(val) > 80:
-                val = val[:77] + "..."
-            tree.add(Text.assemble(("Input: ", "dim"), (val, TOOL_COLOR)))
-
-    # Status/Result section
-    if is_running:
-        # Use a simple pulsing dot or text for running state
-        t = (math.sin(time.time() * 10.0) + 1) / 2
-        r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, t)
-        tree.add(Text("● Executing...", style=f"rgb({r},{g},{b})"))
-    elif result is not None:
-        if result == "":
-            tree.add(Text("✓ Completed", style="dim"))
-        else:
-            res_tree = tree.add(blue_gradient_text("✓ Result"))
-            # Truncate result for preview
-            res_preview = result.strip()
-            
-            # Clean up result preview (remove [Command output]: etc)
-            # Handle various common prefixes
-            res_preview = re.sub(r"^[(Command output|File contents|File written|Skill output|stderr).*?]:\s*", "", res_preview, flags=re.IGNORECASE)
-            res_preview = re.sub(r"^[(.*?)]\s*", "", res_preview) # Catch-all for other [Brackets]
-            
-            # Strip leading/trailing whitespace again after regex
-            res_preview = res_preview.strip()
-            
-            if len(res_preview) > 500:
-                res_preview = res_preview[:497] + "..."
-            
-            if not res_preview:
-                res_preview = "Success (no output)"
-                
-            res_tree.add(Text(res_preview, style="dim"))
-
+    display_tools = tools
+    if compact and tools:
+        # Only show the most recent tool
+        display_tools = [tools[-1]]
+        
+    for t in display_tools:
+        _add_tool_node_to_tree(tree, t['name'], t['params'], t.get('result'), t.get('is_running', False))
+    
     return Panel(tree, border_style=TOOL_COLOR, expand=False, padding=(0, 1))
 
 
@@ -370,66 +431,69 @@ def render_thinking_block(thinking_text: str, is_streaming: bool = False) -> Pan
         r"^i should (probably)?\b",
     ]
 
-    # Split into sentences to identify major steps
-    raw_sentences = re.split(r'(?<=[.!?])\s+', text)
+    # Split into sentences or major lines to identify steps
+    # We split on sentence endings followed by space, OR newlines
+    raw_parts = re.split(r'(?:(?<=[.!?])\s+)|(?:\n+)', text)
     summarized_points = []
+    
+    # Check if the very last part of the raw text is finished
+    last_char = text[-1] if text else ""
+    is_text_finished = last_char in ('.', '!', '?', '\n')
 
-    for sentence in raw_sentences:
-        sentence = sentence.strip()
-        if not sentence: continue
+    for i, part in enumerate(raw_parts):
+        part = part.strip()
+        if not part: continue
         
-        # Clean markers
-        sentence = re.sub(r'^[-*•\d\.\s]+', '', sentence).strip()
+        # If streaming, don't show the very last part if it's not finished yet
+        is_last = (i == len(raw_parts) - 1)
+        if is_streaming and is_last and not is_text_finished:
+            continue
+
+        # Clean markers (bullets, numbers, dots)
+        part = re.sub(r'^[-*•\d\.\s]+', '', part).strip()
         
-        # Strip monologue
+        # Strip common monologue/thought noise
         for pattern in noise_prefixes:
-            sentence = re.sub(pattern, '', sentence, flags=re.IGNORECASE).strip()
+            part = re.sub(pattern, '', part, flags=re.IGNORECASE).strip()
             
-        if sentence:
-            sentence = sentence[0].upper() + sentence[1:]
-            if sentence not in summarized_points:
-                summarized_points.append(sentence)
+        if part:
+            # Capitalize and strip trailing colons or unfinished punctuation
+            part = part[0].upper() + part[1:]
+            part = part.rstrip(':').strip()
+            
+            # Avoid showing very short fragments that might be artifacts
+            if len(part) < 3:
+                continue
+
+            if part not in summarized_points:
+                summarized_points.append(part)
 
     # UI Styles
     blue_style = f"rgb({GRADIENT_BLUE[0]},{GRADIENT_BLUE[1]},{GRADIENT_BLUE[2]})"
     header = blue_gradient_text("🧠 Thinking Process")
+    
+    # Consistent display: Show FIRST 5 points in both cases
+    MAX_DISPLAY = 5
+    display_points = summarized_points[:MAX_DISPLAY]
+    
+    if not display_points:
+        # Fallback if no finished sentences yet
+        if is_streaming:
+            return Panel(Text("• Thinking...", style="dim italic"), border_style="dim", expand=False, padding=(0, 1))
+        else:
+            return Panel(Text("• Task analyzed", style="dim italic"), border_style="dim", expand=False, padding=(0, 1))
 
-    if is_streaming:
-        # List all identified points
-        tree = Tree(header, guide_style=blue_style)
+    tree = Tree(header, guide_style=blue_style)
+    for point in display_points:
+        # Truncate points to keep them punchy
+        if len(point) > 80:
+            point = point[:77] + "..."
+            
+        point_text = Text(f"• {point}", style=blue_style)
+        point_text.stylize("dim") # Keep it subtle
+        tree.add(point_text)
         
-        # Limit to last 5 points to keep it from taking over the screen
-        MAX_DISPLAY = 5
-        start_idx = max(0, len(summarized_points) - MAX_DISPLAY)
-        
-        for i, point in enumerate(summarized_points[start_idx:]):
-            actual_idx = start_idx + i
-            # The very last point is considered active/streaming
-            is_active = (actual_idx == len(summarized_points) - 1) and not text.endswith(('.', '!', '?', '\n'))
-            
-            # Truncate points to keep them punchy
-            if len(point) > 80:
-                point = point[:77] + "..."
-                
-            point_text = Text(f"• {point}", style=blue_style)
-            if not is_active:
-                point_text.stylize("dim")
-            
-            tree.add(point_text)
-            
-        return Panel(tree, border_style=blue_style, expand=False, padding=(0, 1))
-    else:
-        # Final summary: show top 3 points for clear retrospective
-        tree = Tree(header, guide_style=blue_style)
-        MAX_FINAL_POINTS = 3
-        for point in summarized_points[:MAX_FINAL_POINTS]:
-            if len(point) > 80:
-                point = point[:77] + "..."
-            point_text = Text(f"• {point}", style=blue_style)
-            point_text.stylize("dim")
-            tree.add(point_text)
-            
-        return Panel(tree, border_style=blue_style, expand=False, padding=(0, 1))
+    return Panel(tree, border_style=blue_style, expand=False, padding=(0, 1))
 
 
 

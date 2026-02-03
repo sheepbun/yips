@@ -470,14 +470,17 @@ class AgentUIMixin:
         if not hasattr(self, 'conversation_history'):
             return
 
-        for i, message in enumerate(self.conversation_history):
+        # Index to keep track of processed messages
+        idx = 0
+        while idx < len(self.conversation_history):
+            message = self.conversation_history[idx]
             role = message.get("role")
             content = message.get("content", "")
 
             if role == "user":
-                if content == INTERNAL_REPROMPT:
-                    continue
-                self.console.print(f">>> {content}", style=PROMPT_COLOR)
+                if content != INTERNAL_REPROMPT:
+                    self.console.print(f">>> {content}", style=PROMPT_COLOR)
+                idx += 1
             elif role == "assistant":
                 if content:
                     thinking_match = re.search(r"<think>(.*?)</think>", content, re.DOTALL)
@@ -489,22 +492,48 @@ class AgentUIMixin:
                     cleaned_content = clean_response(content)
                     if cleaned_content:
                         print_yips(cleaned_content)
+                idx += 1
             elif role == "system":
-                if content:
+                # Look ahead to group consecutive tool calls
+                tool_batch = []
+                while idx < len(self.conversation_history):
+                    msg = self.conversation_history[idx]
+                    if msg.get("role") != "system":
+                        break
+                    
+                    msg_content = msg.get("content", "")
                     try:
-                        if content.startswith('{') and content.endswith('}'):
-                            data = json.loads(content)
+                        if msg_content.startswith('{') and msg_content.endswith('}'):
+                            data = json.loads(msg_content)
                             if "tool" in data and "result" in data:
-                                tool_name = data.get("tool", "unknown")
-                                params = data.get("params", "")
-                                result = data.get("result", "")
-                                self.console.print(render_tool_call(tool_name, params, result=result))
+                                tool_batch.append({
+                                    "name": data.get("tool", "unknown"),
+                                    "params": data.get("params", ""),
+                                    "result": data.get("result", "")
+                                })
+                                idx += 1
                                 continue
                     except:
                         pass
-                    self.console.print(content, style=TOOL_COLOR)
+                    
+                    # If not a tool call, process normally and break batch
+                    if not tool_batch:
+                        if msg_content:
+                            self.console.print(msg_content, style=TOOL_COLOR)
+                        idx += 1
+                    break
+                
+                if tool_batch:
+                    from cli.ui_rendering import render_tool_batch
+                    summary = f"⚡ Executed {len(tool_batch)} tool call{'s' if len(tool_batch) != 1 else ''}"
+                    self.console.print(render_tool_batch(tool_batch, summary))
 
-            if (i + 1 < len(self.conversation_history) and self.conversation_history[i+1]["role"] == "user") or (i + 1 == len(self.conversation_history)):
+            # Turn spacing
+            if idx < len(self.conversation_history):
+                next_msg = self.conversation_history[idx]
+                if next_msg.get("role") == "user":
+                    self.console.print()
+            elif idx == len(self.conversation_history):
                 self.console.print()
 
     def refresh_title_box_only(self) -> None:

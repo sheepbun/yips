@@ -4,3 +4,4 @@
 - 2026-02-03: Resolved 400 Bad Request errors by improving LM Studio error handling and switching default model to Qwen-3 for better stability on 10GB VRAM hardware.
 - 2026-02-03: Massive backend overhaul: Integrated llama.cpp with CUDA support as the primary backend. Implemented summarized thinking blocks in a bulleted UI box. Added /backend command for hot-switching between llama.cpp, LM Studio, and Claude CLI.
 - 2026-02-03: UI Polish: Implemented banana yellow to solid blue gradient for thinking blocks with manual border rendering for perfect alignment. Refined CLI spacing to eliminate redundant gaps between tool calls and ensure consistent padding before user prompts.
+- 2026-02-03: Style Update: Enhanced thinking block with a diagonal (top-left to bottom-right) gradient scan for a more dynamic and modern aesthetic.

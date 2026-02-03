@@ -550,7 +550,7 @@ def render_thinking_block(thinking_text: str, is_streaming: bool = False) -> Gro
     for i, char in enumerate(h_plain):
         char_w = cell_len(char)
         v_p = 1 / max(total_rows - 1, 1)
-        h_p = (2 + i) / max(width - 1, 1) # Approximation of col index
+        h_p = (2 + i) / max(width - 1, 1)
         progress = (v_p + h_p) / 2
         r, g, b = interpolate_color(GRADIENT_YELLOW, GRADIENT_BLUE, progress)
         header_row.append(char, style=f"rgb({r},{g},{b})")
@@ -559,8 +559,15 @@ def render_thinking_block(thinking_text: str, is_streaming: bool = False) -> Gro
     padding = max(0, width - 4 - h_len)
     header_row.append(" " * padding)
     
-    # Right border
-    r, g, b = interpolate_color(GRADIENT_YELLOW, GRADIENT_BLUE, (1/max(total_rows-1,1) + (width-1)/max(width-1,1))/2)
+    # Right border (with preceding space)
+    v_p = 1 / max(total_rows - 1, 1)
+    # Space before pipe
+    h_p_space = (width - 2) / max(width - 1, 1)
+    r, g, b = interpolate_color(GRADIENT_YELLOW, GRADIENT_BLUE, (v_p + h_p_space) / 2)
+    header_row.append(" ", style=f"rgb({r},{g},{b})")
+    # Pipe
+    h_p_pipe = (width - 1) / max(width - 1, 1)
+    r, g, b = interpolate_color(GRADIENT_YELLOW, GRADIENT_BLUE, (v_p + h_p_pipe) / 2)
     header_row.append("│", style=f"rgb({r},{g},{b})")
     renderables.append(header_row)
     
@@ -601,8 +608,15 @@ def render_thinking_block(thinking_text: str, is_streaming: bool = False) -> Gro
         padding = max(0, width - 4 - l_len)
         row.append(" " * padding)
         
-        # Right border
-        r, g, b = interpolate_color(GRADIENT_YELLOW, GRADIENT_BLUE, (row_idx/max(total_rows-1,1) + (width-1)/max(width-1,1))/2)
+        # Right border (with preceding space)
+        v_p = row_idx / max(total_rows - 1, 1)
+        # Space before pipe
+        h_p_space = (width - 2) / max(width - 1, 1)
+        r, g, b = interpolate_color(GRADIENT_YELLOW, GRADIENT_BLUE, (v_p + h_p_space) / 2)
+        row.append(" ", style=f"rgb({r},{g},{b})")
+        # Pipe
+        h_p_pipe = (width - 1) / max(width - 1, 1)
+        r, g, b = interpolate_color(GRADIENT_YELLOW, GRADIENT_BLUE, (v_p + h_p_pipe) / 2)
         row.append("│", style=f"rgb({r},{g},{b})")
         renderables.append(row)
         

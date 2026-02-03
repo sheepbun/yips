@@ -26,6 +26,7 @@ from cli.color_utils import (
     GRADIENT_BLUE,
     GRADIENT_BLUE_DARK,
     TOOL_COLOR,
+    PROMPT_COLOR,
     blue_gradient_text,
     yellow_blue_gradient_text,
     gradient_text,
@@ -150,6 +151,19 @@ class PulsingSpinner:
         return self.spinner
 
 
+class BootingSpinner(PulsingSpinner):
+    """A Spinner that pulses in the PROMPT_COLOR (#FFCCFF)."""
+    def __rich__(self) -> Spinner:
+        # Simple pulse of opacity or just solid color
+        # For now, solid color to match "the same #ffccff pink"
+        color = PROMPT_COLOR
+        
+        full_text = Text(f"{self.message}", style=color)
+        self.spinner.text = full_text
+        self.spinner.style = color
+        return self.spinner
+
+
 def generate_yips_logo() -> list[str]:
     """Generate YIPS ASCII art (6 lines)."""
     return [
@@ -172,6 +186,11 @@ def safe_center(text: str, width: int) -> str:
 def show_loading(message: str = "Waiting for response...", token_count: int = 0) -> Live:
     """Create and return a Rich Live context with a pulsing pink->yellow loading spinner."""
     return Live(PulsingSpinner(message, token_count=token_count), console=console, transient=True, refresh_per_second=10)
+
+
+def show_booting(message: str = "Initializing...") -> Live:
+    """Create and return a Rich Live context with a booting spinner (#FFCCFF)."""
+    return Live(BootingSpinner(message), console=console, transient=True, refresh_per_second=10)
 
 
 def render_top_border(terminal_width: int) -> None:

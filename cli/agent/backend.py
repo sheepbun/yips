@@ -212,7 +212,7 @@ class AgentBackendMixin:
         """Call llama-server API using OpenAI-compatible endpoint."""
         system_prompt = self.load_context()
 
-        messages = [{"role": "system", "content": system_prompt}]
+        raw_messages = [{"role": "system", "content": system_prompt}]
         for msg in self.conversation_history:
             if msg["role"] == "system":
                 content = msg["content"]
@@ -223,12 +223,25 @@ class AgentBackendMixin:
                             content = data["result"]
                 except:
                     pass
-                messages.append({"role": "user", "content": f"[Observation]: {content}"})
+                raw_messages.append({"role": "user", "content": f"[Observation]: {content}"})
             else:
-                messages.append({"role": msg["role"], "content": msg["content"]})
+                raw_messages.append({"role": msg["role"], "content": msg["content"]})
         
-        if not messages or messages[-1]["content"] != message:
-            messages.append({"role": "user", "content": message})
+        if not raw_messages or raw_messages[-1]["content"] != message:
+            raw_messages.append({"role": "user", "content": message})
+
+        # Ensure strict alternation for llama.cpp (required by Gemma-3 and others)
+        messages = []
+        for msg in raw_messages:
+            if not messages:
+                messages.append(msg)
+                continue
+            
+            if messages[-1]["role"] == msg["role"]:
+                # Merge consecutive messages of same role
+                messages[-1]["content"] += "\n\n" + msg["content"]
+            else:
+                messages.append(msg)
 
         if self.streaming_enabled:
             try:

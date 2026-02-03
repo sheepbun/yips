@@ -53,25 +53,33 @@ def start_llamacpp(model_path: str | None = None) -> bool:
         return False
 
     # Start llama-server
-    # -ngl 99: offload all layers to GPU
+    # -ngl 40: offload some layers to GPU (safer for 10GB cards with 12B models)
     # -c 4096: context size
     # --port 8080
     cmd = [
         LLAMA_SERVER_PATH,
         "-m", model_path,
-        "-ngl", "99",
-        "-c", "8192",
+        "-ngl", "40",
+        "-c", "4096",
         "--port", "8080",
         "--embedding", # Enable embeddings for tools if needed
         "--log-disable"
     ]
+
+    # Ensure LD_LIBRARY_PATH includes the bin directory for shared libs
+    env = os.environ.copy()
+    bin_dir = str(Path(LLAMA_SERVER_PATH).parent)
+    current_ld = env.get("LD_LIBRARY_PATH", "")
+    if bin_dir not in current_ld:
+        env["LD_LIBRARY_PATH"] = f"{bin_dir}:{current_ld}" if current_ld else bin_dir
 
     global _server_process
     _server_process = subprocess.Popen(
         cmd,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        start_new_session=True
+        start_new_session=True,
+        env=env
     )
 
     # Wait for server to be ready

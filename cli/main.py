@@ -23,6 +23,7 @@ from cli.ui_rendering import (
     render_bottom_border,
     render_tool_call,
     render_tool_batch,
+    show_booting,
 )
 from cli.color_utils import (
     console,
@@ -266,7 +267,8 @@ def main() -> None:
         agent.render_title_box()
 
     # Initialize backend after displaying UI
-    agent.initialize_backend()
+    with show_booting("Booting Yips..."):
+        agent.initialize_backend()
 
     if args.command:
         # Handle single command mode

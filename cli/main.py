@@ -201,6 +201,25 @@ def main() -> None:
 
     # Define key bindings
     bindings = KeyBindings()
+    suppress_until = [0.0]  # Use a list for closure modification
+
+    @bindings.add('enter', eager=True)
+    @bindings.add('c-m', eager=True)
+    @bindings.add('c-j', eager=True)
+    def _(event):
+        """Handle Enter key with a sticky suppression for empty input."""
+        buffer = event.current_buffer
+        if not buffer.text.strip():
+            now = time.time()
+            if now < suppress_until[0]:
+                # While holding down, keep extending the suppression significantly
+                suppress_until[0] = now + 1.0
+                return
+            
+            # First empty press: set a long suppression window
+            suppress_until[0] = now + 1.0
+        
+        buffer.validate_and_handle()
 
     @bindings.add('s-tab')
     def _(event):

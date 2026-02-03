@@ -410,6 +410,7 @@ class YipsAgent:
         try:
             # Display with Live for real-time updates
             prefix = get_yips_prefix()
+            indent = " " * len(prefix)
             
             # Calculate tokens
             est_tokens = self._estimate_tokens(system_prompt, messages)
@@ -498,9 +499,9 @@ class YipsAgent:
                                 if accumulated_text:
                                     lines = accumulated_text.split('\n')
                                     for i, text_line in enumerate(lines):
-                                        if i > 0: display_text.append("\n      ")
+                                        if i > 0: display_text.append("\n" + indent)
                                         display_text.append(apply_gradient_to_text(text_line))
-                                    display_text.append("\n      ")
+                                    display_text.append("\n" + indent)
                                 display_text.append(blue_gradient_text(f"🔧 Using tool: {tool_name}..."))
                                 live.update(display_text)
                             else:
@@ -522,14 +523,17 @@ class YipsAgent:
                                 estimated_output = max(1, len(accumulated_text) // 4)
                                 spinner.update_output_animation(estimated_output)
 
+                                # Clean the text for display (hides tags)
+                                display_accumulated = clean_response(accumulated_text)
+
                                 # Update display with full gradient (include prefix)
                                 display_text = Text()
                                 display_text.append_text(prefix)
 
-                                lines = accumulated_text.split('\n')
+                                lines = display_accumulated.split('\n')
                                 for i, text_line in enumerate(lines):
                                     if i > 0:
-                                        display_text.append("\n      ")
+                                        display_text.append("\n" + indent)
                                     display_text.append(apply_gradient_to_text(text_line))
 
                                 live.update(display_text)
@@ -549,12 +553,12 @@ class YipsAgent:
                                 if accumulated_text:
                                     lines = accumulated_text.split('\n')
                                     for i, text_line in enumerate(lines):
-                                        if i > 0: display_text.append("\n      ")
+                                        if i > 0: display_text.append("\n" + indent)
                                         display_text.append(apply_gradient_to_text(text_line))
-                                    display_text.append("\n      ")
+                                    display_text.append("\n" + indent)
 
                                 tool_name = tool_calls[-1].get("name", "tool")
-                                display_text.append("\n      ")
+                                display_text.append("\n" + indent)
                                 display_text.append(blue_gradient_text(f"🔧 Using tool: {tool_name}..."))
                                 live.update(display_text)
 
@@ -604,7 +608,7 @@ class YipsAgent:
                 lines = cleaned_text.strip().split('\n')
                 for i, line in enumerate(lines):
                     if i > 0:
-                        final_text.append("\n      ")
+                        final_text.append("\n" + indent)
                     final_text.append(gradient_text(line))
                 self.console.print(final_text)
 
@@ -658,6 +662,7 @@ class YipsAgent:
 
             # Display with Live for real-time updates
             prefix = get_yips_prefix()
+            indent = " " * len(prefix)
 
             # Claude CLI doesn't expose token counts, so show 0 (no fake data)
             spinner = PulsingSpinner("Thinking...", token_count=0, model_status="generating")
@@ -679,14 +684,17 @@ class YipsAgent:
 
                     accumulated_text += char
 
+                    # Clean the text for display (hides tags)
+                    display_accumulated = clean_response(accumulated_text)
+
                     # Update display with full gradient (include prefix)
                     display_text = Text()
                     display_text.append_text(prefix)
 
-                    lines = accumulated_text.split('\n')
+                    lines = display_accumulated.split('\n')
                     for i, text_line in enumerate(lines):
                         if i > 0:
-                            display_text.append("\n      ")
+                            display_text.append("\n" + indent)
                         display_text.append(apply_gradient_to_text(text_line))
 
                     live.update(display_text)
@@ -700,7 +708,7 @@ class YipsAgent:
                 lines = cleaned_text.strip().split('\n')
                 for i, line in enumerate(lines):
                     if i > 0:
-                        final_text.append("\n      ")
+                        final_text.append("\n" + indent)
                     final_text.append(gradient_text(line))
                 self.console.print(final_text)
 
@@ -847,7 +855,8 @@ class YipsAgent:
     def _display_lm_studio_tool_call(self, tool_name: str, tool_input: dict[str, Any]) -> None:
         """Display LM Studio tool calls in a formatted way using render_tool_call."""
         console.print()
-        render_tool_call(tool_name, tool_input)
+        panel = render_tool_call(tool_name, tool_input)
+        self.console.print(panel)
 
     def _display_claude_tool_calls(self, stderr_output: str) -> None:
         """Parse and display Claude Code tool calls from stderr."""
@@ -862,7 +871,8 @@ class YipsAgent:
             # Look for tool call indicators
             if 'Tool:' in stripped_line or 'tool:' in stripped_line or 'Reading' in stripped_line or 'Writing' in stripped_line or 'Running' in stripped_line:
                 console.print()
-                render_tool_call("Claude Tool", stripped_line)
+                panel = render_tool_call("Claude Tool", stripped_line)
+                self.console.print(panel)
 
     def rename_session(self, new_name: str) -> None:
         """Rename the current session and update title box."""
@@ -1490,6 +1500,7 @@ class YipsAgent:
     def stream_text(self, text: str) -> None:
         """Simulate streaming for a static piece of text."""
         prefix = get_yips_prefix()
+        indent = " " * len(prefix)
 
         accumulated = ""
         with Live("", console=self.console, refresh_per_second=20, transient=True) as live:
@@ -1502,7 +1513,7 @@ class YipsAgent:
                 lines = accumulated.split('\n')
                 for i, line in enumerate(lines):
                     if i > 0:
-                        display_text.append("\n      ")
+                        display_text.append("\n" + indent)
                     display_text.append(apply_gradient_to_text(line))
 
                 live.update(display_text)
@@ -1515,6 +1526,6 @@ class YipsAgent:
             if i == 0:
                 self.console.print(gradient_text(line))
             else:
-                self.console.print(gradient_text("      " + line))
+                self.console.print(gradient_text(indent + line))
 
 

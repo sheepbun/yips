@@ -44,58 +44,84 @@ def parse_tool_requests(response: str) -> list[ToolRequest]:
     # Mask triple backtick blocks
     masked_response = re.sub(r"```.*?```", lambda m: " " * len(m.group(0)), masked_response, flags=re.DOTALL)
     
-    # We NO LONGER mask single backticks because models often wrap their intended actions
-    # in single backticks for emphasis, and we want to allow those to execute.
-
     requests_list: list[ToolRequest] = []
 
-    # Pattern: {ACTION:tool:params}
+    # 1. Pattern: {ACTION:tool:params}
     action_pattern = r"\{ACTION:(\w+):([^}]*)\}"
     for match in re.finditer(action_pattern, masked_response):
-        # Extract parameters from the ORIGINAL response to preserve content
-        # But wait, using masked_response indices is safer
         start, end = match.span()
         original_match = response[start:end]
-        
-        # We need to re-parse from the original match to get groups correctly
-        # because the regex above might have matched simplified whitespace
         m = re.match(action_pattern, original_match)
         if m:
-            action_request: ActionToolRequest = {
+            requests_list.append({
                 "type": "action",
                 "tool": m.group(1),
                 "params": m.group(2)
-            }
-            requests_list.append(action_request)
+            })
 
-    # Pattern: {UPDATE_IDENTITY:reflection}
+    # 2. Pattern: Claude Code internal tool format
+    # Example: <|channel|>commentary to=repo_browser.run_command\n<|constrain|>json<|message|>{"command":"mkdir -p temp"}
+    claude_tool_pattern = r"<\|channel\|>.*?to=(\w+\.\w+)[\s\S]*?<\|message\|>(\{.*?\})"
+    for match in re.finditer(claude_tool_pattern, masked_response):
+        channel = match.group(1) # e.g. "repo_browser.run_command"
+        message_json = match.group(2) # e.g. '{"command":"mkdir -p temp"}'
+        
+        try:
+            import json
+            data = json.loads(message_json)
+            
+            # Map Claude tools to Yips tools
+            if "run_command" in channel or "execute" in channel:
+                tool = "run_command"
+                params = data.get("command", "")
+            elif "write" in channel:
+                tool = "write_file"
+                params = f"{data.get('path', '')}:{data.get('content', '')}"
+            elif "read" in channel:
+                tool = "read_file"
+                params = data.get("path", "")
+            elif "ls" in channel or "list" in channel:
+                tool = "ls"
+                params = data.get("path", ".")
+            else:
+                # Fallback: try to guess or use as a generic command
+                tool = "run_command"
+                params = str(data)
+
+            requests_list.append({
+                "type": "action",
+                "tool": tool,
+                "params": params
+            })
+        except Exception:
+            continue
+
+    # 3. Pattern: {UPDATE_IDENTITY:reflection}
     identity_pattern = r"\{UPDATE_IDENTITY:([^}]*)\}"
     for match in re.finditer(identity_pattern, masked_response):
         start, end = match.span()
         original_match = response[start:end]
         m = re.match(identity_pattern, original_match)
         if m:
-            identity_request: IdentityToolRequest = {
+            requests_list.append({
                 "type": "identity",
                 "reflection": m.group(1)
-            }
-            requests_list.append(identity_request)
+            })
 
-    # Pattern: {INVOKE_SKILL:skill:args} or {INVOKE_SKILL:skill}
+    # 4. Pattern: {INVOKE_SKILL:skill:args}
     skill_pattern = r"\{INVOKE_SKILL:(\w+)(?::([^}]*))?\}"
     for match in re.finditer(skill_pattern, masked_response):
         start, end = match.span()
         original_match = response[start:end]
         m = re.match(skill_pattern, original_match)
         if m:
-            skill_request: SkillToolRequest = {
+            requests_list.append({
                 "type": "skill",
                 "skill": m.group(1),
                 "args": m.group(2) if m.group(2) is not None else ""
-            }
-            requests_list.append(skill_request)
+            })
 
-    # Pattern: {THOUGHT:signature}
+    # 5. Pattern: {THOUGHT:signature}
     thought_pattern = r"\{THOUGHT:([^}]*)\}"
     for match in re.finditer(thought_pattern, masked_response):
         start, end = match.span()
@@ -349,6 +375,14 @@ def clean_response(response: str) -> str:
     skill_pattern = r"\{INVOKE_SKILL:\w+(?::[^}]*)?\}"
     thought_pattern = r"\{THOUGHT:[^}]*\}"
     
+    # Claude-specific internal tags
+    claude_channel_pattern = r"<\|channel\|>[\s\S]*?(?=<\|channel\|>|$)"
+    claude_constrain_pattern = r"<\|constrain\|>[\s\S]*?(?=<\|message\|>|$)"
+    claude_message_pattern = r"<\|message\|>[\s\S]*?(?=<\|channel\|>|$)"
+    
+    # General tag cleanup for any remaining <|...|> style tags
+    general_internal_pattern = r"<\|[\s\S]*?\|>"
+
     combined_pattern = f"({action_pattern})|({identity_pattern})|({skill_pattern})|({thought_pattern})"
     
     # We want to remove tags that are NOT inside backticks
@@ -356,13 +390,29 @@ def clean_response(response: str) -> str:
     # and only replace the tags if they were matched outside backticks.
     
     # Pattern to match code blocks or tags
-    pattern = r"(```.*?```|`.*?`|\{ACTION:\w+:[^}]*\}|\{UPDATE_IDENTITY:[^}]*\}|\{INVOKE_SKILL:\w+(?::[^}]*)?\}|\{THOUGHT:[^}]*\})"
+    pattern = r"(```.*?```|`.*?`|\{ACTION:\w+:[^}]*\}|\{UPDATE_IDENTITY:[^}]*\}|\{INVOKE_SKILL:\w+(?::[^}]*)?\}|\{THOUGHT:[^}]*\}|<\|channel\|>|<\|constrain\|>|<\|message\|>|<\|[\s\S]*?\|>)"
     
     def replace_fn(match):
         text = match.group(0)
         if text.startswith('`') or text.startswith('```'):
             return text  # Keep code blocks as is
+        
+        # If it's a Claude tool call or JSON-like internal message, try to be more aggressive
+        if text.startswith('<|'):
+            return ""
+            
         return ""  # Remove tags
         
     cleaned = re.sub(pattern, replace_fn, response, flags=re.DOTALL)
+    
+    # Final pass to clean up any artifacts like leftover JSON after a tag
+    # If the response looks like just a JSON blob after cleaning, it might be tool input
+    if cleaned.strip().startswith('{') and cleaned.strip().endswith('}'):
+        try:
+            import json
+            json.loads(cleaned.strip())
+            return "" # It's just JSON (likely tool input), hide it
+        except:
+            pass
+
     return cleaned.strip()

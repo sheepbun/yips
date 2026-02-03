@@ -141,10 +141,16 @@ def process_response_and_tools(agent: YipsAgent, response: str, depth: int = 0) 
         if result == "::YIPS_EXIT::":
             sys.exit(0)
             
-        # Store in history
+        # Store structured tool call in history
+        import json
+        metadata = {
+            "tool": tool_name,
+            "params": params,
+            "result": str(result)
+        }
         agent.conversation_history.append({
             "role": "system",
-            "content": str(result)
+            "content": json.dumps(metadata)
         })
 
         # Check for REPROMPT (special case)

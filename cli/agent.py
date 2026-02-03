@@ -24,6 +24,7 @@ from rich.live import Live
 from rich.panel import Panel
 from rich.text import Text
 from rich.tree import Tree
+from rich.console import Group
 
 from cli.color_utils import (
     console,
@@ -327,7 +328,16 @@ class YipsAgent:
         messages = []
         for msg in self.conversation_history:
             if msg["role"] == "system":
-                messages.append({"role": "user", "content": f"[Observation]: {msg['content']}"})
+                content = msg["content"]
+                # Unwrap structured JSON if present
+                try:
+                    if content.startswith('{') and content.endswith('}'):
+                        data = json.loads(content)
+                        if "result" in data:
+                            content = data["result"]
+                except:
+                    pass
+                messages.append({"role": "user", "content": f"[Observation]: {content}"})
             else:
                 messages.append({"role": msg["role"], "content": msg["content"]})
         
@@ -438,7 +448,16 @@ class YipsAgent:
         messages = [{"role": "system", "content": system_prompt}]
         for msg in self.conversation_history:
             if msg["role"] == "system":
-                messages.append({"role": "user", "content": f"[Observation]: {msg['content']}"})
+                content = msg["content"]
+                # Unwrap structured JSON if present
+                try:
+                    if content.startswith('{') and content.endswith('}'):
+                        data = json.loads(content)
+                        if "result" in data:
+                            content = data["result"]
+                except:
+                    pass
+                messages.append({"role": "user", "content": f"[Observation]: {content}"})
             else:
                 messages.append({"role": msg["role"], "content": msg["content"]})
         
@@ -566,14 +585,31 @@ class YipsAgent:
                                 accumulated_text += text                            
                         # Update display
                         if accumulated_text:
+                            renderables = []
+                            
+                            # If we're currently thinking, show the streaming thinking block
+                            if in_thinking_block:
+                                start_idx = accumulated_text.rfind("<think>")
+                                if start_idx != -1:
+                                    thinking_part = accumulated_text[start_idx:]
+                                    renderables.append(render_thinking_block(thinking_part, is_streaming=True))
+                            
                             display_accumulated = clean_response(accumulated_text)
-                            display_text = Text()
-                            display_text.append_text(prefix)
-                            lines = display_accumulated.split('\n')
-                            for i, text_line in enumerate(lines):
-                                if i > 0: display_text.append("\n" + indent)
-                                display_text.append(apply_gradient_to_text(text_line))
-                            live.update(display_text)
+                            if display_accumulated:
+                                display_text = Text()
+                                display_text.append_text(prefix)
+                                lines = display_accumulated.split('\n')
+                                for i, text_line in enumerate(lines):
+                                    if i > 0: display_text.append("\n" + indent)
+                                    display_text.append(apply_gradient_to_text(text_line))
+                                renderables.append(display_text)
+                            
+                            if not renderables:
+                                live.update(spinner)
+                            elif len(renderables) == 1:
+                                live.update(renderables[0])
+                            else:
+                                live.update(Group(*renderables))
                             
                         # Handle token usage if provided in stream
                         usage = data.get("usage")
@@ -587,6 +623,12 @@ class YipsAgent:
 
             if in_thinking_block:
                 accumulated_text += "\n</think>"
+                # Find the last thinking block and render it
+                start_idx = accumulated_text.rfind("<think>")
+                end_idx = accumulated_text.rfind("</think>") + 8
+                if start_idx != -1 and end_idx != -1:
+                    thinking_part = accumulated_text[start_idx:end_idx]
+                    self.console.print(render_thinking_block(thinking_part))
             
             cleaned_text = clean_response(accumulated_text)
             if cleaned_text:
@@ -610,13 +652,22 @@ class YipsAgent:
         # Build history string from conversation_history
         history_parts: list[str] = []
         for msg in self.conversation_history:
+            content = msg["content"]
             if msg["role"] == "user":
                 role = "User"
             elif msg["role"] == "assistant":
                 role = "Assistant"
             else:
                 role = "System Observation"
-            history_parts.append(f"{role}: {msg['content']}")
+                # Unwrap structured JSON if present
+                try:
+                    if content.startswith('{') and content.endswith('}'):
+                        data = json.loads(content)
+                        if "result" in data:
+                            content = data["result"]
+                except:
+                    pass
+            history_parts.append(f"{role}: {content}")
 
         # Add the current message if it's not the last one in history
         if not self.conversation_history or self.conversation_history[-1]["content"] != message:
@@ -835,20 +886,24 @@ class YipsAgent:
                                 estimated_output = max(1, len(accumulated_text) // 4)
                                 spinner.update_output_animation(estimated_output)
 
-                                # Clean the text for display (hides tags)
+                                # Update display
+                                renderables = []
                                 display_accumulated = clean_response(accumulated_text)
-
-                                # Update display with full gradient (include prefix)
-                                display_text = Text()
-                                display_text.append_text(prefix)
-
-                                lines = display_accumulated.split('\n')
-                                for i, text_line in enumerate(lines):
-                                    if i > 0:
-                                        display_text.append("\n" + indent)
-                                    display_text.append(apply_gradient_to_text(text_line))
-
-                                live.update(display_text)
+                                if display_accumulated:
+                                    display_text = Text()
+                                    display_text.append_text(prefix)
+                                    lines = display_accumulated.split('\n')
+                                    for i, text_line in enumerate(lines):
+                                        if i > 0: display_text.append("\n" + indent)
+                                        display_text.append(apply_gradient_to_text(text_line))
+                                    renderables.append(display_text)
+                                
+                                if not renderables:
+                                    live.update(spinner)
+                                elif len(renderables) == 1:
+                                    live.update(renderables[0])
+                                else:
+                                    live.update(Group(*renderables))
 
                             elif delta_type == "thinking_delta":
                                 # Accumulate thinking
@@ -862,17 +917,29 @@ class YipsAgent:
                                 accumulated_text += thinking
                                 
                                 if self.verbose_mode:
-                                    # Clean and update display for thinking content
+                                    # Update display
+                                    renderables = []
+                                    start_idx = accumulated_text.rfind("<think>")
+                                    if start_idx != -1:
+                                        thinking_part = accumulated_text[start_idx:]
+                                        renderables.append(render_thinking_block(thinking_part, is_streaming=True))
+                                    
                                     display_accumulated = clean_response(accumulated_text)
-                                    display_text = Text()
-                                    display_text.append_text(prefix)
+                                    if display_accumulated:
+                                        display_text = Text()
+                                        display_text.append_text(prefix)
+                                        lines = display_accumulated.split('\n')
+                                        for i, text_line in enumerate(lines):
+                                            if i > 0: display_text.append("\n" + indent)
+                                            display_text.append(apply_gradient_to_text(text_line))
+                                        renderables.append(display_text)
                                     
-                                    lines = display_accumulated.split('\n')
-                                    for i, text_line in enumerate(lines):
-                                        if i > 0: display_text.append("\n" + indent)
-                                        display_text.append(apply_gradient_to_text(text_line))
-                                    
-                                    live.update(display_text)
+                                    if not renderables:
+                                        live.update(spinner)
+                                    elif len(renderables) == 1:
+                                        live.update(renderables[0])
+                                    else:
+                                        live.update(Group(*renderables))
 
                             elif delta_type == "input_json_delta":
                                 # Accumulate JSON for tool call
@@ -933,6 +1000,12 @@ class YipsAgent:
                                 # Print final output after Live exits (so it persists)
             if in_thinking_block:
                 accumulated_text += "\n</think>"
+                # Find the last thinking block and render it
+                start_idx = accumulated_text.rfind("<think>")
+                end_idx = accumulated_text.rfind("</think>") + 8
+                if start_idx != -1 and end_idx != -1:
+                    thinking_part = accumulated_text[start_idx:end_idx]
+                    self.console.print(render_thinking_block(thinking_part))
                 in_thinking_block = False
                 
             cleaned_text = clean_response(accumulated_text)
@@ -1771,10 +1844,6 @@ class YipsAgent:
         """Re-render all messages from conversation_history to screen.
 
         Reconstructs the visible chat by replaying stored messages.
-        Follows the same formatting as original display:
-        - User messages: Printed with PROMPT_COLOR and >>> prefix
-        - Assistant messages: Printed with print_yips() gradient styling
-        - System messages: Printed with TOOL_COLOR
         """
         from cli.color_utils import print_yips, PROMPT_COLOR
         from cli.config import INTERNAL_REPROMPT
@@ -1790,19 +1859,38 @@ class YipsAgent:
                 # User messages need to be re-printed during replay
                 self.console.print(f">>> {content}", style=PROMPT_COLOR)
             elif role == "assistant":
-                # Assistant responses use print_yips() for gradient styling
                 if content:
+                    # Parse and render thinking blocks if present
+                    thinking_match = re.search(r"<think>(.*?)</think>", content, re.DOTALL)
+                    if thinking_match:
+                        thinking_content = thinking_match.group(1).strip()
+                        if thinking_content:
+                            self.console.print(render_thinking_block(thinking_content))
+                    
+                    # Clean and print the actual response
                     cleaned_content = clean_response(content)
                     if cleaned_content:
                         print_yips(cleaned_content)
             elif role == "system":
-                # Tool execution results use TOOL_COLOR (matches main.py line 115)
                 if content:
+                    # Check if it's a structured tool result
+                    try:
+                        if content.startswith('{') and content.endswith('}'):
+                            data = json.loads(content)
+                            if "tool" in data and "result" in data:
+                                # Reconstruct tool call panel
+                                tool_name = data.get("tool", "unknown")
+                                params = data.get("params", "")
+                                result = data.get("result", "")
+                                self.console.print(render_tool_call(tool_name, params, result=result))
+                                continue
+                    except:
+                        pass
+                        
+                    # Fallback to raw display
                     self.console.print(content, style=TOOL_COLOR)
 
-            # Add turn-separating blank line if:
-            # 1. The next message is a new user prompt (start of new turn)
-            # 2. OR this is the very last message (separating from active prompt)
+            # Add turn-separating blank line
             if (i + 1 < len(self.conversation_history) and self.conversation_history[i+1]["role"] == "user") or (i + 1 == len(self.conversation_history)):
                 self.console.print()
 

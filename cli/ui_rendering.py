@@ -339,66 +339,476 @@ def render_tool_call(tool_name: str, parameters: dict[str, Any] | str, result: s
     return Panel(tree, border_style=TOOL_COLOR, expand=False, padding=(0, 1))
 
 
-def render_thinking_block(thinking_text: str) -> Panel:
-    """Render a thinking block in a summarized bullet point box."""
+def render_thinking_block(thinking_text: str, is_streaming: bool = False) -> Panel:
+
+
+    """Render a thinking block. Aggressively summarized to show high-level intent."""
+
+
     # Clean up the thinking text
+
+
     text = thinking_text.strip()
+
+
     if text.startswith("<think>"):
+
+
         text = text[7:].strip()
+
+
     if text.endswith("</think>"):
+
+
         text = text[:-8].strip()
 
-    # Create a tree for the thinking summary
-    # Use a brain emoji or similar
-    tree = Tree(blue_gradient_text("🧠 Thinking Process"))
+
+
+
+
+    if not text:
+
+
+        return Panel(Text("• Initializing thoughts...", style="dim italic"), border_style="dim white", expand=False, padding=(0, 1))
+
+
+
+
+
+    # Heuristic for summarization:
+
+
+    # 1. Split into paragraphs
+
+
+    # 2. For each paragraph, extract the first sentence (the "topic" sentence)
+
+
+    # 3. Filter out noise/monologue
+
+
     
-    # Split into paragraphs/lines and try to find bullet points or meaningful chunks
-    lines = text.split('\n')
-    bullets = []
-    current_bullet = ""
+
+
+    paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
+
+
+    if not paragraphs:
+
+
+        paragraphs = [l.strip() for l in text.split('\n') if l.strip()]
+
+
+
+
+
+    summarized_points = []
+
+
     
-    for line in lines:
-        line = line.strip()
-        if not line:
-            if current_bullet:
-                bullets.append(current_bullet)
-                current_bullet = ""
-            continue
+
+
+    # Noise patterns to strip or skip
+
+
+    noise_prefixes = [
+
+
+        r"^i (will|need to|should|can|am going to|think|believe)\b",
+
+
+        r"^let's\b",
+
+
+        r"^first,\b",
+
+
+        r"^then,\b",
+
+
+        r"^next,\b",
+
+
+        r"^finally,\b",
+
+
+        r"^okay,\b",
+
+
+        r"^so,\b",
+
+
+        r"^actually,\b",
+
+
+    ]
+
+
+
+
+
+    for p in paragraphs:
+
+
+        # Take the first sentence (up to the first period/question/exclamation)
+
+
+        sentence = re.split(r'[.!?]\s', p)[0].strip()
+
+
+        if not sentence: continue
+
+
+        
+
+
+        # Clean up markers
+
+
+        sentence = re.sub(r'^[-*•\d\.\s]+', '', sentence).strip()
+
+
+        
+
+
+        # Strip noise prefixes to get to the core action
+
+
+        original_sentence = sentence
+
+
+        for pattern in noise_prefixes:
+
+
+            sentence = re.sub(pattern, '', sentence, flags=re.IGNORECASE).strip()
+
+
             
-        # Check if it's already a bullet point
-        if line.startswith(('-', '*', '•', '1.', '2.', '3.')):
-            if current_bullet:
-                bullets.append(current_bullet)
-            current_bullet = line.lstrip('-*•123456789. ').strip()
-        else:
-            if current_bullet:
-                current_bullet += " " + line
-            else:
-                current_bullet = line
+
+
+        if not sentence:
+
+
+            sentence = original_sentence
+
+
+            
+
+
+        # Capitalize first letter if it was stripped
+
+
+        if sentence:
+
+
+            sentence = sentence[0].upper() + sentence[1:]
+
+
+            
+
+
+        # Avoid duplicate summaries (often models repeat themselves in thought)
+
+
+        if sentence not in summarized_points:
+
+
+            summarized_points.append(sentence)
+
+
+
+
+
+        # Create a tree for the thinking summary
+
+
+
+
+
+        tree = Tree(blue_gradient_text("🧠 Thinking Process"))
+
+
+
+
+
+        
+
+
+
+
+
+        # Define blue style
+
+
+
+
+
+        blue_style = f"rgb({GRADIENT_BLUE[0]},{GRADIENT_BLUE[1]},{GRADIENT_BLUE[2]})"
+
+
+
+
+
+        
+
+
+
+
+
+        if is_streaming:
+
+
+
+
+
+            # Show only the last 4 points to keep it very tight and "summary-like"
+
+
+
+
+
+            MAX_STREAM_POINTS = 4
+
+
+
+
+
+            display_points = summarized_points[-MAX_STREAM_POINTS:] if len(summarized_points) > MAX_STREAM_POINTS else summarized_points
+
+
+
+
+
+            
+
+
+
+
+
+            if len(summarized_points) > MAX_STREAM_POINTS:
+
+
+
+
+
+                tree.add(Text("...", style=blue_style))
+
+
+
+
+
                 
-    if current_bullet:
-        bullets.append(current_bullet)
-        
-    # If no bullets found (all one big block), split by sentences or just show first few lines
-    if not bullets and text:
-        # Split by sentence or just take first 3 meaningful lines
-        meaningful_lines = [l.strip() for l in lines if l.strip()]
-        bullets = meaningful_lines[:5]
-        if len(meaningful_lines) > 5:
-            bullets.append("...")
 
-    # Limit the number of bullets to keep it a "summary"
-    MAX_BULLETS = 5
-    display_bullets = bullets[:MAX_BULLETS]
+
+
+
+
+            for i, point in enumerate(display_points):
+
+
+
+
+
+                if not point: continue
+
+
+
+
+
+                # Truncate aggressively
+
+
+
+
+
+                if len(point) > 80:
+
+
+
+
+
+                    point = point[:77] + "..."
+
+
+
+
+
+                
+
+
+
+
+
+                # The very last point is considered active
+
+
+
+
+
+                is_active = (i == len(display_points) - 1) and not text.endswith(('.', '!', '?', '\n'))
+
+
+
+
+
+                
+
+
+
+
+
+                # Apply blue gradient to the point text
+
+
+
+
+
+                point_text = blue_gradient_text(f"• {point}")
+
+
+
+
+
+                if not is_active:
+
+
+
+
+
+                    point_text.stylize("dim")
+
+
+
+
+
+                
+
+
+
+
+
+                tree.add(point_text)
+
+
+
+
+
+        else:
+
+
+
+
+
+            # Final summary: show top 3 points
+
+
+
+
+
+            MAX_FINAL_POINTS = 3
+
+
+
+
+
+            display_points = summarized_points[:MAX_FINAL_POINTS]
+
+
+
+
+
+            
+
+
+
+
+
+            for point in display_points:
+
+
+
+
+
+                if not point: continue
+
+
+
+
+
+                if len(point) > 100:
+
+
+
+
+
+                    point = point[:97] + "..."
+
+
+
+
+
+                
+
+
+
+
+
+                # Apply blue gradient to the point text
+
+
+
+
+
+                point_text = blue_gradient_text(f"• {point}")
+
+
+
+
+
+                point_text.stylize("dim")
+
+
+
+
+
+                tree.add(point_text)
+
+
+
+
+
+                
+
+
+
+
+
+            if len(summarized_points) > MAX_FINAL_POINTS:
+
+
+
+
+
+                tree.add(Text("  ...", style=blue_style))
+
+
+
+
+
     
-    for bullet in display_bullets:
-        if not bullet: continue
-        # Truncate long bullets
-        if len(bullet) > 120:
-            bullet = bullet[:117] + "..."
-        tree.add(Text(f"• {bullet}", style="dim"))
-        
-    if len(bullets) > MAX_BULLETS:
-        tree.add(Text("  ...", style="dim"))
 
-    return Panel(tree, border_style="dim white", expand=False, padding=(0, 1))
+
+
+
+
+        return Panel(tree, border_style=blue_style, expand=False, padding=(0, 1))
+
+
+
+
+
+    
+
+
+
+

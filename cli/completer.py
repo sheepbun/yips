@@ -126,24 +126,8 @@ class SlashCommandCompleter(Completer):
             # Pink (#FFCCFF) for skills
             return FormattedText([('#ffccff', text)])
         else:
-            # Blue gradient for tools
-            return self._create_blue_gradient_formatted_text(text)
-
-    def _create_blue_gradient_formatted_text(self, text: str) -> FormattedText:
-        """Create blue gradient text from dark blue to light blue."""
-        if not text:
-            return FormattedText([])
-
-        parts = []
-        length = len(text)
-
-        for i, char in enumerate(text):
-            progress = i / max(length - 1, 1)
-            r, g, b = interpolate_color(GRADIENT_BLUE_DARK, GRADIENT_BLUE, progress)
-            style = f'fg:#{r:02x}{g:02x}{b:02x}'
-            parts.append((style, char))
-
-        return FormattedText(parts)
+            # Solid Blue (#89CFF0) for tools
+            return FormattedText([('#89cff0', text)])
 
     def _create_gradient_formatted_text(self, text: str) -> FormattedText:
         """Create gradient-colored text from pink to yellow with character-level control."""

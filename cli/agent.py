@@ -565,7 +565,7 @@ class YipsAgent:
                                     in_thinking_block = True
                                     spinner.update_status("reasoning")
                                 accumulated_text += reasoning
-                        
+
                         if "content" in delta:
                             text = delta["content"]
                             if text: # Ensure it's not None
@@ -579,10 +579,12 @@ class YipsAgent:
                                     if start_idx != -1 and end_idx != -1:
                                         thinking_part = accumulated_text[start_idx:end_idx]
                                         self.console.print(render_thinking_block(thinking_part))
+                                        time.sleep(1.5) # Pause to let the user read the summary
                                         
                                     in_thinking_block = False
                                     spinner.update_status("generating")
-                                accumulated_text += text                            
+                                accumulated_text += text
+                            
                         # Update display
                         if accumulated_text:
                             renderables = []
@@ -629,6 +631,7 @@ class YipsAgent:
                 if start_idx != -1 and end_idx != -1:
                     thinking_part = accumulated_text[start_idx:end_idx]
                     self.console.print(render_thinking_block(thinking_part))
+                    time.sleep(1.5) # Pause to let the user read the summary
             
             cleaned_text = clean_response(accumulated_text)
             if cleaned_text:
@@ -875,6 +878,7 @@ class YipsAgent:
                                     if start_idx != -1 and end_idx != -1:
                                         thinking_part = accumulated_text[start_idx:end_idx]
                                         self.console.print(render_thinking_block(thinking_part))
+                                        time.sleep(1.5) # Pause to let the user read the summary
                                         
                                     in_thinking_block = False
                                     spinner.update_status("generating")
@@ -1006,6 +1010,7 @@ class YipsAgent:
                 if start_idx != -1 and end_idx != -1:
                     thinking_part = accumulated_text[start_idx:end_idx]
                     self.console.print(render_thinking_block(thinking_part))
+                    time.sleep(1.5) # Pause to let the user read the summary
                 in_thinking_block = False
                 
             cleaned_text = clean_response(accumulated_text)

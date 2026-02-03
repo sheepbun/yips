@@ -253,14 +253,43 @@ class YipsAgent:
         """Call LM Studio API using Anthropic-compatible endpoint."""
         system_prompt = self.load_context()
 
-        # Build messages (exclude system role - it's separate in Anthropic format)
+        # Build messages (Anthropic format: role must be 'user' or 'assistant')
         messages: list[Message] = []
         for msg in self.conversation_history:
-            if msg["role"] in ("user", "assistant"):
-                messages.append({"role": msg["role"], "content": msg["content"]})
+            role = msg["role"]
+            content = msg["content"]
+            
+            if role == "user":
+                messages.append({"role": "user", "content": content})
+            elif role == "assistant":
+                messages.append({"role": "assistant", "content": content})
+            elif role == "system":
+                # Map system observations to user role so the model sees them
+                messages.append({"role": "user", "content": f"[Observation]: {content}"})
 
         # Only append 'message' if it's not already the last message in history
         # (prevents duplication in run loop while supporting one-off prompts)
+        if not messages or (messages[-1]["role"] == "user" and messages[-1]["content"] != message) or messages[-1]["role"] != "user":
+             # If the last message was a system observation (mapped to user), 
+             # and the next message is the internal reprompt, we might have consecutive user messages.
+             # Anthropic API usually requires alternating roles, but some backends are flexible.
+             # However, 'process_response_and_tools' in main.py always sends a user reprompt.
+             pass
+
+        # Re-sync with what main.py does: it appends user_input to history before calling get_response.
+        # But call_lm_studio is sometimes called directly.
+        # Let's simplify: the 'messages' list should exactly reflect 'conversation_history'
+        # but with 'system' roles converted to 'user'.
+        
+        # Actually, let's just use a clean mapping loop.
+        messages = []
+        for msg in self.conversation_history:
+            if msg["role"] == "system":
+                messages.append({"role": "user", "content": f"[Observation]: {msg['content']}"})
+            else:
+                messages.append({"role": msg["role"], "content": msg["content"]})
+        
+        # Ensure the current 'message' is at the end if not already there
         if not messages or messages[-1]["content"] != message:
             messages.append({"role": "user", "content": message})
 
@@ -352,7 +381,12 @@ class YipsAgent:
         # Build history string from conversation_history
         history_parts: list[str] = []
         for msg in self.conversation_history:
-            role = "User" if msg["role"] == "user" else "Assistant"
+            if msg["role"] == "user":
+                role = "User"
+            elif msg["role"] == "assistant":
+                role = "Assistant"
+            else:
+                role = "System Observation"
             history_parts.append(f"{role}: {msg['content']}")
 
         # Add the current message if it's not the last one in history
@@ -1426,7 +1460,9 @@ class YipsAgent:
             elif role == "assistant":
                 # Assistant responses use print_yips() for gradient styling
                 if content:
-                    print_yips(content)
+                    cleaned_content = clean_response(content)
+                    if cleaned_content:
+                        print_yips(cleaned_content)
             elif role == "system":
                 # Tool execution results use TOOL_COLOR (matches main.py line 115)
                 if content:

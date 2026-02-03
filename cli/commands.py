@@ -232,7 +232,11 @@ def handle_slash_command(agent: YipsAgentProtocol, user_input: str) -> str | boo
         tool_path = cmd_dir / f"{cmd_dir.name}.py"
         if tool_path.exists():
             try:
-                cmd = [sys.executable, str(tool_path)] + (args.split() if args else [])
+                # Prefer venv python for tool execution if available
+                venv_python = PROJECT_ROOT / ".venv" / "bin" / "python3"
+                executable = str(venv_python) if venv_python.exists() else sys.executable
+
+                cmd = [executable, str(tool_path)] + (args.split() if args else [])
                 env = {**os.environ, "PYTHONPATH": str(PROJECT_ROOT)}
                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env)
                 

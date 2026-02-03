@@ -283,7 +283,7 @@ def render_tool_call(tool_name: str, parameters: dict[str, Any] | str, result: s
     # Parameters section
     if isinstance(parameters, dict):
         if parameters:
-            param_node = tree.add("[dim]Parameters[/dim]")
+            param_node = tree.add(Text("Parameters", style="dim"))
             for key, value in parameters.items():
                 value_str = str(value)
                 if len(value_str) > 80:
@@ -294,7 +294,7 @@ def render_tool_call(tool_name: str, parameters: dict[str, Any] | str, result: s
         if val:
             if len(val) > 80:
                 val = val[:77] + "..."
-            tree.add(Text.assemble(("[dim]Input: [/dim]", ""), (val, TOOL_COLOR)))
+            tree.add(Text.assemble(("Input: ", "dim"), (val, TOOL_COLOR)))
 
     # Status/Result section
     if is_running:

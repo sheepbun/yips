@@ -47,7 +47,7 @@ def parse_tool_requests(response: str) -> list[ToolRequest]:
     requests_list: list[ToolRequest] = []
 
     # 1. Pattern: {ACTION:tool:params}
-    action_pattern = r"\{ACTION:(\w+):([^}]*)\}"
+    action_pattern = r"\{ACTION:\s*(\w+)\s*:\s*([^}]*)\}"
     for match in re.finditer(action_pattern, masked_response):
         start, end = match.span()
         original_match = response[start:end]
@@ -61,9 +61,9 @@ def parse_tool_requests(response: str) -> list[ToolRequest]:
 
     # 2. Pattern: Claude Code internal tool format
     # Example: <|channel|>commentary to=repo_browser.run_command\n<|constrain|>json<|message|>{"command":"mkdir -p temp"}
-    claude_tool_pattern = r"<\|channel\|>.*?to=(\w+\.\w+)[\s\S]*?<\|message\|>(\{.*?\})"
+    claude_tool_pattern = r"<\|channel\|>.*?to=([a-zA-Z0-9_\.]+)[\s\S]*?<\|message\|>(\{.*?\})"
     for match in re.finditer(claude_tool_pattern, masked_response):
-        channel = match.group(1) # e.g. "repo_browser.run_command"
+        channel = match.group(1) # e.g. "repo_browser.run_command" or "search"
         message_json = match.group(2) # e.g. '{"command":"mkdir -p temp"}'
         
         try:
@@ -71,6 +71,16 @@ def parse_tool_requests(response: str) -> list[ToolRequest]:
             data = json.loads(message_json)
             
             # Map Claude tools to Yips tools
+            if "search" in channel or "google" in channel or (isinstance(data, dict) and ("query" in data or "q" in data)):
+                # Map to SEARCH skill
+                query = data.get("query", data.get("q", ""))
+                requests_list.append({
+                    "type": "skill",
+                    "skill": "SEARCH",
+                    "args": str(query)
+                })
+                continue
+
             if "run_command" in channel or "execute" in channel:
                 tool = "run_command"
                 params = data.get("command", "")
@@ -83,10 +93,25 @@ def parse_tool_requests(response: str) -> list[ToolRequest]:
             elif "ls" in channel or "list" in channel:
                 tool = "ls"
                 params = data.get("path", ".")
+            elif "grep" in channel:
+                tool = "grep"
+                params = f"{data.get('pattern', '')}:{data.get('path', '.')}"
+            elif "git" in channel:
+                tool = "git"
+                params = data.get("subcommand", data.get("command", ""))
             else:
                 # Fallback: try to guess or use as a generic command
-                tool = "run_command"
-                params = str(data)
+                # ONLY if it looks like a command string or has a command key
+                if isinstance(data, dict):
+                    if "command" in data:
+                        tool = "run_command"
+                        params = data["command"]
+                    else:
+                        # Skip if it's just some other dict we don't understand
+                        continue
+                else:
+                    tool = "run_command"
+                    params = str(data)
 
             requests_list.append({
                 "type": "action",
@@ -109,7 +134,7 @@ def parse_tool_requests(response: str) -> list[ToolRequest]:
             })
 
     # 4. Pattern: {INVOKE_SKILL:skill:args}
-    skill_pattern = r"\{INVOKE_SKILL:(\w+)(?::([^}]*))?\}"
+    skill_pattern = r"\{INVOKE_SKILL:\s*(\w+)\s*(?::\s*([^}]*))?\}"
     for match in re.finditer(skill_pattern, masked_response):
         start, end = match.span()
         original_match = response[start:end]
@@ -319,7 +344,11 @@ def execute_tool(request: ToolRequest, agent: Any = None) -> str:
             return f"[Error: Skill not found: {skill_name}]"
 
         try:
-            cmd = [sys.executable, str(skill_path)] + (args.split() if args else [])
+            # Prefer venv python for skill execution if available
+            venv_python = PROJECT_ROOT / ".venv" / "bin" / "python3"
+            executable = str(venv_python) if venv_python.exists() else sys.executable
+
+            cmd = [executable, str(skill_path)] + (args.split() if args else [])
             env = {**os.environ, "PYTHONPATH": str(PROJECT_ROOT)}
             
             # Special handling for interactive VT skill
@@ -369,49 +398,38 @@ def execute_tool(request: ToolRequest, agent: Any = None) -> str:
 
 def clean_response(response: str) -> str:
     """Remove tool request tags from response for display, but keep those in code blocks."""
-    # Find all tags
-    action_pattern = r"\{ACTION:\w+:[^}]*\}"
-    identity_pattern = r"\{UPDATE_IDENTITY:[^}]*\}"
-    skill_pattern = r"\{INVOKE_SKILL:\w+(?::[^}]*)?\}"
-    thought_pattern = r"\{THOUGHT:[^}]*\}"
+    import json
     
-    # Claude-specific internal tags
-    claude_channel_pattern = r"<\|channel\|>[\s\S]*?(?=<\|channel\|>|$)"
-    claude_constrain_pattern = r"<\|constrain\|>[\s\S]*?(?=<\|message\|>|$)"
-    claude_message_pattern = r"<\|message\|>[\s\S]*?(?=<\|channel\|>|$)"
+    tags_to_remove = [
+        r"\{ACTION:\s*\w+\s*:[^}]*\}",
+        r"\{UPDATE_IDENTITY:[^}]*\}",
+        r"\{INVOKE_SKILL:\s*\w+\s*(?::[^}]*)?\}",
+        r"\{THOUGHT:[^}]*\}",
+        r"<\|channel\|>.*?to=[a-zA-Z0-9_\.]*",
+        r"<\|constrain\|>[a-z0-9]*",
+        r"<\|message\|>",
+        r"<\|.*?\|>"
+    ]
     
-    # General tag cleanup for any remaining <|...|> style tags
-    general_internal_pattern = r"<\|[\s\S]*?\|>"
-
-    combined_pattern = f"({action_pattern})|({identity_pattern})|({skill_pattern})|({thought_pattern})"
-    
-    # We want to remove tags that are NOT inside backticks
-    # A simple way is to use a regex that matches backtick blocks OR the tags
-    # and only replace the tags if they were matched outside backticks.
-    
-    # Pattern to match code blocks or tags
-    pattern = r"(```.*?```|`.*?`|\{ACTION:\w+:[^}]*\}|\{UPDATE_IDENTITY:[^}]*\}|\{INVOKE_SKILL:\w+(?::[^}]*)?\}|\{THOUGHT:[^}]*\}|<\|channel\|>|<\|constrain\|>|<\|message\|>|<\|[\s\S]*?\|>)"
+    # Match code blocks first to protect them, then tags to remove
+    pattern = r"(```.*?```|`[^`]*`|" + "|".join(tags_to_remove) + ")"
     
     def replace_fn(match):
         text = match.group(0)
-        if text.startswith('`') or text.startswith('```'):
-            return text  # Keep code blocks as is
-        
-        # If it's a Claude tool call or JSON-like internal message, try to be more aggressive
-        if text.startswith('<|'):
-            return ""
-            
-        return ""  # Remove tags
+        # If it's a code block (starts with backtick), keep it
+        if text.startswith('`'):
+            return text
+        # Otherwise, it's a tag or internal metadata, remove it
+        return ""
         
     cleaned = re.sub(pattern, replace_fn, response, flags=re.DOTALL)
     
-    # Final pass to clean up any artifacts like leftover JSON after a tag
-    # If the response looks like just a JSON blob after cleaning, it might be tool input
+    # Final pass: if the entire remaining content is just a JSON blob, hide it
+    # (This handles cases where the model only outputs tool parameters)
     if cleaned.strip().startswith('{') and cleaned.strip().endswith('}'):
         try:
-            import json
             json.loads(cleaned.strip())
-            return "" # It's just JSON (likely tool input), hide it
+            return ""
         except:
             pass
 

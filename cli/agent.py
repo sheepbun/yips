@@ -136,6 +136,22 @@ class YipsAgent:
             self.use_claude_cli = False
             self.current_model = LM_STUDIO_MODEL
 
+    @property
+    def is_gui(self) -> bool:
+        return os.environ.get("YIPS_GUI_MODE") == "1"
+
+    def emit_gui_event(self, event_type: str, data: Any) -> None:
+        """Emit a structured JSON event for the Electron frontend."""
+        if self.is_gui:
+            event = {
+                "type": event_type,
+                "data": data,
+                "timestamp": time.time()
+            }
+            # Use a unique prefix to make it easy for the frontend to identify JSON lines
+            print(f"__YIPS_JSON__{json.dumps(event)}")
+            sys.stdout.flush()
+
     def initialize_backend(self) -> None:
         """Initialize backend after UI is displayed."""
         if self.backend_initialized:
@@ -475,29 +491,59 @@ class YipsAgent:
             final_input_tokens = 0
             final_output_tokens = 0
 
-            with Live(spinner, console=self.console, refresh_per_second=20, transient=True) as live:
+            if self.is_gui:
                 for line in response.iter_lines():
-                    if not line:
-                        continue
-
-                    # Decode SSE format
+                    if not line: continue
                     line_str = line.decode('utf-8').strip()
-
-                    # Skip 'event: ...' lines
-                    if line_str.startswith('event:'):
-                        continue
-
-                    if not line_str.startswith('data:'):
-                        continue
-
-                    data_str = line_str[5:].strip()  # Remove 'data:' prefix
-                    if data_str == '[DONE]':
-                        break
-
+                    if line_str.startswith('event:'): continue
+                    if not line_str.startswith('data:'): continue
+                    data_str = line_str[5:].strip()
+                    if data_str == '[DONE]': break
                     try:
                         data = json.loads(data_str)
                         event_type = data.get("type", "")
+                        if event_type == "content_block_delta":
+                            delta = data.get("delta", {})
+                            if delta.get("type") == "text_delta":
+                                text = delta.get("text", "")
+                                accumulated_text += text
+                                self.emit_gui_event("text_chunk", text)
+                            elif delta.get("type") == "input_json_delta":
+                                partial_json = delta.get("partial_json", "")
+                                if tool_calls:
+                                    tool_calls[-1]["input_json"] += partial_json
+                        elif event_type == "content_block_start":
+                            block = data.get("content_block", {})
+                            if block.get("type") == "tool_use":
+                                tool_name = block.get("name", "unknown")
+                                tool_calls.append({"name": tool_name, "input_json": ""})
+                                self.emit_gui_event("tool_start", {"name": tool_name})
+                    except Exception: continue
+            else:
+                with Live(spinner, console=self.console, refresh_per_second=20, transient=True) as live:
+                    for line in response.iter_lines():
+                        if not line:
+                            continue
 
+                        # Decode SSE format
+                        line_str = line.decode('utf-8').strip()
+
+                        # Skip 'event: ...' lines
+                        if line_str.startswith('event:'):
+                            continue
+
+                        if not line_str.startswith('data:'):
+                            continue
+
+                        data_str = line_str[5:].strip()  # Remove 'data:' prefix
+                        if data_str == '[DONE]':
+                            break
+
+                        try:
+                            data = json.loads(data_str)
+                            event_type = data.get("type", "")
+                        except json.JSONDecodeError:
+                            continue
 
                         # Handle message_start event (contains input tokens)
                         if event_type == "message_start":
@@ -630,9 +676,6 @@ class YipsAgent:
                                 spinner.update_tokens(input_tokens=input_tokens, output_tokens=output_tokens)
                                 spinner.update_output_animation(output_tokens)
 
-                    except json.JSONDecodeError:
-                        continue
-
             # Print final output after Live exits (so it persists)
             cleaned_text = clean_response(accumulated_text)
             if cleaned_text:
@@ -705,33 +748,44 @@ class YipsAgent:
             assert process.stdout is not None
             assert process.stderr is not None
 
-            with Live(spinner, console=self.console, refresh_per_second=20, transient=True) as live:
+            if self.is_gui:
                 while True:
-                    # Read one character at a time for maximum responsiveness
                     char = process.stdout.read(1)
                     if not char and process.poll() is not None:
                         break
-
                     if not char:
                         time.sleep(0.01)
                         continue
-
                     accumulated_text += char
+                    self.emit_gui_event("text_chunk", char)
+            else:
+                with Live(spinner, console=self.console, refresh_per_second=20, transient=True) as live:
+                    while True:
+                        # Read one character at a time for maximum responsiveness
+                        char = process.stdout.read(1)
+                        if not char and process.poll() is not None:
+                            break
 
-                    # Clean the text for display (hides tags)
-                    display_accumulated = clean_response(accumulated_text)
+                        if not char:
+                            time.sleep(0.01)
+                            continue
 
-                    # Update display with full gradient (include prefix)
-                    display_text = Text()
-                    display_text.append_text(prefix)
+                        accumulated_text += char
 
-                    lines = display_accumulated.split('\n')
-                    for i, text_line in enumerate(lines):
-                        if i > 0:
-                            display_text.append("\n" + indent)
-                        display_text.append(apply_gradient_to_text(text_line))
+                        # Clean the text for display (hides tags)
+                        display_accumulated = clean_response(accumulated_text)
 
-                    live.update(display_text)
+                        # Update display with full gradient (include prefix)
+                        display_text = Text()
+                        display_text.append_text(prefix)
+
+                        lines = display_accumulated.split('\n')
+                        for i, text_line in enumerate(lines):
+                            if i > 0:
+                                display_text.append("\n" + indent)
+                            display_text.append(apply_gradient_to_text(text_line))
+
+                        live.update(display_text)
 
             # Print final output after Live exits (so it persists)
             cleaned_text = clean_response(accumulated_text)
@@ -766,15 +820,19 @@ class YipsAgent:
         if not self.backend_initialized:
             return "[Error: Backend not initialized]"
 
-        if self.use_claude_cli:
-            return self.call_claude_cli(message)
+        self.emit_gui_event("status", "thinking")
 
-        response = self.call_lm_studio(message)
-        # If LM Studio fails mid-session, fall back to CLI
-        if response.startswith("[Error: Could not connect"):
-            self.console.print(f"[yellow]{get_friendly_backend_name('lmstudio')} disconnected, switching to {get_friendly_backend_name('claude')}.[/yellow]")
-            self.use_claude_cli = True
-            return self.call_claude_cli(message)
+        if self.use_claude_cli:
+            response = self.call_claude_cli(message)
+        else:
+            response = self.call_lm_studio(message)
+            # If LM Studio fails mid-session, fall back to CLI
+            if response.startswith("[Error: Could not connect"):
+                self.console.print(f"[yellow]{get_friendly_backend_name('lmstudio')} disconnected, switching to {get_friendly_backend_name('claude')}.[/yellow]")
+                self.use_claude_cli = True
+                response = self.call_claude_cli(message)
+        
+        self.emit_gui_event("status", "idle")
         return response
 
     def generate_session_summary(self) -> str:
@@ -1284,11 +1342,11 @@ class YipsAgent:
         verbose_status = "on" if self.verbose_mode else "off"
         streaming_status = "on" if self.streaming_enabled else "off"
         right_col_data = [
-            ("Tips for getting started", False),  # [0]
-            ("Type /model to switch models", False),  # [1]
-            (f"Type /verbose to toggle tool calls ({verbose_status})", False),  # [2]
-            (f"Type /stream to toggle streaming ({streaming_status})", False),  # [3]
-            ("Type /exit to leave", False),  # [4]
+            ("Tips for getting started:", False),  # [0]
+            ("- Ask questions, edit files, or run commands.", False),  # [1]
+            ("- Be specific for the best results.", False),  # [2]
+            ("- /help for more information.", False),  # [3]
+            ("", False),  # [4]
             ("─" * right_width, False),  # [5] divider
             ("Recent activity", False),  # [6]
         ]

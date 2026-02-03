@@ -396,7 +396,7 @@ def render_thinking_block(thinking_text: str, is_streaming: bool = False) -> Pan
 
     if is_streaming:
         # List all identified points
-        tree = Tree(header)
+        tree = Tree(header, guide_style=blue_style)
         
         # Limit to last 5 points to keep it from taking over the screen
         MAX_DISPLAY = 5
@@ -420,7 +420,7 @@ def render_thinking_block(thinking_text: str, is_streaming: bool = False) -> Pan
         return Panel(tree, border_style=blue_style, expand=False, padding=(0, 1))
     else:
         # Final summary: show top 3 points for clear retrospective
-        tree = Tree(header)
+        tree = Tree(header, guide_style=blue_style)
         MAX_FINAL_POINTS = 3
         for point in summarized_points[:MAX_FINAL_POINTS]:
             if len(point) > 80:

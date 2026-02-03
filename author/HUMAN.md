@@ -4,14 +4,14 @@
 
 ## Basic Information
 
-**Name**: Katherine
-**Preferred name/nickname**: <!-- How should Yips address you? -->
-**Timezone**: <!-- e.g., America/New_York, UTC+1 -->
+**Name**: Katherine Michelle North
+**Preferred name/nickname**: Katie
+**Timezone**: MST
 
 ## Communication Preferences
 
-**Formality level**: <!-- casual, balanced, formal -->
-**Response length preference**: <!-- brief, moderate, detailed -->
+**Formality level**: balanced
+**Response length preference**: weigh based on input.
 **Emoji usage**: <!-- never, occasionally, often -->
 **When I'm frustrated**: <!-- How should Yips respond? -->
 **When I'm in a hurry**: <!-- Shorter responses? Just the facts? -->

@@ -132,7 +132,10 @@ def process_response_and_tools(agent: YipsAgent, response: str, depth: int = 0) 
             final_panel = render_tool_call(display_name, params, result=result)
         
         # Print the final persistent panel
-        console.print(final_panel)
+        if agent.is_gui:
+            agent.emit_gui_event("tool_result", final_panel)
+        else:
+            console.print(final_panel)
         
         # Handle special command results
         if result == "::YIPS_EXIT::":
@@ -236,11 +239,14 @@ def main() -> None:
     # Create agent and pass session reference
     agent = YipsAgent(prompt_session=session)
 
-    # Clear terminal
-    subprocess.run('clear' if os.name != 'nt' else 'cls', shell=True)
+    is_gui = os.environ.get("YIPS_GUI_MODE") == "1"
 
-    # Render the title box
-    agent.render_title_box()
+    if not is_gui:
+        # Clear terminal
+        subprocess.run('clear' if os.name != 'nt' else 'cls', shell=True)
+
+        # Render the title box
+        agent.render_title_box()
 
     # Initialize backend after displaying UI
     agent.initialize_backend()
@@ -275,17 +281,21 @@ def main() -> None:
 
     while True:
         # Check for pending resize
-        if agent.resize_pending:
+        if not is_gui and agent.resize_pending:
             agent.resize_pending = False
             agent.last_width = agent.console.width
             agent.refresh_display()
 
         try:
-            # Use PromptSession for input
-            user_input = session.prompt(
-                HTMLText(f'<style fg="{PROMPT_COLOR}">>>> </style>'),
-                complete_while_typing=True
-            ).strip()
+            if is_gui:
+                # In GUI mode, use a simple input() to read from stdin
+                user_input = input().strip()
+            else:
+                # Use PromptSession for input
+                user_input = session.prompt(
+                    HTMLText(f'<style fg="{PROMPT_COLOR}">>>> </style>'),
+                    complete_while_typing=True
+                ).strip()
         except (EOFError, KeyboardInterrupt):
             agent.graceful_exit()
             sys.exit(0)

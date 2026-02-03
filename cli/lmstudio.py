@@ -14,7 +14,7 @@ import requests
 # LM Studio configuration
 LM_STUDIO_URL = os.environ.get("LM_STUDIO_URL", "http://localhost:1234")
 LM_STUDIO_MODELS_DIR = Path.home() / ".lmstudio" / "models"
-LM_STUDIO_MODEL = os.environ.get("LM_STUDIO_MODEL", "lmstudio-community/gpt-oss-20b-GGUF")
+LM_STUDIO_MODEL = os.environ.get("LM_STUDIO_MODEL", "qwen/qwen3-4b-thinking-2507")
 LMS_CLI_PATH = os.environ.get("LMS_CLI_PATH", "/home/katherine/.lmstudio/bin/lms")
 LM_STUDIO_APPIMAGE = os.environ.get("LM_STUDIO_APPIMAGE", "/home/katherine/Apps/LM-Studio.AppImage")
 
@@ -70,15 +70,6 @@ def ensure_lmstudio_running() -> bool:
         )
         # Wait for daemon to initialize
         time.sleep(8)
-        # Try to hide the window if xdotool is available
-        try:
-            subprocess.run(
-                ["xdotool", "search", "--class", "LM Studio", "windowunmap"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-        except (subprocess.SubprocessError, FileNotFoundError):
-            pass
 
     # Start headless server via lms CLI
     try:
@@ -102,7 +93,23 @@ def ensure_lmstudio_running() -> bool:
 
 
 def get_available_models() -> list[str]:
-    """Scan LM Studio models directory for available models."""
+    """Scan LM Studio for available models using the CLI."""
+    try:
+        result = subprocess.run(
+            [LMS_CLI_PATH, "ls", "--json", "--llm"],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        if result.returncode == 0:
+            import json
+            models_data = json.loads(result.stdout)
+            # Use 'path' as the identifier as it's what 'lms load' and the API usually expect
+            return sorted([m["path"] for m in models_data if "path" in m])
+    except Exception:
+        pass
+
+    # Fallback to directory scanning if CLI fails
     models: list[str] = []
     if LM_STUDIO_MODELS_DIR.is_dir():
         for gguf in LM_STUDIO_MODELS_DIR.rglob("*.gguf"):

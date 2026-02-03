@@ -105,6 +105,11 @@ def print_gradient(text: str) -> None:
 
 def print_yips(text: str) -> None:
     """Print Yips' response with gradient styling."""
+    import os
+    if os.environ.get("YIPS_GUI_MODE") == "1":
+        print(text)
+        return
+
     prefix = get_yips_prefix()
     indent = " " * len(prefix)
 

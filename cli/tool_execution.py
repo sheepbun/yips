@@ -33,6 +33,7 @@ DESTRUCTIVE_PATTERNS = [
     r"systemctl\s+stop",
     r"reboot",
     r"shutdown",
+    r"ls\s+-R\s+/",
 ]
 
 
@@ -179,17 +180,21 @@ def is_in_working_zone(path: str | Path) -> bool:
         return False
 
 
-def confirm_action(description: str) -> bool:
-    """Ask user for confirmation (only for destructive commands)."""
-    console.print(f"\n[bold red]Warning: Destructive command detected![/bold red]")
+def confirm_action(description: str, is_destructive: bool = False) -> bool:
+    """Ask user for confirmation."""
+    if is_destructive:
+        console.print(f"\n[bold red]Warning: Destructive command detected![/bold red]")
+    else:
+        console.print(f"\n[bold yellow]Notice: Action outside working zone[/bold yellow]")
+        
     console.print(f"[yellow]{description}[/yellow]")
-    console.print("Allow? ", style=PROMPT_COLOR, end="")
+    console.print("Allow? (y/n): ", style=PROMPT_COLOR, end="")
     response = input().strip().lower()
     return response in ("y", "yes")
 
 
 def execute_tool(request: ToolRequest, agent: Any = None) -> str:
-    """Execute a tool request (autonomously unless destructive)."""
+    """Execute a tool request (autonomously unless destructive or out of bounds)."""
 
     if request["type"] == "action":
         tool: str = str(request["tool"])
@@ -227,7 +232,7 @@ def execute_tool(request: ToolRequest, agent: Any = None) -> str:
 
             # Check for destructive commands
             if is_destructive_command(command):
-                if not confirm_action(f"Run: {command}"):
+                if not confirm_action(f"Run: {command}", is_destructive=True):
                     return "[Command cancelled by user]"
             
             # Check for out-of-zone activity (heuristically)
@@ -426,11 +431,14 @@ def clean_response(response: str) -> str:
     
     # Final pass: if the entire remaining content is just a JSON blob, hide it
     # (This handles cases where the model only outputs tool parameters)
-    if cleaned.strip().startswith('{') and cleaned.strip().endswith('}'):
+    stripped = cleaned.strip()
+    if stripped.startswith('{') and stripped.endswith('}'):
         try:
-            json.loads(cleaned.strip())
+            import json
+            json.loads(stripped)
             return ""
         except:
             pass
-
+            
+    # Also handle <think> blocks - if it's the only thing there, don't hide it
     return cleaned.strip()

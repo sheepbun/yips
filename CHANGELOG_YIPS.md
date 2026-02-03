@@ -1,0 +1,3 @@
+- 2026-02-02: Added search for latest US presidential administration news using DuckDuckGo skill.
+- 2026-02-02: Updated AGENT.md to explicitly mandate using SEARCH skill for current events and time-sensitive queries to prevent outdated hallucinations.
+- 2026-02-02: Implemented "Truth via Tools" principle in AGENT.md and added system prompt injection in SEARCH.py to force the agent to prioritize search results over internal training data.- 2026-02-03: Resolved 400 Bad Request errors by improving LM Studio error handling and switching default model to Qwen-3 for better stability on 10GB VRAM hardware.

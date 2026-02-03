@@ -266,10 +266,20 @@ def render_bottom_border(terminal_width: int, session_name: str | None = None) -
     console.print()
 
 
-def render_tool_call(tool_name: str, parameters: dict[str, Any] | str, result: str | None = None, is_running: bool = False) -> Panel:
+def render_tool_call(tool_name: str, parameters: dict[str, Any] | str, result: str | None = None, is_running: bool = False) -> Any:
     """Render a tool call in a beautiful way using Tree and Panel.
     Returns the Panel object for use with Live or direct printing.
     """
+    import os
+    if os.environ.get("YIPS_GUI_MODE") == "1":
+        # Return a dictionary that can be JSON serialized
+        return {
+            "name": tool_name,
+            "params": parameters,
+            "result": result,
+            "is_running": is_running
+        }
+
     # Create the root node with a nice icon
     icon = "⚙️"
     if "read" in tool_name.lower(): icon = "📖"

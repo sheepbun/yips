@@ -338,7 +338,15 @@ class YipsAgent:
                     },
                     timeout=120
                 )
-                response.raise_for_status()
+                
+                if response.status_code != 200:
+                    try:
+                        err_data = response.json()
+                        err_msg = err_data.get("error", {}).get("message", response.text)
+                        return f"[Error from LM Studio ({response.status_code}): {err_msg}]"
+                    except:
+                        return f"[Error from LM Studio: {response.status_code} - {response.text}]"
+
                 data = response.json()
 
             # Anthropic format: {"content": [{"type": "text", "text": "..."}, {"type": "tool_use", ...}]}
@@ -367,17 +375,23 @@ class YipsAgent:
                 if block_type == "text":
                     text_parts.append(block.get("text", ""))
                 elif block_type == "thinking":
-                    # Thinking blocks are detected but not displayed in non-streaming mode
-                    pass
+                    thinking_content = block.get("thinking", "")
+                    if thinking_content:
+                        if self.verbose_mode:
+                            self.console.print(f"[dim]Thought: {thinking_content}[/dim]")
+                        # For models that use thinking blocks instead of text tags,
+                        # we want to keep the thinking for context/parsing.
+                        text_parts.append(f"<think>\n{thinking_content}\n</think>")
                 elif block_type == "tool_use" and self.verbose_mode:
                     # Display tool use if verbose mode is enabled
                     tool_name = block.get("name", "unknown")
                     tool_input = block.get("input", {})
                     self._display_lm_studio_tool_call(tool_name, tool_input)
 
-            # Return combined text (fallback to old format if no content blocks)
-            if text_parts:
-                return "\n".join(text_parts)
+            # Return combined text
+            combined_text = "\n".join(text_parts) if text_parts else ""
+            if combined_text:
+                return combined_text
             elif content_blocks and content_blocks[0].get("text"):
                 return content_blocks[0]["text"]
             else:
@@ -479,7 +493,14 @@ class YipsAgent:
                 timeout=120,
                 stream=True
             )
-            response.raise_for_status()
+            
+            if response.status_code != 200:
+                try:
+                    err_data = response.json()
+                    err_msg = err_data.get("error", {}).get("message", response.text)
+                    return f"[Error from LM Studio ({response.status_code}): {err_msg}]"
+                except:
+                    return f"[Error from LM Studio: {response.status_code} - {response.text}]"
 
             # Accumulate response text
             accumulated_text = ""
@@ -594,6 +615,11 @@ class YipsAgent:
                             delta_type = delta.get("type", "")
 
                             if delta_type == "text_delta":
+                                # If we were thinking, close the tag
+                                if in_thinking_block:
+                                    accumulated_text += "\n</think>\n"
+                                    in_thinking_block = False
+
                                 # Accumulate text
                                 text = delta.get("text", "")
                                 accumulated_text += text
@@ -617,6 +643,30 @@ class YipsAgent:
                                     display_text.append(apply_gradient_to_text(text_line))
 
                                 live.update(display_text)
+
+                            elif delta_type == "thinking_delta":
+                                # Accumulate thinking
+                                thinking = delta.get("thinking", "")
+                                
+                                # Add tags if this is the start of a thinking block
+                                if not in_thinking_block:
+                                    accumulated_text += "<think>\n"
+                                    in_thinking_block = True
+                                
+                                accumulated_text += thinking
+                                
+                                if self.verbose_mode:
+                                    # Clean and update display for thinking content
+                                    display_accumulated = clean_response(accumulated_text)
+                                    display_text = Text()
+                                    display_text.append_text(prefix)
+                                    
+                                    lines = display_accumulated.split('\n')
+                                    for i, text_line in enumerate(lines):
+                                        if i > 0: display_text.append("\n" + indent)
+                                        display_text.append(apply_gradient_to_text(text_line))
+                                    
+                                    live.update(display_text)
 
                             elif delta_type == "input_json_delta":
                                 # Accumulate JSON for tool call
@@ -674,9 +724,11 @@ class YipsAgent:
                                 final_output_tokens = output_tokens
                                 final_input_tokens = input_tokens
                                 spinner.update_tokens(input_tokens=input_tokens, output_tokens=output_tokens)
-                                spinner.update_output_animation(output_tokens)
-
-            # Print final output after Live exits (so it persists)
+                                # Print final output after Live exits (so it persists)
+            if in_thinking_block:
+                accumulated_text += "\n</think>"
+                in_thinking_block = False
+                
             cleaned_text = clean_response(accumulated_text)
             if cleaned_text:
                 final_text = Text()

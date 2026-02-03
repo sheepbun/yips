@@ -2,7 +2,7 @@ rich>=13.0.0
 requests>=2.28.0
 prompt_toolkit>=3.0.0
 beautifulsoup4>=4.12.0
-duckduckgo_search>=4.0.0
+ddgs>=9.0.0
 
 # Development dependencies
 pyright>=1.1.350

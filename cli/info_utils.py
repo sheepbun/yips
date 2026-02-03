@@ -309,5 +309,10 @@ def get_friendly_model_name(model_name: str) -> str:
         "sonnet": "4.5 Sonnet",
         "opus": "4.5 Opus",
         "lmstudio-community/gpt-oss-20b-GGUF": "gpt-oss",
+        "lmstudio-community/gemma-3-12b-it-GGUF": "gemma-3",
+        "google/gemma-3-12b": "gemma-3",
+        "openai/gpt-oss-20b": "gpt-oss",
+        "lmstudio-community/Qwen3-4B-Thinking-2507-GGUF": "qwen-3",
+        "qwen/qwen3-4b-thinking": "qwen-3",
     }
     return mapping.get(model_name, model_name)

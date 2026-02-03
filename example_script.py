@@ -1,0 +1,1 @@
+"\"\"\"\nSimple demo script\n\"\"\"\nprint(\"Hello from the example script!\")\n"

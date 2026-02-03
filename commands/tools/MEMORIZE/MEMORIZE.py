@@ -14,9 +14,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from cli.root import PROJECT_ROOT
-
-MEMORIES_DIR = PROJECT_ROOT / "memories"
+from cli.config import MEMORIES_DIR
 
 
 def sanitize_name(name: str) -> str:

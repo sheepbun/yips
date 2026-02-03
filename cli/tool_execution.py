@@ -13,9 +13,9 @@ from pathlib import Path
 from typing import Any
 
 from cli.color_utils import console, PROMPT_COLOR, print_gradient, blue_gradient_text
-from cli.config import BASE_DIR, SKILLS_DIR
+from cli.config import BASE_DIR, SKILLS_DIR, WORKING_ZONE
 from cli.root import PROJECT_ROOT
-from cli.type_defs import ToolRequest, ActionToolRequest, IdentityToolRequest, SkillToolRequest
+from cli.type_defs import ToolRequest, ActionToolRequest, IdentityToolRequest, SkillToolRequest, ThoughtToolRequest
 
 # Destructive commands that require confirmation
 DESTRUCTIVE_PATTERNS = [
@@ -26,6 +26,13 @@ DESTRUCTIVE_PATTERNS = [
     r">\s*/dev/",
     r"chmod\s+-R\s+777\s+/",
     r":(){ :|:& };:",
+    r"pacman\s+-[RS]", # Arch Linux destructive commands
+    r"apt\s+remove",
+    r"apt\s+purge",
+    r"dnf\s+remove",
+    r"systemctl\s+stop",
+    r"reboot",
+    r"shutdown",
 ]
 
 
@@ -88,6 +95,18 @@ def parse_tool_requests(response: str) -> list[ToolRequest]:
             }
             requests_list.append(skill_request)
 
+    # Pattern: {THOUGHT:signature}
+    thought_pattern = r"\{THOUGHT:([^}]*)\}"
+    for match in re.finditer(thought_pattern, masked_response):
+        start, end = match.span()
+        original_match = response[start:end]
+        m = re.match(thought_pattern, original_match)
+        if m:
+            requests_list.append({
+                "type": "thought",
+                "signature": m.group(1)
+            })
+
     return requests_list
 
 
@@ -97,6 +116,16 @@ def is_destructive_command(command: str) -> bool:
         if re.search(pattern, command, re.IGNORECASE):
             return True
     return False
+
+
+def is_in_working_zone(path: str | Path) -> bool:
+    """Check if a path is within the designated WORKING_ZONE."""
+    try:
+        target_path = Path(path).expanduser().resolve()
+        zone_path = WORKING_ZONE.resolve()
+        return zone_path in target_path.parents or target_path == zone_path
+    except Exception:
+        return False
 
 
 def confirm_action(description: str) -> bool:
@@ -117,6 +146,9 @@ def execute_tool(request: ToolRequest, agent: Any = None) -> str:
 
         if tool == "read_file":
             path = params.strip()
+            if not is_in_working_zone(path):
+                if not confirm_action(f"Read file outside working zone: {path}"):
+                    return "[Read cancelled by user]"
             try:
                 content = Path(path).expanduser().read_text()
                 return f"[File contents of {path}]:\n{content}"
@@ -128,6 +160,9 @@ def execute_tool(request: ToolRequest, agent: Any = None) -> str:
             if len(parts) < 2:
                 return "[Error: write_file requires path:content]"
             path, content = parts[0].strip(), parts[1]
+            if not is_in_working_zone(path):
+                if not confirm_action(f"Write file outside working zone: {path}"):
+                    return "[Write cancelled by user]"
             try:
                 p = Path(path).expanduser()
                 p.parent.mkdir(parents=True, exist_ok=True)
@@ -142,6 +177,11 @@ def execute_tool(request: ToolRequest, agent: Any = None) -> str:
             # Check for destructive commands
             if is_destructive_command(command):
                 if not confirm_action(f"Run: {command}"):
+                    return "[Command cancelled by user]"
+            
+            # Check for out-of-zone activity (heuristically)
+            if not any(is_in_working_zone(p) for p in [".", os.getcwd()]):
+                 if not confirm_action(f"Run command in non-working directory: {os.getcwd()}"):
                     return "[Command cancelled by user]"
 
             try:
@@ -160,6 +200,69 @@ def execute_tool(request: ToolRequest, agent: Any = None) -> str:
                 return "[Command timed out after 60 seconds]"
             except Exception as e:
                 return f"[Error running command: {e}]"
+
+        elif tool == "ls":
+            path = params.strip() or "."
+            if not is_in_working_zone(path):
+                if not confirm_action(f"List directory outside working zone: {path}"):
+                    return "[ls cancelled by user]"
+            try:
+                # Use -F for file type indicators and -1 for one-per-line
+                result = subprocess.run(f"ls -F1 {path}", shell=True, capture_output=True, text=True, timeout=10)
+                if result.returncode == 0:
+                    return f"[Directory listing for {path}]:\n{result.stdout}"
+                return f"[Error listing {path}]: {result.stderr}"
+            except Exception as e:
+                return f"[Error running ls: {e}]"
+
+        elif tool == "grep":
+            # Expecting "pattern:path" or just "pattern"
+            parts = params.split(":", 1)
+            pattern = parts[0].strip()
+            path = parts[1].strip() if len(parts) > 1 else "."
+            if not is_in_working_zone(path):
+                if not confirm_action(f"Grep outside working zone: {path}"):
+                    return "[grep cancelled by user]"
+            try:
+                # Use -r for recursive, -n for line numbers, -I to ignore binary files
+                result = subprocess.run(f"grep -rnI \"{pattern}\" {path}", shell=True, capture_output=True, text=True, timeout=30)
+                if result.stdout:
+                    return f"[Grep matches for '{pattern}' in {path}]:\n{result.stdout}"
+                return f"[No matches found for '{pattern}' in {path}]"
+            except Exception as e:
+                return f"[Error running grep: {e}]"
+
+        elif tool == "git":
+            subcommand = params.strip()
+            try:
+                # Run git command from project root
+                result = subprocess.run(f"git {subcommand}", shell=True, capture_output=True, text=True, timeout=30, cwd=PROJECT_ROOT)
+                output = result.stdout
+                if result.stderr:
+                    output += f"\n[git stderr]: {result.stderr}"
+                return f"[Git output (git {subcommand})]:\n{output}" if output else f"[Git {subcommand} completed]"
+            except Exception as e:
+                return f"[Error running git: {e}]"
+
+        elif tool == "sed":
+            # Expecting "expression:path"
+            parts = params.split(":", 1)
+            if len(parts) < 2:
+                return "[Error: sed requires expression:path]"
+            expression, path = parts[0].strip(), parts[1].strip()
+            if not is_in_working_zone(path):
+                if not confirm_action(f"Sed outside working zone: {path}"):
+                    return "[sed cancelled by user]"
+            try:
+                # and return output unless it's clearly an in-place edit request.
+                # Actually, most agents want to modify files.
+                # Let's support both. If expression contains -i, we handle it.
+                result = subprocess.run(f"sed {expression} {path}", shell=True, capture_output=True, text=True, timeout=10)
+                if result.returncode == 0:
+                    return f"[Sed output for {path}]:\n{result.stdout}" if result.stdout else f"[Sed operation on {path} completed]"
+                return f"[Error running sed on {path}]: {result.stderr}"
+            except Exception as e:
+                return f"[Error running sed: {e}]"
 
         else:
             return f"[Unknown tool: {tool}]"
@@ -244,15 +347,16 @@ def clean_response(response: str) -> str:
     action_pattern = r"\{ACTION:\w+:[^}]*\}"
     identity_pattern = r"\{UPDATE_IDENTITY:[^}]*\}"
     skill_pattern = r"\{INVOKE_SKILL:\w+(?::[^}]*)?\}"
+    thought_pattern = r"\{THOUGHT:[^}]*\}"
     
-    combined_pattern = f"({action_pattern})|({identity_pattern})|({skill_pattern})"
+    combined_pattern = f"({action_pattern})|({identity_pattern})|({skill_pattern})|({thought_pattern})"
     
     # We want to remove tags that are NOT inside backticks
     # A simple way is to use a regex that matches backtick blocks OR the tags
     # and only replace the tags if they were matched outside backticks.
     
     # Pattern to match code blocks or tags
-    pattern = r"(```.*?```|`.*?`|\{ACTION:\w+:[^}]*\}|\{UPDATE_IDENTITY:[^}]*\}|\{INVOKE_SKILL:\w+(?::[^}]*)?\})"
+    pattern = r"(```.*?```|`.*?`|\{ACTION:\w+:[^}]*\}|\{UPDATE_IDENTITY:[^}]*\}|\{INVOKE_SKILL:\w+(?::[^}]*)?\}|\{THOUGHT:[^}]*\})"
     
     def replace_fn(match):
         text = match.group(0)

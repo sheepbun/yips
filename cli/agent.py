@@ -40,6 +40,7 @@ from cli.color_utils import (
 )
 from cli.config import (
     BASE_DIR,
+    DOT_YIPS_DIR,
     MEMORIES_DIR,
     COMMANDS_DIR,
     SKILLS_DIR,
@@ -75,7 +76,7 @@ from cli.ui_rendering import (
     render_tool_call,
     LOGO_WIDTH,
 )
-from cli.type_defs import Message, YipsConfig, StreamingToolCall
+from cli.type_defs import Message, YipsConfig, StreamingToolCall, SessionState
 
 
 class YipsAgent:
@@ -85,6 +86,13 @@ class YipsAgent:
         self.conversation_history: list[Message] = []
         self.console = console
         self.backend_initialized = False
+        
+        # Initialize loop state
+        self.session_state: SessionState = {
+            "thought_signature": "",
+            "error_count": 0,
+            "last_action": ""
+        }
 
         # Load saved configuration
         config: YipsConfig = load_config()
@@ -172,6 +180,33 @@ class YipsAgent:
         if specs_md.exists():
             sections.append(f"# SPECIFICATIONS\n\n{specs_md.read_text()}")
 
+        # Focus Area
+        focus_md = DOT_YIPS_DIR / "FOCUS.md"
+        if focus_md.exists():
+            sections.append(f"# CURRENT FOCUS AREA\n\n{focus_md.read_text()}")
+
+        # User Preferences
+        pref_json = DOT_YIPS_DIR / "preferences.json"
+        if pref_json.exists():
+            try:
+                prefs = json.loads(pref_json.read_text())
+                sections.append(f"# USER PREFERENCES\n\n{json.dumps(prefs, indent=2)}")
+            except Exception:
+                pass
+
+        # Recent Git Activity (Last 5 commits)
+        try:
+            git_log = subprocess.run(
+                ["git", "log", "-n", "5", "--oneline"],
+                capture_output=True,
+                text=True,
+                cwd=BASE_DIR
+            )
+            if git_log.returncode == 0 and git_log.stdout:
+                sections.append(f"# RECENT GIT COMMITS\n\n{git_log.stdout}")
+        except Exception:
+            pass
+
         # Recent memories (last 5)
         if MEMORIES_DIR.exists():
             memories = sorted(MEMORIES_DIR.glob("*.md"), reverse=True)[:5]
@@ -195,6 +230,10 @@ class YipsAgent:
                 "IMPORTANT: As an agent, you MUST NOT use slash commands. To use a tool or skill yourself, "
                 "you MUST use the {INVOKE_SKILL:SKILL_NAME:args} or {ACTION:TOOL_NAME:params} syntax as defined in your soul document."
             )
+
+        # Thought Signature / Current Task State
+        if self.session_state.get("thought_signature"):
+            sections.append(f"# CURRENT TASK PLAN (Thought Signature)\n\n{self.session_state['thought_signature']}")
 
         return "\n\n" + "=" * 60 + "\n\n".join(sections)
 
@@ -1362,12 +1401,16 @@ class YipsAgent:
         - System messages: Printed with TOOL_COLOR
         """
         from cli.color_utils import print_yips, PROMPT_COLOR
+        from cli.config import INTERNAL_REPROMPT
 
         for i, message in enumerate(self.conversation_history):
             role = message.get("role")
             content = message.get("content", "")
 
             if role == "user":
+                # Skip internal reprompts in replay
+                if content == INTERNAL_REPROMPT:
+                    continue
                 # User messages need to be re-printed during replay
                 self.console.print(f">>> {content}", style=PROMPT_COLOR)
             elif role == "assistant":

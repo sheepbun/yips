@@ -35,7 +35,13 @@ class SkillToolRequest(TypedDict):
     args: str
 
 
-ToolRequest = ActionToolRequest | IdentityToolRequest | SkillToolRequest
+class ThoughtToolRequest(TypedDict):
+    """A pseudo-tool request for updating the internal thought signature."""
+    type: Literal["thought"]
+    signature: str
+
+
+ToolRequest = ActionToolRequest | IdentityToolRequest | SkillToolRequest | ThoughtToolRequest
 
 
 # Configuration
@@ -45,6 +51,15 @@ class YipsConfig(TypedDict, total=False):
     model: str
     verbose: bool
     streaming: bool
+    max_depth: int
+
+
+# Session State for ReAct loop
+class SessionState(TypedDict, total=False):
+    """Internal state tracking for the current agentic loop."""
+    thought_signature: str  # The high-level plan or "thought" for this task
+    error_count: int        # Number of consecutive errors encountered
+    last_action: str        # The last tool/action attempted
 
 
 # LM Studio response content blocks

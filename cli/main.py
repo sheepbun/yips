@@ -37,9 +37,14 @@ from cli.completer import SlashCommandCompleter
 
 
 def process_response_and_tools(agent: YipsAgent, response: str, depth: int = 0) -> None:
-    """Recursively process response, execute tools, and handle reprompts."""
-    if depth > 10:  # Prevent infinite loops
-        console.print("[red]Max reprompt depth reached.[/red]")
+    """Recursively process response, execute tools, and handle standardized ReAct loop."""
+    from cli.config import load_config, DEFAULT_MAX_DEPTH
+    
+    config = load_config()
+    max_depth = config.get("max_depth", DEFAULT_MAX_DEPTH)
+
+    if depth >= max_depth:
+        console.print(f"[red]Max autonomous depth ({max_depth}) reached.[/red]")
         return
 
     # 1. Clean and display the assistant response text
@@ -63,7 +68,15 @@ def process_response_and_tools(agent: YipsAgent, response: str, depth: int = 0) 
         console.print()
         console.print(blue_gradient_text(f"⚡ Executing {total_requests} tool call{'s' if total_requests != 1 else ''}..."))
 
+    has_reprompt = False
+    reprompt_msg = ""
+    
     for i, request in enumerate(tool_requests, 1):
+        # Handle pseudo-tool THOUGHT (updates agent state)
+        if request["type"] == "thought":
+            agent.session_state["thought_signature"] = request["signature"]
+            continue
+
         # Get tool name and params
         tool_name = "unknown"
         params: Any = ""
@@ -93,6 +106,28 @@ def process_response_and_tools(agent: YipsAgent, response: str, depth: int = 0) 
             # Execute the tool
             result = execute_tool(request, agent)
             
+            # Update error tracking
+            if isinstance(result, str) and ("[Error" in result or "failed" in result.lower()):
+                agent.session_state["error_count"] = agent.session_state.get("error_count", 0) + 1
+            else:
+                agent.session_state["error_count"] = 0 # Reset on success
+            
+            agent.session_state["last_action"] = f"{tool_name}: {params}"
+            
+            # Update metrics
+            try:
+                from cli.config import DOT_YIPS_DIR
+                import json
+                metrics_path = DOT_YIPS_DIR / "metrics.json"
+                if metrics_path.exists():
+                    metrics = json.loads(metrics_path.read_text())
+                    metrics["total_actions"] = metrics.get("total_actions", 0) + 1
+                    if not (isinstance(result, str) and ("[Error" in result or "failed" in result.lower())):
+                        metrics["successes"] = metrics.get("successes", 0) + 1
+                    metrics_path.write_text(json.dumps(metrics, indent=2))
+            except Exception:
+                pass
+            
             # Update with final result
             final_panel = render_tool_call(display_name, params, result=result)
         
@@ -106,32 +141,49 @@ def process_response_and_tools(agent: YipsAgent, response: str, depth: int = 0) 
         # Store in history
         agent.conversation_history.append({
             "role": "system",
-            "content": result
+            "content": str(result)
         })
 
         # Check for REPROMPT (special case)
         if isinstance(result, str) and result.startswith("::YIPS_REPROMPT::"):
+            has_reprompt = True
             reprompt_msg = result[17:]
-            if reprompt_msg:
-                # Add to history
-                agent.conversation_history.append({
-                    "role": "user",
-                    "content": reprompt_msg
-                })
-                
-                # Recursive call for the reprompt
-                next_response = agent.get_response(reprompt_msg)
-                agent.conversation_history.append({
-                    "role": "assistant",
-                    "content": next_response
-                })
-                
-                process_response_and_tools(agent, next_response, depth + 1)
-                return # Stop processing current batch as we've chained
+
+    # Standardized ReAct loop: Always trigger next turn if tools were called
+    if not has_reprompt:
+        from cli.config import INTERNAL_REPROMPT
+        reprompt_msg = INTERNAL_REPROMPT
+        
+        # If we have consecutive errors, inject a pivot prompt
+        error_count = agent.session_state.get("error_count", 0)
+        if error_count > 0:
+            reprompt_msg = f"Observation received. NOTE: You have encountered {error_count} consecutive error(s). If your current approach is failing, consider a different tool or strategy (Pivot)."
+
+    # Add the reprompt message to history
+    agent.conversation_history.append({
+        "role": "user",
+        "content": reprompt_msg
+    })
+    
+    # Recursive call for the next turn
+    next_response = agent.get_response(reprompt_msg)
+    
+    # Store assistant response
+    agent.conversation_history.append({
+        "role": "assistant",
+        "content": next_response
+    })
+    
+    process_response_and_tools(agent, next_response, depth + 1)
 
 
 def main() -> None:
     """Main entry point for Yips CLI."""
+    import argparse
+    parser = argparse.ArgumentParser(description="Yips - Personal Desktop Agent")
+    parser.add_argument("-c", "--command", type=str, help="Run a single command and exit")
+    args = parser.parse_args()
+
     completer = SlashCommandCompleter()
 
     # Create custom style for prompt_toolkit input
@@ -182,6 +234,34 @@ def main() -> None:
     # Initialize backend after displaying UI
     agent.initialize_backend()
 
+    if args.command:
+        # Handle single command mode
+        user_input = args.command.strip()
+        
+        # Store user message
+        agent.conversation_history.append({
+            "role": "user",
+            "content": user_input
+        })
+
+        # Get response
+        response = agent.get_response(user_input)
+
+        # Store assistant response
+        agent.conversation_history.append({
+            "role": "assistant",
+            "content": response
+        })
+
+        # Process response and any tools (recursively)
+        process_response_and_tools(agent, response)
+        
+        # Update session memory file
+        agent.update_session_file()
+        
+        agent.graceful_exit()
+        sys.exit(0)
+
     while True:
         # Check for pending resize
         if agent.resize_pending:
@@ -201,6 +281,18 @@ def main() -> None:
 
         if not user_input:
             continue
+
+        # Update user intervention metrics
+        try:
+            from cli.config import DOT_YIPS_DIR
+            import json
+            metrics_path = DOT_YIPS_DIR / "metrics.json"
+            if metrics_path.exists():
+                metrics = json.loads(metrics_path.read_text())
+                metrics["user_interventions"] = metrics.get("user_interventions", 0) + 1
+                metrics_path.write_text(json.dumps(metrics, indent=2))
+        except Exception:
+            pass
 
         # Handle slash commands first
         command_result = handle_command(agent, user_input)

@@ -1,0 +1,42 @@
+#!/usr/bin/env python3
+"""
+pre-commit - Git hook for Yips optimization suggestions.
+"""
+
+import subprocess
+import sys
+from pathlib import Path
+
+def main():
+    # Get staged diff
+    diff = subprocess.run(
+        ["git", "diff", "--cached"],
+        capture_output=True,
+        text=True
+    ).stdout
+    
+    if not diff:
+        return
+    
+    print("Yips is analyzing your changes for optimizations...")
+    
+    # Call Yips agent with the diff
+    project_root = Path(__file__).resolve().parent.parent
+    agent_py = project_root / "AGENT.py"
+    
+    prompt = f"Analyze this git diff and suggest optimizations or point out potential bugs:\n\n{diff}"
+    
+    try:
+        # Run in non-interactive mode
+        # We use a limited depth to avoid long loops in hooks
+        # Actually, let's just run it.
+        subprocess.run(
+            [sys.executable, str(agent_py), "--command", prompt],
+            cwd=project_root
+        )
+    except Exception as e:
+        print(f"Error calling Yips: {e}")
+
+if __name__ == "__main__":
+    main()
+

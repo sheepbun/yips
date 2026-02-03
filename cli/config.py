@@ -11,7 +11,9 @@ from cli.type_defs import YipsConfig
 
 # Directory paths
 BASE_DIR = PROJECT_ROOT
-MEMORIES_DIR = BASE_DIR / "memories"
+DOT_YIPS_DIR = BASE_DIR / ".yips"
+MEMORIES_DIR = DOT_YIPS_DIR / "memory"
+WORKING_ZONE = BASE_DIR # The default "Working Zone" for autonomous actions
 COMMANDS_DIR = BASE_DIR / "commands"
 SKILLS_DIR = COMMANDS_DIR / "skills"
 TOOLS_DIR = COMMANDS_DIR / "tools"
@@ -35,6 +37,12 @@ LAYOUT_FULL_MIN_WIDTH = 80
 LAYOUT_SINGLE_MIN_WIDTH = 60
 LAYOUT_COMPACT_MIN_WIDTH = 45
 LAYOUT_MINIMAL_MIN_WIDTH = 35
+
+# Default autonomous depth limit
+DEFAULT_MAX_DEPTH = 5
+
+# Internal reprompt message for ReAct loop
+INTERNAL_REPROMPT = "Observation received. Please proceed."
 
 
 def load_config() -> YipsConfig:

@@ -496,77 +496,118 @@ def render_thinking_block(thinking_text: str, is_streaming: bool = False) -> Gro
     
     # Build the box
     renderables = []
+    total_rows = 2 + 1 + len(content_lines) # top + bottom + header + content
     
-    # Top border (yellow to blue)
-    top_border = yellow_blue_gradient_text("╭" + "─" * (width - 2) + "╮")
-    renderables.append(top_border)
+    def get_diag_text(text_str: str, row_idx: int) -> Text:
+        styled = Text()
+        current_col_cell = 0
+        for char in text_str:
+            # col_idx relative to total width of box
+            # we use cell_len to stay aligned with visual width
+            char_w = cell_len(char)
+            
+            # Progress calculation: (row/total_rows + col/width) / 2
+            # Offset col by 1 if it's the left border char, but easier to just use global col
+            # Actually, for the text inside, we want to start from col 2 (after "│ ")
+            # Let's just use the current_col_cell as a proxy for horizontal progress
+            
+            # We'll calculate progress for the start of the character
+            v_p = row_idx / max(total_rows - 1, 1)
+            h_p = current_col_cell / max(width - 1, 1)
+            progress = (v_p + h_p) / 2
+            
+            r, g, b = interpolate_color(GRADIENT_YELLOW, GRADIENT_BLUE, progress)
+            styled.append(char, style=f"rgb({r},{g},{b})")
+            current_col_cell += char_w
+        return styled
+
+    # 1. Top border (row 0)
+    renderables.append(get_diag_text("╭" + "─" * (width - 2) + "╮", 0))
     
-    # Colors for side borders
-    r_y, g_y, b_y = GRADIENT_YELLOW
-    r_b, g_b, b_b = GRADIENT_BLUE
-    left_style = f"rgb({r_y},{g_y},{b_y})"
-    right_style = f"rgb({r_b},{g_b},{b_b})"
-    
-    # Header row
+    # 2. Header row (row 1)
     header_row = Text()
-    header_row.append("│ ", style=left_style)
+    # Left border
+    r, g, b = interpolate_color(GRADIENT_YELLOW, GRADIENT_BLUE, (1/max(total_rows-1,1) + 0)/2)
+    header_row.append("│", style=f"rgb({r},{g},{b})")
+    header_row.append(" ")
     
     # Truncate header if box is too narrow
-    h_text = header_text
-    h_len = cell_len(h_text.plain)
+    h_plain = header_text.plain
+    h_len = cell_len(h_plain)
     if h_len > width - 4:
-        # Manual truncation for gradient text to keep it reasonably accurate
-        plain = h_text.plain
-        # Try to find a safe truncation point in cells
         truncated_plain = ""
         current_cells = 0
-        for char in plain:
+        for char in h_plain:
             char_cells = cell_len(char)
             if current_cells + char_cells > width - 7:
                 break
             truncated_plain += char
             current_cells += char_cells
-        h_text = yellow_blue_gradient_text(truncated_plain + "...")
-        h_len = cell_len(h_text.plain)
-        
-    header_row.append_text(h_text)
+        h_plain = truncated_plain + "..."
+        h_len = cell_len(h_plain)
+    
+    # Color header content with diagonal gradient (starting at col 2)
+    for i, char in enumerate(h_plain):
+        char_w = cell_len(char)
+        v_p = 1 / max(total_rows - 1, 1)
+        h_p = (2 + i) / max(width - 1, 1) # Approximation of col index
+        progress = (v_p + h_p) / 2
+        r, g, b = interpolate_color(GRADIENT_YELLOW, GRADIENT_BLUE, progress)
+        header_row.append(char, style=f"rgb({r},{g},{b})")
+    
     # Padding
     padding = max(0, width - 4 - h_len)
     header_row.append(" " * padding)
-    header_row.append(" │", style=right_style)
+    
+    # Right border
+    r, g, b = interpolate_color(GRADIENT_YELLOW, GRADIENT_BLUE, (1/max(total_rows-1,1) + (width-1)/max(width-1,1))/2)
+    header_row.append("│", style=f"rgb({r},{g},{b})")
     renderables.append(header_row)
     
-    # Content rows
-    for line in content_lines:
+    # 3. Content rows (rows 2 to 2 + len - 1)
+    for line_idx, line in enumerate(content_lines):
+        row_idx = 2 + line_idx
         row = Text()
-        row.append("│ ", style=left_style)
         
-        # Truncate content if too wide
-        l_text = line
-        l_len = cell_len(l_text.plain)
+        # Left border
+        r, g, b = interpolate_color(GRADIENT_YELLOW, GRADIENT_BLUE, (row_idx/max(total_rows-1,1) + 0)/2)
+        row.append("│", style=f"rgb({r},{g},{b})")
+        row.append(" ")
+        
+        # Truncate content
+        l_plain = line.plain
+        l_len = cell_len(l_plain)
         if l_len > width - 4:
-            plain = l_text.plain
             truncated_plain = ""
             current_cells = 0
-            for char in plain:
+            for char in l_plain:
                 char_cells = cell_len(char)
                 if current_cells + char_cells > width - 7:
                     break
                 truncated_plain += char
                 current_cells += char_cells
-            l_text = yellow_blue_gradient_text(truncated_plain + "...")
-            l_len = cell_len(l_text.plain)
+            l_plain = truncated_plain + "..."
+            l_len = cell_len(l_plain)
             
-        row.append_text(l_text)
+        # Color line content
+        for i, char in enumerate(l_plain):
+            v_p = row_idx / max(total_rows - 1, 1)
+            h_p = (2 + i) / max(width - 1, 1)
+            progress = (v_p + h_p) / 2
+            r, g, b = interpolate_color(GRADIENT_YELLOW, GRADIENT_BLUE, progress)
+            row.append(char, style=f"rgb({r},{g},{b})")
+            
         # Padding
         padding = max(0, width - 4 - l_len)
         row.append(" " * padding)
-        row.append(" │", style=right_style)
+        
+        # Right border
+        r, g, b = interpolate_color(GRADIENT_YELLOW, GRADIENT_BLUE, (row_idx/max(total_rows-1,1) + (width-1)/max(width-1,1))/2)
+        row.append("│", style=f"rgb({r},{g},{b})")
         renderables.append(row)
         
-    # Bottom border (yellow to blue)
-    bottom_border = yellow_blue_gradient_text("╰" + "─" * (width - 2) + "╯")
-    renderables.append(bottom_border)
+    # 4. Bottom border (last row)
+    renderables.append(get_diag_text("╰" + "─" * (width - 2) + "╯", total_rows - 1))
     
     return Group(*renderables)
 

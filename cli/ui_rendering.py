@@ -15,6 +15,8 @@ from rich._spinners import SPINNERS
 from rich.text import Text
 from rich.tree import Tree
 from rich.panel import Panel
+from rich.console import Group
+from rich.cells import cell_len
 
 from cli.color_utils import (
     console,
@@ -25,6 +27,8 @@ from cli.color_utils import (
     GRADIENT_BLUE_DARK,
     TOOL_COLOR,
     blue_gradient_text,
+    yellow_blue_gradient_text,
+    gradient_text,
 )
 from cli.config import APP_VERSION
 
@@ -377,7 +381,7 @@ def render_tool_call(tool_name: str, parameters: dict[str, Any] | str, result: s
 
     tree = Tree(blue_gradient_text("Tool Execution"))
     _add_tool_node_to_tree(tree, tool_name, parameters, result, is_running)
-    return Panel(tree, border_style=TOOL_COLOR, expand=False, padding=(0, 1))
+    return Panel(tree, border_style=TOOL_COLOR, expand=False, padding=0)
 
 
 def render_tool_batch(tools: list[dict], title: str | None = None, compact: bool = False) -> Any:
@@ -397,20 +401,17 @@ def render_tool_batch(tools: list[dict], title: str | None = None, compact: bool
     for t in display_tools:
         _add_tool_node_to_tree(tree, t['name'], t['params'], t.get('result'), t.get('is_running', False))
     
-    return Panel(tree, border_style=TOOL_COLOR, expand=False, padding=(0, 1))
+    return Panel(tree, border_style=TOOL_COLOR, expand=False, padding=0)
 
 
-def render_thinking_block(thinking_text: str, is_streaming: bool = False) -> Panel:
-    """Render a thinking block. Aggressively summarized to show high-level intent."""
+def render_thinking_block(thinking_text: str, is_streaming: bool = False) -> Group:
+    """Render a thinking block with manual gradient borders."""
     # Clean up the thinking text
     text = thinking_text.strip()
     if text.startswith("<think>"):
         text = text[7:].strip()
     if text.endswith("</think>"):
         text = text[:-8].strip()
-
-    if not text:
-        return Panel(Text("• Initializing...", style="dim italic"), border_style="dim", expand=False, padding=(0, 1))
 
     # Noise patterns to strip
     noise_prefixes = [
@@ -432,7 +433,6 @@ def render_thinking_block(thinking_text: str, is_streaming: bool = False) -> Pan
     ]
 
     # Split into sentences or major lines to identify steps
-    # We split on sentence endings followed by space, OR newlines
     raw_parts = re.split(r'(?:(?<=[.!?])\s+)|(?:\n+)', text)
     summarized_points = []
     
@@ -461,39 +461,114 @@ def render_thinking_block(thinking_text: str, is_streaming: bool = False) -> Pan
             part = part[0].upper() + part[1:]
             part = part.rstrip(':').strip()
             
-            # Avoid showing very short fragments that might be artifacts
-            if len(part) < 3:
-                continue
-
+            if len(part) < 3: continue
             if part not in summarized_points:
                 summarized_points.append(part)
 
     # UI Styles
-    blue_style = f"rgb({GRADIENT_BLUE[0]},{GRADIENT_BLUE[1]},{GRADIENT_BLUE[2]})"
-    header = blue_gradient_text("🧠 Thinking Process")
+    header_text = yellow_blue_gradient_text("🧠 Thinking Process")
     
     # Consistent display: Show FIRST 5 points in both cases
     MAX_DISPLAY = 5
     display_points = summarized_points[:MAX_DISPLAY]
     
+    content_lines = []
     if not display_points:
-        # Fallback if no finished sentences yet
-        if is_streaming:
-            return Panel(Text("• Thinking...", style="dim italic"), border_style="dim", expand=False, padding=(0, 1))
+        if not text:
+            content_lines.append(yellow_blue_gradient_text("• Initializing..."))
+        elif is_streaming:
+            content_lines.append(yellow_blue_gradient_text("• Thinking..."))
         else:
-            return Panel(Text("• Task analyzed", style="dim italic"), border_style="dim", expand=False, padding=(0, 1))
+            content_lines.append(yellow_blue_gradient_text("• Task analyzed"))
+    else:
+        for point in display_points:
+            content_lines.append(yellow_blue_gradient_text(f"• {point}"))
 
-    tree = Tree(header, guide_style=blue_style)
-    for point in display_points:
-        # Truncate points to keep them punchy
-        if len(point) > 80:
-            point = point[:77] + "..."
-            
-        point_text = Text(f"• {point}", style=blue_style)
-        point_text.stylize("dim") # Keep it subtle
-        tree.add(point_text)
+    # Calculate width
+    max_content_w = max(cell_len(l.plain) for l in content_lines) if content_lines else 0
+    header_w = cell_len(header_text.plain)
+    # Box needs space for borders (2) and padding (2)
+    width = max(max_content_w, header_w) + 4
+    
+    # Constrain to terminal width
+    term_width = console.width or 80
+    width = min(width, term_width - 2)
+    
+    # Build the box
+    renderables = []
+    
+    # Top border (yellow to blue)
+    top_border = yellow_blue_gradient_text("╭" + "─" * (width - 2) + "╮")
+    renderables.append(top_border)
+    
+    # Colors for side borders
+    r_y, g_y, b_y = GRADIENT_YELLOW
+    r_b, g_b, b_b = GRADIENT_BLUE
+    left_style = f"rgb({r_y},{g_y},{b_y})"
+    right_style = f"rgb({r_b},{g_b},{b_b})"
+    
+    # Header row
+    header_row = Text()
+    header_row.append("│ ", style=left_style)
+    
+    # Truncate header if box is too narrow
+    h_text = header_text
+    h_len = cell_len(h_text.plain)
+    if h_len > width - 4:
+        # Manual truncation for gradient text to keep it reasonably accurate
+        plain = h_text.plain
+        # Try to find a safe truncation point in cells
+        truncated_plain = ""
+        current_cells = 0
+        for char in plain:
+            char_cells = cell_len(char)
+            if current_cells + char_cells > width - 7:
+                break
+            truncated_plain += char
+            current_cells += char_cells
+        h_text = yellow_blue_gradient_text(truncated_plain + "...")
+        h_len = cell_len(h_text.plain)
         
-    return Panel(tree, border_style=blue_style, expand=False, padding=(0, 1))
+    header_row.append_text(h_text)
+    # Padding
+    padding = max(0, width - 4 - h_len)
+    header_row.append(" " * padding)
+    header_row.append(" │", style=right_style)
+    renderables.append(header_row)
+    
+    # Content rows
+    for line in content_lines:
+        row = Text()
+        row.append("│ ", style=left_style)
+        
+        # Truncate content if too wide
+        l_text = line
+        l_len = cell_len(l_text.plain)
+        if l_len > width - 4:
+            plain = l_text.plain
+            truncated_plain = ""
+            current_cells = 0
+            for char in plain:
+                char_cells = cell_len(char)
+                if current_cells + char_cells > width - 7:
+                    break
+                truncated_plain += char
+                current_cells += char_cells
+            l_text = yellow_blue_gradient_text(truncated_plain + "...")
+            l_len = cell_len(l_text.plain)
+            
+        row.append_text(l_text)
+        # Padding
+        padding = max(0, width - 4 - l_len)
+        row.append(" " * padding)
+        row.append(" │", style=right_style)
+        renderables.append(row)
+        
+    # Bottom border (yellow to blue)
+    bottom_border = yellow_blue_gradient_text("╰" + "─" * (width - 2) + "╯")
+    renderables.append(bottom_border)
+    
+    return Group(*renderables)
 
 
 

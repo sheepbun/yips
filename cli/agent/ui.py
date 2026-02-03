@@ -148,6 +148,7 @@ class AgentUIMixin:
 
         # Render bottom border
         render_bottom_border(terminal_width, self.current_session_name)
+        self.console.print()
 
     def _render_single_column_title(self, layout_mode: str) -> None:
         """Render single-column title box for narrow terminals (45-79 chars)."""
@@ -255,6 +256,7 @@ class AgentUIMixin:
 
         # Render bottom border
         render_bottom_border(terminal_width, self.current_session_name)
+        self.console.print()
 
     def _render_two_column_title(self) -> None:
         """Render two-column title box for wide terminals (>= 80 chars)."""
@@ -455,6 +457,7 @@ class AgentUIMixin:
 
         # Render bottom border
         render_bottom_border(terminal_width, self.current_session_name)
+        self.console.print()
 
     def refresh_display(self) -> None:
         """Clear terminal and re-render title box and history."""
@@ -472,7 +475,8 @@ class AgentUIMixin:
 
         # Index to keep track of processed messages
         idx = 0
-        while idx < len(self.conversation_history):
+        history_len = len(self.conversation_history)
+        while idx < history_len:
             message = self.conversation_history[idx]
             role = message.get("role")
             content = message.get("content", "")
@@ -496,7 +500,7 @@ class AgentUIMixin:
             elif role == "system":
                 # Look ahead to group consecutive tool calls
                 tool_batch = []
-                while idx < len(self.conversation_history):
+                while idx < history_len:
                     msg = self.conversation_history[idx]
                     if msg.get("role") != "system":
                         break
@@ -528,13 +532,15 @@ class AgentUIMixin:
                     summary = f"⚡ Executed {len(tool_batch)} tool call{'s' if len(tool_batch) != 1 else ''}"
                     self.console.print(render_tool_batch(tool_batch, summary))
 
-            # Turn spacing
-            if idx < len(self.conversation_history):
+            # Turn spacing: Only add a blank line if the NEXT message is a REAL user prompt
+            if idx < history_len:
                 next_msg = self.conversation_history[idx]
-                if next_msg.get("role") == "user":
+                if next_msg.get("role") == "user" and next_msg.get("content") != INTERNAL_REPROMPT:
                     self.console.print()
-            elif idx == len(self.conversation_history):
-                self.console.print()
+        
+        # Ensure a final newline before the interactive prompt
+        if history_len > 0:
+            self.console.print()
 
     def refresh_title_box_only(self) -> None:
         """Re-render the title box and conversation history."""

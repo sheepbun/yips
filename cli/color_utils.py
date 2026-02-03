@@ -80,6 +80,11 @@ def blue_gradient_text(text: str) -> Text:
     return gradient_text(text, (GRADIENT_BLUE_DARK, GRADIENT_BLUE))
 
 
+def yellow_blue_gradient_text(text: str) -> Text:
+    """Create yellow to blue gradient-colored text."""
+    return gradient_text(text, (GRADIENT_YELLOW, GRADIENT_BLUE))
+
+
 def apply_gradient_to_text(text: str) -> Text:
     """Apply pink->yellow gradient to text for streaming display."""
     return gradient_text(text)

@@ -1,9 +1,8 @@
 #!/bin/bash
-# Yips CLI Launcher
+# Yips CLI Launcher (Portable)
 
-PROJECT_ROOT="/home/katherine/Yips"
+PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
 cd "$PROJECT_ROOT"
 
-# Run the Python CLI
-export YIPS_PERSIST_BACKEND=1
-exec ./.venv/bin/python3 -m cli.main "$@"
+# Run the unified startup script
+exec ./startup.sh "$@"

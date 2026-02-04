@@ -317,6 +317,20 @@ def handle_slash_command(agent: YipsAgentProtocol, user_input: str) -> str | boo
         agent.refresh_display()
         return True
 
+    if command == "models":
+        # Execute the MODELS tool directly
+        cmd_dir = TOOLS_DIR / "MODELS"
+        tool_path = cmd_dir / "MODELS.py"
+        if tool_path.exists():
+            try:
+                venv_python = PROJECT_ROOT / ".venv" / "bin" / "python3"
+                executable = str(venv_python) if venv_python.exists() else sys.executable
+                subprocess.run([executable, str(tool_path)], env={**os.environ, "PYTHONPATH": str(PROJECT_ROOT)})
+                return True
+            except Exception as e:
+                console.print(f"[red]Error running /models: {e}[/red]")
+                return True
+
     # Check for command directory (case-insensitive) in tools then skills
     cmd_dir = None
     # Priority 1: Tools

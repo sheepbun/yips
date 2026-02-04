@@ -108,7 +108,7 @@ class AgentBackendMixin:
         return response
 
     def call_lm_studio(self, message: str) -> str:
-        """Call LM Studio API using Anthropic-compatible endpoint."""
+        """Call LM Studio API using Anthropic-compatible endpoint with retries."""
         system_prompt = self.load_context()
 
         messages = []
@@ -135,81 +135,89 @@ class AgentBackendMixin:
             "Content-Type": "application/json",
         }
 
-        # If streaming is enabled, use streaming mode
+        # If streaming is enabled, use streaming mode (streaming handles its own errors)
         if self.streaming_enabled:
             try:
                 return self._stream_lm_studio(system_prompt, messages)
             except Exception as e:
                 self.console.print(f"[yellow]Streaming failed ({e}), using non-streaming mode[/yellow]")
 
-        try:
-            est_tokens = self._estimate_tokens(system_prompt, messages)
+        last_error = ""
+        for attempt in range(3):
+            try:
+                est_tokens = self._estimate_tokens(system_prompt, messages)
 
-            with show_loading("Waiting for LM Studio response...", token_count=est_tokens):
-                response = requests.post(
-                    f"{LM_STUDIO_URL}/v1/messages",
-                    headers=headers,
-                    json={
-                        "model": self.current_model,
-                        "system": system_prompt,
-                        "messages": messages,
-                        "max_tokens": 2048,
-                    },
-                    timeout=120
-                )
-                
-                if response.status_code != 200:
-                    try:
-                        err_data = response.json()
-                        err_msg = err_data.get("error", {}).get("message", response.text)
-                        return f"[Error from LM Studio ({response.status_code}): {err_msg}]"
-                    except:
-                        return f"[Error from LM Studio: {response.status_code} - {response.text}]"
+                loading_msg = "Waiting for LM Studio response..."
+                if attempt > 0:
+                    loading_msg = f"Retrying LM Studio (attempt {attempt+1}/3)..."
 
-                data = response.json()
+                with show_loading(loading_msg, token_count=est_tokens):
+                    response = requests.post(
+                        f"{LM_STUDIO_URL}/v1/messages",
+                        headers=headers,
+                        json={
+                            "model": self.current_model,
+                            "system": system_prompt,
+                            "messages": messages,
+                            "max_tokens": 2048,
+                        },
+                        timeout=120
+                    )
+                    
+                    if response.status_code != 200:
+                        try:
+                            err_data = response.json()
+                            last_error = err_data.get("error", {}).get("message", response.text)
+                        except:
+                            last_error = f"{response.status_code} - {response.text}"
+                        continue
 
-            content_blocks = data.get("content", [])
-            text_parts: list[str] = []
+                    data = response.json()
 
-            usage = data.get("usage", {})
-            if self.verbose_mode and usage:
-                output_tokens = usage.get("output_tokens", 0)
-                if output_tokens > 0:
-                    token_str = f"{output_tokens/1000:.1f}k" if output_tokens >= 1000 else str(output_tokens)
-                    self.console.print(f"[dim]↓ {token_str} tokens[/dim]", style=TOOL_COLOR)
+                content_blocks = data.get("content", [])
+                text_parts: list[str] = []
 
-            for block in content_blocks:
-                block_type = block.get("type", "")
-                if block_type == "text":
-                    text_parts.append(block.get("text", ""))
-                elif block_type == "thinking":
-                    thinking_content = block.get("thinking", "")
-                    if thinking_content:
-                        if self.verbose_mode:
-                            self.console.print(render_thinking_block(thinking_content))
-                        text_parts.append(f"<think>\n{thinking_content}\n</think>")
-                elif block_type == "tool_use" and self.verbose_mode:
-                    tool_name = block.get("name", "unknown")
-                    tool_input = block.get("input", {})
-                    self._display_lm_studio_tool_call(tool_name, tool_input)
+                usage = data.get("usage", {})
+                if self.verbose_mode and usage:
+                    output_tokens = usage.get("output_tokens", 0)
+                    if output_tokens > 0:
+                        token_str = f"{output_tokens/1000:.1f}k" if output_tokens >= 1000 else str(output_tokens)
+                        self.console.print(f"[dim]↓ {token_str} tokens[/dim]", style=TOOL_COLOR)
 
-            combined_text = "\n".join(text_parts) if text_parts else ""
-            if combined_text:
-                return combined_text
-            elif content_blocks and content_blocks[0].get("text"):
-                return content_blocks[0]["text"]
-            else:
-                return "[No text response from model]"
+                for block in content_blocks:
+                    block_type = block.get("type", "")
+                    if block_type == "text":
+                        text_parts.append(block.get("text", ""))
+                    elif block_type == "thinking":
+                        thinking_content = block.get("thinking", "")
+                        if thinking_content:
+                            if self.verbose_mode:
+                                self.console.print(render_thinking_block(thinking_content))
+                            text_parts.append(f"<think>\n{thinking_content}\n</think>")
+                    elif block_type == "tool_use" and self.verbose_mode:
+                        tool_name = block.get("name", "unknown")
+                        tool_input = block.get("input", {})
+                        self._display_lm_studio_tool_call(tool_name, tool_input)
 
-        except requests.exceptions.ConnectionError:
-            return "[Error: Could not connect to LM Studio. Is it running?]"
-        except requests.exceptions.Timeout:
-            return "[Error: Request timed out after 120 seconds]"
-        except Exception as e:
-            return f"[Error calling LM Studio: {e}]"
+                combined_text = "\n".join(text_parts) if text_parts else ""
+                if combined_text:
+                    return combined_text
+                elif content_blocks and content_blocks[0].get("text"):
+                    return content_blocks[0]["text"]
+                else:
+                    return "[No text response from model]"
+
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+                last_error = str(e)
+                time.sleep(attempt + 1)
+                continue
+            except Exception as e:
+                return f"[Error calling LM Studio: {e}]"
+        
+        return f"[Error: Could not connect to LM Studio after 3 attempts. Last error: {last_error}]"
 
     def call_llamacpp(self, message: str) -> str:
-        """Call llama-server API using OpenAI-compatible endpoint."""
+        """Call llama-server API using OpenAI-compatible endpoint with retries."""
         system_prompt = self.load_context()
 
         raw_messages = [{"role": "system", "content": system_prompt}]
@@ -249,45 +257,59 @@ class AgentBackendMixin:
             except Exception as e:
                 self.console.print(f"[yellow]Streaming failed ({e}), using non-streaming mode[/yellow]")
 
-        try:
-            est_tokens = self._estimate_tokens(system_prompt, messages)
-            with show_loading("Waiting for llama.cpp response...", token_count=est_tokens):
-                response = requests.post(
-                    f"{LLAMA_SERVER_URL}/v1/chat/completions",
-                    json={
-                        "model": self.current_model,
-                        "messages": messages,
-                        "max_tokens": 2048,
-                        "temperature": 0.7,
-                    },
-                    timeout=120
-                )
+        last_error = ""
+        for attempt in range(3):
+            try:
+                est_tokens = self._estimate_tokens(system_prompt, messages)
                 
-                if response.status_code != 200:
-                    return f"[Error from llama.cpp ({response.status_code}): {response.text}]"
+                loading_msg = "Waiting for llama.cpp response..."
+                if attempt > 0:
+                    loading_msg = f"Retrying llama.cpp (attempt {attempt+1}/3)..."
 
-                data = response.json()
-                msg_data = data.get("choices", [{}])[0].get("message", {})
-                content = msg_data.get("content", "")
-                reasoning = msg_data.get("reasoning_content", "")
+                with show_loading(loading_msg, token_count=est_tokens):
+                    response = requests.post(
+                        f"{LLAMA_SERVER_URL}/v1/chat/completions",
+                        json={
+                            "model": self.current_model,
+                            "messages": messages,
+                            "max_tokens": 2048,
+                            "temperature": 0.7,
+                        },
+                        timeout=120
+                    )
+                    
+                    if response.status_code != 200:
+                        last_error = f"{response.status_code}: {response.text}"
+                        continue
 
-                if reasoning and self.verbose_mode:
-                    self.console.print(render_thinking_block(reasoning))
-                
-                if reasoning and not content.startswith("<think>"):
-                    content = f"<think>\n{reasoning}\n</think>\n{content}"
-                
-                usage = data.get("usage", {})
-                if self.verbose_mode and usage:
-                    output_tokens = usage.get("completion_tokens", 0)
-                    if output_tokens > 0:
-                        token_str = f"{output_tokens/1000:.1f}k" if output_tokens >= 1000 else str(output_tokens)
-                        self.console.print(f"[dim]↓ {token_str} tokens[/dim]", style=TOOL_COLOR)
+                    data = response.json()
+                    msg_data = data.get("choices", [{}])[0].get("message", {})
+                    content = msg_data.get("content", "")
+                    reasoning = msg_data.get("reasoning_content", "")
 
-                return content
+                    if reasoning and self.verbose_mode:
+                        self.console.print(render_thinking_block(reasoning))
+                    
+                    if reasoning and not content.startswith("<think>"):
+                        content = f"<think>\n{reasoning}\n</think>\n{content}"
+                    
+                    usage = data.get("usage", {})
+                    if self.verbose_mode and usage:
+                        output_tokens = usage.get("completion_tokens", 0)
+                        if output_tokens > 0:
+                            token_str = f"{output_tokens/1000:.1f}k" if output_tokens >= 1000 else str(output_tokens)
+                            self.console.print(f"[dim]↓ {token_str} tokens[/dim]", style=TOOL_COLOR)
 
-        except Exception as e:
-            return f"[Error calling llama.cpp: {e}]"
+                    return content
+
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+                last_error = str(e)
+                time.sleep(attempt + 1)
+                continue
+            except Exception as e:
+                return f"[Error calling llama.cpp: {e}]"
+        
+        return f"[Error calling llama.cpp after 3 attempts. Last error: {last_error}]"
 
     def _stream_llamacpp(self, messages: list[dict]) -> str:
         """Stream response from llama-server API with real-time display."""

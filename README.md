@@ -20,6 +20,7 @@ cd Yips
 
 ### 2. Run the startup script
 ```bash
+chmod +x startup.sh
 ./startup.sh
 ```
 

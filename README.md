@@ -14,7 +14,7 @@ Yips is designed to be zero-config. The included startup script handles dependen
 
 ### 1. Clone the repository
 ```bash
-git clone https://github.com/yourusername/Yips.git
+git clone https://github.com/sheepbun/yips-cli.git
 cd Yips
 ```
 

@@ -30,7 +30,7 @@ from prompt_toolkit.layout.containers import (
 from prompt_toolkit.layout.controls import FormattedTextControl, BufferControl
 from prompt_toolkit.data_structures import Point
 from prompt_toolkit.layout.layout import Layout
-from prompt_toolkit.layout.menus import CompletionsMenu
+from prompt_toolkit.layout.menus import MultiColumnCompletionsMenu
 from prompt_toolkit.widgets import (
     Frame,
     TextArea,
@@ -417,6 +417,14 @@ class DownloadUI:
             "error": "#ff0000",
             "input": "#ffccff",
             "search_prompt": "#ffccff",
+            'completion-menu': 'noinherit',
+            'completion-menu.completion': 'noinherit',
+            'completion-menu.completion.current': 'noinherit reverse',
+            'completion-menu.meta': 'noinherit',
+            'completion-menu.meta.completion': 'noinherit',
+            'completion-menu.meta.completion.current': 'noinherit reverse',
+            'scrollbar.background': 'noinherit',
+            'scrollbar.button': 'noinherit',
         })
 
         # --- Widgets ---
@@ -504,7 +512,7 @@ class DownloadUI:
         self.floats = [
             Float(xcursor=True,
                   ycursor=True,
-                  content=CompletionsMenu(max_height=16))
+                  content=MultiColumnCompletionsMenu(suggested_max_column_width=20))
         ]
         self.main_layout_container = FloatContainer(
             content=self.root_container,

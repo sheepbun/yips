@@ -504,7 +504,7 @@ class DownloadUI:
         self.floats = [
             Float(xcursor=True,
                   ycursor=True,
-                  content=CompletionsMenu(max_height=16, scrollbar=True))
+                  content=CompletionsMenu(max_height=16))
         ]
         self.main_layout_container = FloatContainer(
             content=self.root_container,

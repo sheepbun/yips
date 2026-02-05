@@ -13,14 +13,22 @@ from huggingface_hub import HfApi
 from huggingface_hub.utils import RepositoryNotFoundError
 
 from prompt_toolkit import Application
+from prompt_toolkit.output.color_depth import ColorDepth
+from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.styles import Style
+from prompt_toolkit.formatted_text import HTML, Template
+from prompt_toolkit.filters import Condition
 from prompt_toolkit.layout.containers import (
     HSplit,
     VSplit,
     Window,
     FloatContainer,
     Float,
+    ConditionalContainer,
+    DynamicContainer,
 )
 from prompt_toolkit.layout.controls import FormattedTextControl, BufferControl
+from prompt_toolkit.data_structures import Point
 from prompt_toolkit.layout.layout import Layout
 from prompt_toolkit.widgets import (
     Frame,
@@ -30,14 +38,148 @@ from prompt_toolkit.widgets import (
     Box,
     RadioList,
 )
-from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.styles import Style
-from prompt_toolkit.formatted_text import HTML
-from prompt_toolkit.filters import Condition
+from prompt_toolkit.widgets.base import Border
+from prompt_toolkit.formatted_text.utils import fragment_list_to_text
+from functools import partial
 
-from cli.color_utils import console
+from cli.color_utils import (
+    console,
+    interpolate_color,
+    GRADIENT_PINK,
+    GRADIENT_YELLOW,
+    GRADIENT_BLUE,
+    GRADIENT_BLUE_DARK,
+    TOOL_COLOR,
+    PROMPT_COLOR,
+)
+
 from cli.ui_rendering import show_loading
 from cli.llamacpp import LLAMA_MODELS_DIR
+
+class CustomFrame(Frame):
+    def __init__(
+        self,
+        body,
+        title="",
+        style="",
+        width=None,
+        height=None,
+        key_bindings=None,
+        modal=False,
+    ) -> None:
+        self.title = title
+        self.body = body
+        self.is_dimmed = False
+
+        # We'll use DynamicContainer to allow the title to change
+        # and re-render the top row with correct gradients if needed.
+        self.container = DynamicContainer(self._get_container)
+
+    def _get_diag_style(self, row_idx, col_idx, total_rows, total_cols):
+        """Calculate gradient style. Use horizontal gradient for top/bottom rows to match Yips style."""
+        if self.is_dimmed:
+            return "#444444"
+
+        if row_idx == 0 or row_idx == total_rows - 1:
+            # Purely horizontal for top/bottom borders
+            progress = col_idx / max(total_cols - 1, 1)
+        else:
+            v_p = row_idx / max(total_rows - 1, 1)
+            h_p = col_idx / max(total_cols - 1, 1)
+            progress = (v_p + h_p) / 2
+        
+        r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, progress)
+        return f"#{r:02x}{g:02x}{b:02x}"
+
+    def _get_container(self):
+        # Determine total rows for gradient calculation
+        total_rows = 15 
+        total_cols = console.width or 80
+
+        # Title formatting: "Yips" (gradient) + " Model Downloader" (blue)
+        title_text = []
+        prefix = "╭─── "
+        for i, char in enumerate(prefix):
+            style = self._get_diag_style(0, i, total_rows, total_cols)
+            title_text.append((style, char))
+        
+        # Split title for specific styling
+        full_title = fragment_list_to_text(self.title) if not isinstance(self.title, str) else self.title
+        
+        if "Yips" in full_title:
+            parts = full_title.split("Yips", 1)
+            # Before "Yips"
+            if parts[0]:
+                for char in parts[0]:
+                    title_text.append((self._get_diag_style(0, len(title_text), total_rows, total_cols), char))
+            
+            # "Yips" with its own gradient
+            yips_str = "Yips"
+            for i, char in enumerate(yips_str):
+                if self.is_dimmed:
+                    style = "#555555"
+                else:
+                    progress = i / max(len(yips_str) - 1, 1)
+                    r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, progress)
+                    style = f"#{r:02x}{g:02x}{b:02x}"
+                title_text.append((style, char))
+            
+            # After "Yips" (Blue text)
+            rest = parts[1]
+            if rest:
+                blue_hex = f"#{GRADIENT_BLUE[0]:02x}{GRADIENT_BLUE[1]:02x}{GRADIENT_BLUE[2]:02x}"
+                if self.is_dimmed: blue_hex = "#555555"
+                for char in rest:
+                    title_text.append((blue_hex, char))
+        else:
+            # Fallback
+            for i, char in enumerate(full_title):
+                style = self._get_diag_style(0, len(prefix) + i, total_rows, total_cols)
+                title_text.append((style, char))
+
+        # Add space after title
+        title_len = len(title_text)
+        title_text.append((self._get_diag_style(0, title_len, total_rows, total_cols), " "))
+        title_len += 1
+
+        top_row = VSplit([
+            Window(content=FormattedTextControl(title_text), height=1, dont_extend_width=True),
+            Window(char=Border.HORIZONTAL, style=lambda: self._get_diag_style(0, title_len, total_rows, total_cols)), # Dynamic style is tricky here
+            # We'll just use a bunch of 1-char windows to get the gradient on the line
+        ], height=1)
+
+        # Re-implementing the frame with gradient windows
+        def fill(row, col, char, width=None):
+            return Window(width=width, height=1, char=char, 
+                          style=self._get_diag_style(row, col, total_rows, total_cols))
+
+        # Build top row more carefully for gradient
+        top_elements = []
+        # Prefix and title are already handled in a single control for simplicity of text
+        top_elements.append(Window(content=FormattedTextControl(title_text), height=1, dont_extend_width=True))
+        
+        # Fill the rest of the top line with gradient characters
+        remaining = total_cols - title_len - 1 # -1 for the corner
+        for i in range(remaining):
+            top_elements.append(fill(0, title_len + i, Border.HORIZONTAL, width=1))
+        
+        top_elements.append(fill(0, total_cols - 1, "╮", width=1))
+
+        # Bottom row
+        bottom_elements = [fill(total_rows-1, 0, "╰", width=1)]
+        for i in range(1, total_cols - 1):
+            bottom_elements.append(fill(total_rows-1, i, Border.HORIZONTAL, width=1))
+        bottom_elements.append(fill(total_rows-1, total_cols-1, "╯", width=1))
+
+        return HSplit([
+            VSplit(top_elements, height=1),
+            VSplit([
+                Window(width=1, char=Border.VERTICAL, style=lambda: self._get_diag_style(5, 0, total_rows, total_cols)),
+                self.body,
+                Window(width=1, char=Border.VERTICAL, style=lambda: self._get_diag_style(5, total_cols-1, total_rows, total_cols)),
+            ]),
+            VSplit(bottom_elements, height=1),
+        ])
 
 # --- System Info & Hardware Filtering ---
 
@@ -141,6 +283,7 @@ class HFModelManager:
         sort_map = {
             "Downloads": "downloads",
             "Likes": "likes", 
+            "Trending": "trendingScore",
             "Updated": "lastModified"
         }
         sort_key = sort_map.get(sort, "downloads")
@@ -153,6 +296,7 @@ class HFModelManager:
             "filter": "gguf",
             "sort": sort_key,
             "limit": limit,
+            "expand": ["lastModified", "pipeline_tag", "downloads", "likes", "gguf"]
         }
         if search:
             params["search"] = search
@@ -163,12 +307,27 @@ class HFModelManager:
             models = self.api.list_models(**params)
             results = []
             for m in models:
+                # Filter for text-generation related models if it's a general list
+                # but be lenient to include models with no pipeline_tag (like many GGUF quants)
+                p_tag = getattr(m, 'pipeline_tag', None)
+                if not search and not author:
+                    if p_tag and p_tag not in ["text-generation", "conversational", "text2text-generation"]:
+                        continue
+
+                # Filter by size if gguf info is available
+                gguf_info = getattr(m, 'gguf', None)
+                if gguf_info and 'total' in gguf_info:
+                    size_gb = gguf_info['total'] / (1024 * 1024 * 1024)
+                    # Use the same 1.2x heuristic as can_run_model
+                    if size_gb > TOTAL_MEM_GB * 1.2:
+                        continue
+
                 results.append({
-                    "id": m.modelId,
-                    "downloads": m.downloads,
-                    "likes": m.likes,
-                    "last_modified": m.lastModified,
-                    "author": m.author,
+                    "id": m.id,
+                    "downloads": getattr(m, 'downloads', 0) or 0,
+                    "likes": getattr(m, 'likes', 0) or 0,
+                    "last_modified": getattr(m, 'lastModified', None),
+                    "author": getattr(m, 'author', "Unknown") or "Unknown",
                 })
             
             # Update cache for standard requests
@@ -190,7 +349,7 @@ class HFModelManager:
         def _task():
             manager = HFModelManager()
             # Precache all tabs
-            for sort in ["Downloads", "Likes", "Updated"]:
+            for sort in ["Downloads", "Trending", "Updated"]:
                 manager.list_gguf_models(sort=sort)
             cls._is_precaching = False
             
@@ -199,29 +358,32 @@ class HFModelManager:
     def get_model_files(self, model_id: str) -> List[Dict]:
         """Get GGUF files for a specific model."""
         try:
-            # list_files_info is the one.
-            files_info = list(self.api.list_files_info(model_id, paths="*.gguf"))
+            # Use list_repo_tree with recursive=True to find all .gguf files
+            files_info = [f for f in self.api.list_repo_tree(model_id, recursive=True) 
+                         if f.path.endswith(".gguf")]
             
             results = []
             for f in files_info:
                 # Calculate quantization from name (e.g. Q4_K_M)
                 quant = "Unknown"
-                if "Q4_K_M" in f.path: quant = "Q4_K_M (Balanced)"
-                elif "Q5_K_M" in f.path: quant = "Q5_K_M (High Quality)"
-                elif "Q8_0" in f.path: quant = "Q8_0 (Max Quality)"
-                elif "Q2_K" in f.path: quant = "Q2_K (Max Speed)"
+                path_str = f.path.upper()
+                if "Q4_K_M" in path_str: quant = "Q4_K_M (Balanced)"
+                elif "Q5_K_M" in path_str: quant = "Q5_K_M (High Quality)"
+                elif "Q8_0" in path_str: quant = "Q8_0 (Max Quality)"
+                elif "Q2_K" in path_str: quant = "Q2_K (Max Speed)"
                 else:
                     # Extract roughly
                     import re
-                    match = re.search(r'(Q\d_[A-Z0-9_]+)', f.path, re.IGNORECASE)
+                    match = re.search(r'(Q\d_[A-Z0-9_]+)', path_str)
                     if match:
                         quant = match.group(1)
                 
-                can_run, reason = can_run_model(f.size)
+                size_bytes = getattr(f, 'size', None)
+                can_run, reason = can_run_model(size_bytes)
                 
                 results.append({
                     "filename": f.path,
-                    "size": f.size,
+                    "size": size_bytes,
                     "quant": quant,
                     "can_run": can_run,
                     "reason": reason
@@ -243,6 +405,7 @@ class DownloadUI:
         self.models_data = []
         self.selected_model_id = None
         self.files_data = []
+        self.is_dimmed = False
         
         # State
         self.current_tab = "Most Downloaded" # Most Downloaded, Top Rated, Newest
@@ -261,6 +424,7 @@ class DownloadUI:
             "status": "#888888",
             "error": "#ff0000",
             "input": "#ffccff",
+            "search_prompt": "#ffccff",
         })
 
         # --- Widgets ---
@@ -268,7 +432,7 @@ class DownloadUI:
         # Search Bar (Moved to bottom)
         self.search_area = TextArea(
             multiline=False, 
-            prompt=HTML('<style fg="#ffccff">>>> 🔍</style>'),
+            prompt=[("class:search_prompt", ">>> 🔍 ")],
             style="class:input",
             accept_handler=self._on_search
         )
@@ -283,7 +447,9 @@ class DownloadUI:
         self.model_list_control = FormattedTextControl(
             text=self._get_model_list_text,
             focusable=True,
-            key_bindings=self._get_list_key_bindings()
+            show_cursor=False,
+            key_bindings=self._get_list_key_bindings(),
+            get_cursor_position=self._get_model_list_cursor_position
         )
         self.model_list_window = Window(
             content=self.model_list_control,
@@ -296,7 +462,9 @@ class DownloadUI:
         self.file_list_control = FormattedTextControl(
             text=self._get_file_list_text,
             focusable=True,
-            key_bindings=self._get_file_list_key_bindings()
+            show_cursor=False,
+            key_bindings=self._get_file_list_key_bindings(),
+            get_cursor_position=self._get_file_list_cursor_position
         )
         self.selected_file_index = 0
         
@@ -328,10 +496,9 @@ class DownloadUI:
         ])
         
         # Framed content
-        framed_content = Frame(
+        framed_content = CustomFrame(
             main_content,
-            title="Yips Model Downloader",
-            style="class:frame.border"
+            title="Yips Model Downloader"
         )
         
         self.root_container = HSplit([
@@ -349,18 +516,41 @@ class DownloadUI:
             key_bindings=self.kb,
             style=self.style,
             full_screen=False,
-            mouse_support=True
+            mouse_support=True,
+            color_depth=ColorDepth.TRUE_COLOR
         )
+
+    def _get_model_list_cursor_position(self):
+        row = self.selected_model_index - self.list_scroll_offset
+        return Point(x=0, y=row)
+
+    def _get_file_list_cursor_position(self):
+        # The file list has a header of 2 lines
+        return Point(x=0, y=self.selected_file_index + 2)
 
     def _get_tabs_text(self):
         tabs = ["Most Downloaded", "Top Rated", "Newest"]
         result = []
+        total_cols = console.width or 80
+        
+        current_pos = 0
         for t in tabs:
+            display_t = f" {t} "
             if t == self.current_tab:
-                result.append(("class:tab.active", f" {t} "))
+                if self.is_dimmed:
+                    result.append(("bg:#555555 #000000 bold", display_t))
+                else:
+                    for i, char in enumerate(display_t):
+                        # Horizontal gradient mapped to the tab width
+                        progress = i / max(len(display_t) - 1, 1)
+                        r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, progress)
+                        # Use black text for highlighted elements
+                        result.append((f"bg:#{r:02x}{g:02x}{b:02x} #000000 bold", char))
             else:
-                result.append(("class:tab.inactive", f" {t} "))
+                result.append(("class:tab.inactive", display_t))
+            
             result.append(("", " "))
+            current_pos += len(display_t) + 1
         return result
 
     def _get_status_text(self):
@@ -375,34 +565,50 @@ class DownloadUI:
             return "Loading or no models found..."
             
         lines = []
-        # Calculate visible range based on height (approximate)
-        # Fixed height 12
         height = 12
         start = self.list_scroll_offset
         end = start + height
+        total_cols = console.width or 80
+        total_rows = 15 # Approximate total rows for gradient
         
         visible_items = self.models_data[start:end]
+        is_focused = self.layout.has_focus(self.model_list_control)
         
         for i, model in enumerate(visible_items):
             real_idx = start + i
-            style = "class:list-item.selected" if real_idx == self.selected_model_index else ""
+            is_selected = (real_idx == self.selected_model_index)
             
             name = model['id']
             if len(name) > 50: name = name[:47] + "..."
             
-            # Format numbers
             downloads = f"{model['downloads']/1000:.1f}k" if model['downloads'] > 1000 else str(model['downloads'])
             
             last_mod = "Unknown"
             if model['last_modified']:
-                # Handle both datetime and string (API variations)
                 if isinstance(model['last_modified'], datetime):
                     last_mod = model['last_modified'].strftime('%Y-%m-%d')
                 else:
                     last_mod = str(model['last_modified'])[:10]
 
-            text = f" {name:<50} | ↓ {downloads:<6} | {last_mod}"
-            lines.append((style, text + "\n"))
+            cursor = ">" if is_selected else " "
+            text = f"{cursor} {name:<50} | ↓ {downloads:<6} | {last_mod}"
+            
+            if is_selected:
+                if self.is_dimmed:
+                    lines.append(("bg:#555555 #000000", text + "\n"))
+                else:
+                    for col, char in enumerate(text):
+                        if col == 0 and is_focused:
+                            # Only the cursor character gets solid pink background when focused
+                            lines.append(("bg:#ffccff #000000", char))
+                        else:
+                            # The rest of the line (or everything if not focused) uses the gradient
+                            progress = col / max(len(text) - 1, 1)
+                            r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, progress)
+                            lines.append((f"bg:#{r:02x}{g:02x}{b:02x} #000000", char))
+                    lines.append(("", "\n"))
+            else:
+                lines.append(("", text + "\n"))
             
         return lines
 
@@ -412,23 +618,44 @@ class DownloadUI:
             
         lines = []
         lines.append(("", f"Select quantization for {self.selected_model_id}:\n\n"))
+        total_cols = console.width or 80
+        total_rows = 15
+        is_focused = self.layout.has_focus(self.file_list_control)
         
         for i, f in enumerate(self.files_data):
-            style = "class:list-item.selected" if i == self.selected_file_index else ""
+            is_selected = (i == self.selected_file_index)
             
             size_val = f['size'] or 0
             size_gb = size_val / (1024*1024*1024)
             fname = f['filename']
-            # Only show filename part
             if "/" in fname: fname = fname.split("/")[-1]
             
             status = "OK" if f['can_run'] else "⚠️ TOO LARGE"
             status_style = "fg:ansired" if not f['can_run'] else "fg:ansigreen"
             
-            text = f" {fname:<40} | {f['quant']:<15} | {size_gb:.1f} GB | "
+            cursor = ">" if is_selected else " "
+            text = f"{cursor} {fname:<40} | {f['quant']:<15} | {size_gb:.1f} GB | "
             
-            lines.append((style, text))
-            lines.append((status_style, f"{status}\n"))
+            if is_selected:
+                full_selected_text = text + status
+                if self.is_dimmed:
+                    lines.append(("bg:#555555 #000000", full_selected_text + "\n"))
+                else:
+                    for col, char in enumerate(full_selected_text):
+                        if col == 0 and is_focused:
+                            # Only the cursor character gets solid pink background when focused
+                            lines.append(("bg:#ffccff #000000", char))
+                        else:
+                            # The rest of the line uses the gradient
+                            progress = col / max(len(full_selected_text) - 1, 1)
+                            r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, progress)
+                            lines.append((f"bg:#{r:02x}{g:02x}{b:02x} #000000", char))
+                    lines.append(("", "\n"))
+            else:
+                lines.append(("", text))
+                lines.append((status_style, f"{status}\n"))
+            
+        return lines
             
         return lines
 
@@ -436,6 +663,22 @@ class DownloadUI:
         @self.kb.add("escape")
         def _(event):
             # Apply dimmed style for "greyed out" look on exit
+            self.is_dimmed = True
+            # Find the CustomFrame(s) and dim them
+            for container in self.layout.container.get_children():
+                if isinstance(container, CustomFrame):
+                    container.is_dimmed = True
+                # Recursive search if needed, but here they are top-level
+            
+            # If the layout is currently showing a popup, it's a FloatContainer
+            if isinstance(self.layout.container, FloatContainer):
+                for f in self.layout.container.floats:
+                    if isinstance(f.content, CustomFrame):
+                        f.content.is_dimmed = True
+                # Also dim the base content
+                if isinstance(self.layout.container.content, CustomFrame):
+                    self.layout.container.content.is_dimmed = True
+
             dim_style = Style.from_dict({
                 "frame.border": "#444444", 
                 "frame.label": "#555555",
@@ -445,7 +688,8 @@ class DownloadUI:
                 "list-item.selected": "#555555",
                 "status": "#444444",
                 "error": "#444444",
-                "input": "#555555",
+                "input": "#444444",
+                "search_prompt": "#444444",
             })
             event.app.style = dim_style
             event.app.exit()
@@ -548,11 +792,11 @@ class DownloadUI:
         self.models_data = []
         
         # Adjust params based on tabs
-        # "Top Rated" maps to Likes
+        # "Top Rated" maps to Trending for "Most Popular" feel
         # "Newest" -> lastModified
         sort_mode = "Downloads"
         if self.current_tab == "Top Rated":
-            sort_mode = "Likes"
+            sort_mode = "Trending"
         elif self.current_tab == "Newest":
             sort_mode = "Updated"
         
@@ -580,10 +824,9 @@ class DownloadUI:
         # Switch layout to show overlay
         # We create a FloatContainer wrapping the root
         
-        popup_body = Frame(
+        popup_body = CustomFrame(
             Window(self.file_list_control),
-            title=f"Files for {model_id}",
-            style="class:dialog"
+            title=f"Files for {model_id}"
         )
         
         self.layout.container = FloatContainer(

@@ -11,15 +11,16 @@ from cli.hw_utils import get_system_specs, is_model_suitable
 
 console = Console()
 
-# Hugging Face Search Config
 HF_API_URL = "https://huggingface.co/api/models"
-# We'll look for popular GGUF models
+
+# Hugging Face Search Config
+# We'll look for popular GGUF models with more inclusive filtering
 SEARCH_PARAMS = {
-    "search": "GGUF",
+    "filter": "gguf",
     "sort": "downloads",
     "direction": "-1",
     "limit": 20,
-    "filter": "gguf"
+    "expand": ["pipeline_tag", "downloads", "likes"]
 }
 
 MODELS_DIR = Path.home() / ".lmstudio" / "models"
@@ -28,7 +29,15 @@ def fetch_popular_models():
     try:
         response = requests.get(HF_API_URL, params=SEARCH_PARAMS, timeout=10)
         response.raise_for_status()
-        return response.json()
+        models = response.json()
+        
+        # Filter for text-generation related models or those with no pipeline tag
+        filtered = []
+        for m in models:
+            p_tag = m.get("pipeline_tag")
+            if not p_tag or p_tag in ["text-generation", "conversational", "text2text-generation"]:
+                filtered.append(m)
+        return filtered
     except Exception as e:
         console.print(f"[red]Error fetching from Hugging Face: {e}[/red]")
         return []
@@ -52,7 +61,7 @@ def main():
     
     for m in models:
         repo_id = m.get("id")
-        downloads = m.get("downloads", 0)
+        downloads = m.get("downloads") or 0
         
         # Estimate size (very rough heuristic based on name or metadata)
         # Most popular are 7B-12B, roughly 5-10GB

@@ -398,9 +398,9 @@ def render_tool_call(tool_name: str, parameters: dict[str, Any] | str, result: s
             "is_running": is_running
         }
 
-    tree = Tree(blue_gradient_text("Tool Execution"))
+    tree = Tree("", hide_root=True)
     _add_tool_node_to_tree(tree, tool_name, parameters, result, is_running)
-    return Panel(tree, border_style=TOOL_COLOR, expand=False, padding=0)
+    return Panel(tree, title=blue_gradient_text("Tool Execution"), border_style=TOOL_COLOR, expand=False, padding=(0, 1))
 
 
 def render_tool_batch(tools: list[dict], title: str | None = None, compact: bool = False) -> Any:
@@ -409,8 +409,8 @@ def render_tool_batch(tools: list[dict], title: str | None = None, compact: bool
     if os.environ.get("YIPS_GUI_MODE") == "1":
         return {"type": "batch", "title": title, "tools": tools, "compact": compact}
 
-    root_text = blue_gradient_text(title) if title else blue_gradient_text("Batch Execution")
-    tree = Tree(root_text)
+    title_text = title if title else "Batch Execution"
+    tree = Tree("", hide_root=True)
     
     display_tools = tools
     if compact and tools:
@@ -420,7 +420,7 @@ def render_tool_batch(tools: list[dict], title: str | None = None, compact: bool
     for t in display_tools:
         _add_tool_node_to_tree(tree, t['name'], t['params'], t.get('result'), t.get('is_running', False))
     
-    return Panel(tree, border_style=TOOL_COLOR, expand=False, padding=0)
+    return Panel(tree, title=blue_gradient_text(title_text), border_style=TOOL_COLOR, expand=False, padding=(0, 1))
 
 
 def render_thinking_block(thinking_text: str, is_streaming: bool = False) -> Group:
@@ -505,9 +505,12 @@ def render_thinking_block(thinking_text: str, is_streaming: bool = False) -> Gro
 
     # Calculate width
     max_content_w = max(cell_len(l.plain) for l in content_lines) if content_lines else 0
-    header_w = cell_len(header_text.plain)
+    header_plain = "🧠 Thinking Process"
+    header_w = cell_len(header_plain)
+    
     # Box needs space for borders (2) and padding (2)
-    width = max(max_content_w, header_w) + 4
+    # For header in border, we need at least ╭─── [header] ───╮ which is header_w + 10
+    width = max(max_content_w + 4, header_w + 10)
     
     # Constrain to terminal width
     term_width = console.width or 80
@@ -515,7 +518,7 @@ def render_thinking_block(thinking_text: str, is_streaming: bool = False) -> Gro
     
     # Build the box
     renderables = []
-    total_rows = 2 + 1 + len(content_lines) # top + bottom + header + content
+    total_rows = 2 + len(content_lines) # top + bottom + content
     
     def get_diag_text(text_str: str, row_idx: int) -> Text:
         styled = Text()
@@ -540,59 +543,24 @@ def render_thinking_block(thinking_text: str, is_streaming: bool = False) -> Gro
             current_col_cell += char_w
         return styled
 
-    # 1. Top border (row 0)
-    renderables.append(get_diag_text("╭" + "─" * (width - 2) + "╮", 0))
+    # 1. Top border with title (row 0)
+    opening = "╭─── "
+    # Truncate header if box is too narrow (extremely unlikely given width calculation)
+    h_plain = header_plain
+    if cell_len(opening) + cell_len(h_plain) + 5 > width: # 5 for " ───╮"
+        h_plain = h_plain[:width-10] + "..."
+        
+    top_border_str = opening + h_plain + " "
+    remainder = width - cell_len(top_border_str) - 1
+    if remainder > 0:
+        top_border_str += "─" * remainder
+    top_border_str += "╮"
     
-    # 2. Header row (row 1)
-    header_row = Text()
-    # Left border
-    r, g, b = interpolate_color(GRADIENT_YELLOW, GRADIENT_BLUE, (1/max(total_rows-1,1) + 0)/2)
-    header_row.append("│", style=f"rgb({r},{g},{b})")
-    header_row.append(" ")
+    renderables.append(get_diag_text(top_border_str, 0))
     
-    # Truncate header if box is too narrow
-    h_plain = header_text.plain
-    h_len = cell_len(h_plain)
-    if h_len > width - 4:
-        truncated_plain = ""
-        current_cells = 0
-        for char in h_plain:
-            char_cells = cell_len(char)
-            if current_cells + char_cells > width - 7:
-                break
-            truncated_plain += char
-            current_cells += char_cells
-        h_plain = truncated_plain + "..."
-        h_len = cell_len(h_plain)
-    
-    # Color header content with diagonal gradient (starting at col 2)
-    for i, char in enumerate(h_plain):
-        char_w = cell_len(char)
-        v_p = 1 / max(total_rows - 1, 1)
-        h_p = (2 + i) / max(width - 1, 1)
-        progress = (v_p + h_p) / 2
-        r, g, b = interpolate_color(GRADIENT_YELLOW, GRADIENT_BLUE, progress)
-        header_row.append(char, style=f"rgb({r},{g},{b})")
-    
-    # Padding
-    padding = max(0, width - 4 - h_len)
-    header_row.append(" " * padding)
-    
-    # Right border (with preceding space)
-    v_p = 1 / max(total_rows - 1, 1)
-    # Space before pipe
-    h_p_space = (width - 2) / max(width - 1, 1)
-    r, g, b = interpolate_color(GRADIENT_YELLOW, GRADIENT_BLUE, (v_p + h_p_space) / 2)
-    header_row.append(" ", style=f"rgb({r},{g},{b})")
-    # Pipe
-    h_p_pipe = (width - 1) / max(width - 1, 1)
-    r, g, b = interpolate_color(GRADIENT_YELLOW, GRADIENT_BLUE, (v_p + h_p_pipe) / 2)
-    header_row.append("│", style=f"rgb({r},{g},{b})")
-    renderables.append(header_row)
-    
-    # 3. Content rows (rows 2 to 2 + len - 1)
+    # 2. Content rows (rows 1 to len)
     for line_idx, line in enumerate(content_lines):
-        row_idx = 2 + line_idx
+        row_idx = 1 + line_idx
         row = Text()
         
         # Left border
@@ -639,7 +607,7 @@ def render_thinking_block(thinking_text: str, is_streaming: bool = False) -> Gro
         row.append("│", style=f"rgb({r},{g},{b})")
         renderables.append(row)
         
-    # 4. Bottom border (last row)
+    # 3. Bottom border (last row)
     renderables.append(get_diag_text("╰" + "─" * (width - 2) + "╯", total_rows - 1))
     
     return Group(*renderables)

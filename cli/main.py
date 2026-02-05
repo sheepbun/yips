@@ -7,6 +7,8 @@ Provides the main() function that initializes and runs the YipsAgent.
 import os
 import sys
 import subprocess
+import termios
+import tty
 from typing import Any
 
 from prompt_toolkit import PromptSession
@@ -258,17 +260,50 @@ def main() -> None:
     agent = YipsAgent(prompt_session=session)
 
     is_gui = os.environ.get("YIPS_GUI_MODE") == "1"
+    
+    # Save original terminal settings
+    fd = sys.stdin.fileno()
+    old_settings = termios.tcgetattr(fd)
+    settings_changed = False
 
-    if not is_gui:
-        # Clear terminal
-        subprocess.run('clear' if os.name != 'nt' else 'cls', shell=True)
+    try:
+        if not is_gui:
+            # Disable echo during startup (keep other flags normal)
+            new_settings = termios.tcgetattr(fd)
+            new_settings[3] = new_settings[3] & ~termios.ECHO
+            termios.tcsetattr(fd, termios.TCSANOW, new_settings)
+            settings_changed = True
 
-        # Render the title box
-        agent.render_title_box()
+            # Clear terminal
+            subprocess.run('clear' if os.name != 'nt' else 'cls', shell=True)
 
-    # Initialize backend after displaying UI
-    with show_booting("Booting Yips..."):
-        agent.initialize_backend()
+            # Render the title box
+            agent.render_title_box()
+
+        # Initialize backend after displaying UI
+        with show_booting("Booting Yips..."):
+            agent.initialize_backend()
+            
+            # Precache HF model data in background for snappy /download command
+            try:
+                from cli.download_ui import HFModelManager
+                HFModelManager.precache_background()
+            except Exception:
+                pass # Silently fail if HF is unavailable during boot
+
+        # Flush any keystrokes buffered during startup BEFORE restoring echo
+        # This prevents them from being echoed to the screen
+        termios.tcflush(sys.stdin, termios.TCIFLUSH)
+
+    except Exception:
+        # Ensure terminal is restored if init fails so user sees the error
+        if settings_changed:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        raise
+    
+    # Restore terminal settings (re-enables echo)
+    if settings_changed:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
     if args.command:
         # Handle single command mode

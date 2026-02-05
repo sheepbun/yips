@@ -76,7 +76,10 @@ class SlashCommandCompleter(Completer):
             '/clear': {'desc': 'Clear context and start a new session', 'type': 'tool'},
             '/new': {'desc': 'Start a new session', 'type': 'tool'},
             '/verbose': {'desc': 'Toggle verbose output', 'type': 'tool'},
-            '/stream': {'desc': 'Toggle streaming responses', 'type': 'tool'}
+            '/stream': {'desc': 'Toggle streaming responses', 'type': 'tool'},
+            '/backend': {'desc': 'Switch AI backends (llamacpp, claude)', 'type': 'tool'},
+            '/download': {'desc': 'Open the interactive model downloader', 'type': 'tool'},
+            '/models': {'desc': 'List or search for models on Hugging Face', 'type': 'tool'}
         }
 
         # 2. Discover commands from directories
@@ -147,25 +150,29 @@ class SlashCommandCompleter(Completer):
 
     def get_completions(self, document, complete_event):
         """Get completions for commands with styling."""
-        # Get text before cursor (lstrip for leading whitespace)
-        text_before_cursor = document.text_before_cursor.lstrip()
+        # Get text before cursor
+        text_before_cursor = document.text_before_cursor
 
-        # Only trigger if text starts with '/'
-        if not text_before_cursor.startswith('/'):
+        # If it doesn't contain a slash, no completion
+        if '/' not in text_before_cursor:
             return
 
-        # Stop if space detected (entering args)
-        if ' ' in text_before_cursor:
+        # Find the last slash to determine what we are completing
+        last_slash_idx = text_before_cursor.rfind('/')
+        
+        # What comes after the slash
+        after_slash = text_before_cursor[last_slash_idx:].lower()
+        
+        # If there's a space after the slash (other than leading spaces which we might be lstripping)
+        # we are likely in arguments.
+        if ' ' in after_slash:
             return
 
         # Get available commands
         words, meta_dict = self._get_words_and_meta()
 
-        # Case-insensitive matching
-        text_lower = text_before_cursor.lower()
-
         for command in words:
-            if command.lower().startswith(text_lower):
+            if command.lower().startswith(after_slash):
                 cmd_data = meta_dict.get(command, {'desc': '', 'type': 'tool'})
                 
                 # Styled command (pink for skills, blue gradient for tools)
@@ -175,8 +182,14 @@ class SlashCommandCompleter(Completer):
                 description = cmd_data['desc']
                 display_meta = self._create_gradient_formatted_text(description)
 
-                # Calculate replacement position
-                start_position = -len(text_before_cursor)
+                # Calculate replacement position.
+                # If the line starts with the slash (ignoring whitespace), replace the whole line.
+                # Otherwise, replace just the current word starting with the slash.
+                stripped_before = text_before_cursor.lstrip()
+                if stripped_before.startswith('/'):
+                    start_position = -len(text_before_cursor)
+                else:
+                    start_position = -len(after_slash)
 
                 # Yield completion with styling
                 yield Completion(

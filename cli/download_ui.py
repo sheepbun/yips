@@ -55,6 +55,7 @@ from cli.color_utils import (
 
 from cli.ui_rendering import show_loading
 from cli.llamacpp import LLAMA_MODELS_DIR
+from cli.completer import SlashCommandCompleter
 
 class CustomFrame(Frame):
     def __init__(
@@ -76,17 +77,12 @@ class CustomFrame(Frame):
         self.container = DynamicContainer(self._get_container)
 
     def _get_diag_style(self, row_idx, col_idx, total_rows, total_cols):
-        """Calculate gradient style. Use horizontal gradient for top/bottom rows to match Yips style."""
+        """Calculate gradient style. Use horizontal gradient for all border characters to match Yips style."""
         if self.is_dimmed:
             return "#444444"
 
-        if row_idx == 0 or row_idx == total_rows - 1:
-            # Purely horizontal for top/bottom borders
-            progress = col_idx / max(total_cols - 1, 1)
-        else:
-            v_p = row_idx / max(total_rows - 1, 1)
-            h_p = col_idx / max(total_cols - 1, 1)
-            progress = (v_p + h_p) / 2
+        # Purely horizontal progress for borders to match Yips agent's style
+        progress = col_idx / max(total_cols - 1, 1)
         
         r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, progress)
         return f"#{r:02x}{g:02x}{b:02x}"
@@ -108,12 +104,7 @@ class CustomFrame(Frame):
         
         if "Yips" in full_title:
             parts = full_title.split("Yips", 1)
-            # Before "Yips"
-            if parts[0]:
-                for char in parts[0]:
-                    title_text.append((self._get_diag_style(0, len(title_text), total_rows, total_cols), char))
-            
-            # "Yips" with its own gradient
+            # "Yips" with its own gradient from the start of its position
             yips_str = "Yips"
             for i, char in enumerate(yips_str):
                 if self.is_dimmed:
@@ -124,12 +115,19 @@ class CustomFrame(Frame):
                     style = f"#{r:02x}{g:02x}{b:02x}"
                 title_text.append((style, char))
             
-            # After "Yips" (Blue text)
+            # Rest of the title
             rest = parts[1]
             if rest:
+                # Add the space after Yips
+                title_text.append((self._get_diag_style(0, len(title_text), total_rows, total_cols), " "))
+                
+                # "Model Downloader" in Blue
                 blue_hex = f"#{GRADIENT_BLUE[0]:02x}{GRADIENT_BLUE[1]:02x}{GRADIENT_BLUE[2]:02x}"
                 if self.is_dimmed: blue_hex = "#555555"
-                for char in rest:
+                
+                # Strip the leading space from 'rest' if it was " Model Downloader"
+                rest_display = rest.strip()
+                for char in rest_display:
                     title_text.append((blue_hex, char))
         else:
             # Fallback
@@ -142,41 +140,34 @@ class CustomFrame(Frame):
         title_text.append((self._get_diag_style(0, title_len, total_rows, total_cols), " "))
         title_len += 1
 
-        top_row = VSplit([
-            Window(content=FormattedTextControl(title_text), height=1, dont_extend_width=True),
-            Window(char=Border.HORIZONTAL, style=lambda: self._get_diag_style(0, title_len, total_rows, total_cols)), # Dynamic style is tricky here
-            # We'll just use a bunch of 1-char windows to get the gradient on the line
-        ], height=1)
-
-        # Re-implementing the frame with gradient windows
-        def fill(row, col, char, width=None):
-            return Window(width=width, height=1, char=char, 
-                          style=self._get_diag_style(row, col, total_rows, total_cols))
-
-        # Build top row more carefully for gradient
+        # Fill the rest of the top line with gradient characters
         top_elements = []
-        # Prefix and title are already handled in a single control for simplicity of text
         top_elements.append(Window(content=FormattedTextControl(title_text), height=1, dont_extend_width=True))
         
-        # Fill the rest of the top line with gradient characters
         remaining = total_cols - title_len - 1 # -1 for the corner
         for i in range(remaining):
-            top_elements.append(fill(0, title_len + i, Border.HORIZONTAL, width=1))
+            top_elements.append(Window(width=1, height=1, char=Border.HORIZONTAL, 
+                                     style=partial(self._get_diag_style, 0, title_len + i, total_rows, total_cols)))
         
-        top_elements.append(fill(0, total_cols - 1, "╮", width=1))
+        top_elements.append(Window(width=1, height=1, char="╮", 
+                                 style=partial(self._get_diag_style, 0, total_cols - 1, total_rows, total_cols)))
 
         # Bottom row
-        bottom_elements = [fill(total_rows-1, 0, "╰", width=1)]
+        bottom_elements = []
+        bottom_elements.append(Window(width=1, height=1, char="╰", 
+                                    style=partial(self._get_diag_style, total_rows-1, 0, total_rows, total_cols)))
         for i in range(1, total_cols - 1):
-            bottom_elements.append(fill(total_rows-1, i, Border.HORIZONTAL, width=1))
-        bottom_elements.append(fill(total_rows-1, total_cols-1, "╯", width=1))
+            bottom_elements.append(Window(width=1, height=1, char=Border.HORIZONTAL, 
+                                        style=partial(self._get_diag_style, total_rows-1, i, total_rows, total_cols)))
+        bottom_elements.append(Window(width=1, height=1, char="╯", 
+                                    style=partial(self._get_diag_style, total_rows-1, total_cols-1, total_rows, total_cols)))
 
         return HSplit([
             VSplit(top_elements, height=1),
             VSplit([
-                Window(width=1, char=Border.VERTICAL, style=lambda: self._get_diag_style(5, 0, total_rows, total_cols)),
+                Window(width=1, char=Border.VERTICAL, style=partial(self._get_diag_style, 5, 0, total_rows, total_cols)),
                 self.body,
-                Window(width=1, char=Border.VERTICAL, style=lambda: self._get_diag_style(5, total_cols-1, total_rows, total_cols)),
+                Window(width=1, char=Border.VERTICAL, style=partial(self._get_diag_style, 5, total_cols-1, total_rows, total_cols)),
             ]),
             VSplit(bottom_elements, height=1),
         ])
@@ -429,13 +420,15 @@ class DownloadUI:
 
         # --- Widgets ---
         
-        # Search Bar (Moved to bottom)
         self.search_area = TextArea(
             multiline=False, 
             prompt=[("class:search_prompt", ">>> 🔍 ")],
             style="class:input",
+            completer=SlashCommandCompleter(),
             accept_handler=self._on_search
         )
+        self.search_area.buffer.on_text_changed += self._on_text_changed
+        self._search_task = None
         
         # Tabs
         self.tab_container = Window(
@@ -478,7 +471,7 @@ class DownloadUI:
                 Window(content=FormattedTextControl(self._get_tabs_text), height=1, dont_extend_width=True),
                 Window(), # Flexible spacer
                 Window(
-                    FormattedTextControl(f"RAM+VRAM: {TOTAL_MEM_GB:.1f}GB | Disk: {DISK_FREE_GB:.1f}GB"), 
+                    FormattedTextControl(f"RAM+VRAM: {TOTAL_MEM_GB:.1f}GB | Disk: {DISK_FREE_GB:.1f}GB "), 
                     style="class:status", 
                     align="right", 
                     dont_extend_width=True
@@ -776,30 +769,90 @@ class DownloadUI:
         
         return kb
 
+    def _on_text_changed(self, _):
+        """Triggered on every keystroke in the search bar."""
+        self.search_query = self.search_area.text
+        
+        # We need an event loop to schedule the background refresh
+        try:
+            loop = asyncio.get_event_loop()
+            if self._search_task:
+                self._search_task.cancel()
+            
+            # Use the app's create_background_task if available, or just the loop
+            if hasattr(self, 'app') and self.app:
+                self._search_task = self.app.create_background_task(self._do_live_search())
+            else:
+                self._search_task = loop.create_task(self._do_live_search())
+        except Exception:
+            # Fallback if no loop is available (unlikely in prompt_toolkit 3)
+            pass
+
+    async def _do_live_search(self):
+        """Async task to debounce and fetch results."""
+        try:
+            await asyncio.sleep(0.3) # Debounce delay
+            
+            # Determine sort mode
+            sort_mode = "Downloads"
+            if self.current_tab == "Top Rated":
+                sort_mode = "Trending"
+            elif self.current_tab == "Newest":
+                sort_mode = "Updated"
+
+            # Execute blocking API call in a thread
+            loop = asyncio.get_event_loop()
+            results = await loop.run_in_executor(
+                None,
+                partial(self.manager.list_gguf_models, sort=sort_mode, search=self.search_query, limit=100)
+            )
+
+            self.models_data = results
+            self.selected_model_index = 0
+            self.list_scroll_offset = 0
+            
+            # Request UI re-render
+            if hasattr(self, 'app') and self.app:
+                self.app.invalidate()
+        except asyncio.CancelledError:
+            pass # Task was cancelled by a newer keystroke
+        except Exception:
+            self.models_data = []
+            if hasattr(self, 'app') and self.app:
+                self.app.invalidate()
+
     def _on_search(self, buff):
         text = self.search_area.text.strip()
         if text.startswith("/"):
             self.app.exit(result=text)
             return False # Don't keep text
             
-        self.search_query = self.search_area.text
-        self.refresh_data()
-        # Keep focus on search area so user can keep typing
+        # If results are already there from live search, just focus the list
+        if self.models_data:
+            self.app.layout.focus(self.model_list_window)
+        else:
+            # Fallback to manual refresh if live search hasn't finished
+            self.search_query = self.search_area.text
+            self.refresh_data()
+            
         return True
 
     def refresh_data(self):
-        # Fetch data
-        self.models_data = []
-        
+        """Synchronous refresh for initial load or when async is not available."""
         # Adjust params based on tabs
-        # "Top Rated" maps to Trending for "Most Popular" feel
-        # "Newest" -> lastModified
         sort_mode = "Downloads"
         if self.current_tab == "Top Rated":
             sort_mode = "Trending"
         elif self.current_tab == "Newest":
             sort_mode = "Updated"
         
+        # If app is running, use async version to avoid blocking
+        if hasattr(self, 'app') and self.app.is_running:
+            if self._search_task:
+                self._search_task.cancel()
+            self._search_task = self.app.create_background_task(self._do_live_search())
+            return
+
         try:
             results = self.manager.list_gguf_models(
                 sort=sort_mode,

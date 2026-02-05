@@ -6,3 +6,4 @@
 - 2026-02-03: UI Polish: Implemented banana yellow to solid blue gradient for thinking blocks with manual border rendering for perfect alignment. Refined CLI spacing to eliminate redundant gaps between tool calls and ensure consistent padding before user prompts.
 - 2026-02-03: Style Update: Enhanced thinking block with a diagonal (top-left to bottom-right) gradient scan for a more dynamic and modern aesthetic.
 - 2026-02-03: UI Bugfix: Corrected alignment of the thinking process box border by ensuring symmetric internal padding and precise width calculations.
+- 2026-02-05: UX Enhancement: Made the slash command completer "global" in scope, allowing it to trigger anywhere in the input buffer. Integrated command autocompletion into the Model Downloader search prompt and added missing /backend and /download commands to the built-in completion list.

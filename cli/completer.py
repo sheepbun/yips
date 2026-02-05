@@ -133,18 +133,24 @@ class SlashCommandCompleter(Completer):
             return FormattedText([('#89cff0', text)])
 
     def _create_gradient_formatted_text(self, text: str) -> FormattedText:
-        """Create gradient-colored text from pink to yellow with character-level control."""
+        """Create a smooth two-stop gradient (Pink to Yellow) for descriptions."""
         if not text:
             return FormattedText([])
 
         parts = []
         length = len(text)
 
+        # Apply gradient to the entire string character by character
         for i, char in enumerate(text):
+            # Progress from 0.0 at the first char to 1.0 at the last char
             progress = i / max(length - 1, 1)
+            
+            # Interpolate between the exact Pink and Yellow constants
             r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, progress)
-            style = f'fg:#{r:02x}{g:02x}{b:02x}'
-            parts.append((style, char))
+            
+            # Use the hex format #rrggbb which is standard for truecolor in prompt_toolkit
+            color_hex = f'#{r:02x}{g:02x}{b:02x}'
+            parts.append((f'fg:{color_hex}', char))
 
         return FormattedText(parts)
 
@@ -175,17 +181,14 @@ class SlashCommandCompleter(Completer):
             if command.lower().startswith(after_slash):
                 cmd_data = meta_dict.get(command, {'desc': '', 'type': 'tool'})
                 
-                # Styled command (pink for skills, blue gradient for tools)
+                # Styled command (pink for skills, solid blue for tools)
                 display = self._create_command_formatted_text(command, cmd_data['type'])
 
-                # Styled description (gradient)
+                # Styled description (smooth two-stop gradient)
                 description = cmd_data['desc']
                 display_meta = self._create_gradient_formatted_text(description)
 
                 # Calculate replacement position.
-                # If the line starts with the slash (ignoring whitespace), replace the whole line.
-                # This ensures any leading whitespace is removed so it's a valid slash command.
-                # Otherwise, replace just the current word starting with the slash.
                 if text_before_cursor[:last_slash_idx].isspace() or not text_before_cursor[:last_slash_idx]:
                     start_position = -len(text_before_cursor)
                 else:

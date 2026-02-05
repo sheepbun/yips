@@ -15,6 +15,7 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import HTML as HTMLText
 from prompt_toolkit.styles import Style as PromptStyle
 from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.output import ColorDepth
 import time
 from rich.live import Live
 from rich.text import Text
@@ -253,7 +254,8 @@ def main() -> None:
         style=style,
         completer=completer,
         complete_while_typing=True,
-        key_bindings=bindings
+        key_bindings=bindings,
+        color_depth=ColorDepth.TRUE_COLOR
     )
 
     # Create agent and pass session reference

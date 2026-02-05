@@ -5,6 +5,8 @@ Handles loading and saving user configuration, paths, and constants.
 """
 
 import json
+import os
+import shutil
 
 from cli.root import PROJECT_ROOT
 from cli.type_defs import YipsConfig
@@ -21,6 +23,10 @@ CONFIG_FILE = BASE_DIR / ".yips_config.json"
 
 # Application info
 APP_NAME = "Yips"
+
+# Claude CLI Configuration
+CLAUDE_CLI_MODEL = "claude-3-5-sonnet-20240620"
+CLAUDE_CLI_PATH = os.environ.get("CLAUDE_CLI_PATH", shutil.which("claude") or "claude")
 
 # Import version dynamically
 def _get_app_version() -> str:

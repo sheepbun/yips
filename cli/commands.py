@@ -22,7 +22,6 @@ from cli.info_utils import (
     get_friendly_model_name,
     get_session_list,
 )
-from cli.lmstudio import get_available_models as get_lm_models, unload_all_models
 from cli.llamacpp import get_available_models as get_llama_models, stop_llamacpp, start_llamacpp
 
 
@@ -50,7 +49,7 @@ def handle_backend_command(agent: YipsAgentProtocol, args: str) -> None:
     """Handle the /backend command to switch backends."""
     args = args.strip().lower()
     
-    valid_backends = ["llamacpp", "lmstudio", "claude"]
+    valid_backends = ["llamacpp", "claude"]
     
     if not args:
         console.print(f"[cyan]Current backend:[/cyan] {get_friendly_backend_name(agent.backend)}")
@@ -72,23 +71,14 @@ def handle_backend_command(agent: YipsAgentProtocol, args: str) -> None:
     # Cleanup current backend
     if agent.backend == "llamacpp":
         stop_llamacpp()
-    elif agent.backend == "lmstudio":
-        unload_all_models()
-        # Also try to stop LM Studio server if possible
-        try:
-            subprocess.run(["lms", "server", "stop"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        except: pass
         
     agent.backend = args
     agent.use_claude_cli = (args == "claude")
     
     # Reset model to default for new backend
     if args == "claude":
-        from cli.lmstudio import CLAUDE_CLI_MODEL
-        agent.current_model = CLAUDE_CLI_MODEL
-    elif args == "lmstudio":
-        from cli.lmstudio import LM_STUDIO_MODEL
-        agent.current_model = LM_STUDIO_MODEL
+        # Default model for Claude (hardcoded for now as we removed lmstudio constants)
+        agent.current_model = "sonnet" 
     elif args == "llamacpp":
         from cli.llamacpp import LLAMA_DEFAULT_MODEL
         agent.current_model = LLAMA_DEFAULT_MODEL
@@ -168,7 +158,6 @@ def handle_model_command(agent: YipsAgentProtocol, args: str) -> None:
     claude_models = {"haiku", "sonnet", "opus"}
 
     # Get available models
-    lm_models = get_lm_models()
     llama_models = get_llama_models()
 
     if not args:
@@ -190,12 +179,6 @@ def handle_model_command(agent: YipsAgentProtocol, args: str) -> None:
             status = "← current" if is_current else ""
             table.add_row(get_friendly_model_name(model), get_friendly_backend_name("llamacpp"), status)
 
-        # LM Studio models
-        for model in lm_models:
-            is_current = not agent.use_claude_cli and agent.backend == "lmstudio" and agent.current_model == model
-            status = "← current" if is_current else ""
-            table.add_row(get_friendly_model_name(model), get_friendly_backend_name("lmstudio"), status)
-
         console.print(table)
         return
 
@@ -206,7 +189,6 @@ def handle_model_command(agent: YipsAgentProtocol, args: str) -> None:
         # User requested switch - clean up first
         console.print("[dim]Cleaning up (unloading models and clearing session)...[/dim]")
         stop_llamacpp()
-        unload_all_models()
         agent.new_session()
         
         agent.use_claude_cli = True
@@ -226,7 +208,6 @@ def handle_model_command(agent: YipsAgentProtocol, args: str) -> None:
         if matched:
             console.print("[dim]Cleaning up (unloading models and clearing session)...[/dim]")
             stop_llamacpp()
-            unload_all_models()
             agent.new_session()
             
             agent.use_claude_cli = False
@@ -243,32 +224,10 @@ def handle_model_command(agent: YipsAgentProtocol, args: str) -> None:
                 console.print(f"[red]Error: Failed to start server for {get_friendly_model_name(matched)}[/red]")
 
             agent.refresh_display()
-
-    elif args in lm_models or any(args.lower() in m.lower() for m in lm_models):
-        # Find matching LM Studio model
-        matched = args if args in lm_models else next(
-            (m for m in lm_models if args.lower() in m.lower()), None
-        )
-        if matched:
-            # User requested switch - clean up first
-            console.print("[dim]Cleaning up (unloading models and clearing session)...[/dim]")
-            stop_llamacpp()
-            unload_all_models()
-            agent.new_session()
-            
-            agent.use_claude_cli = False
-            agent.backend = "lmstudio"
-            agent.current_model = matched
-            config = load_config()
-            config.update({"backend": "lmstudio", "model": matched, "verbose": agent.verbose_mode})
-            save_config(config)
-            console.print(f"[green]Switched to {get_friendly_backend_name('lmstudio')} with model: {get_friendly_model_name(matched)}[/green]")
-            agent.refresh_display()
-        else:
-            console.print(f"[red]Model not found: {args}[/red]")
     else:
         console.print(f"[red]Model not found: {args}[/red]")
         console.print("[dim]Use /model to see available models[/dim]")
+
 
 
 def handle_slash_command(agent: YipsAgentProtocol, user_input: str) -> str | bool:
@@ -300,6 +259,9 @@ def handle_slash_command(agent: YipsAgentProtocol, user_input: str) -> str | boo
 
     if command in ("clear", "new"):
         agent.new_session()
+        # Check backend state - reload if necessary (e.g. to prioritize GPU)
+        if agent.backend == "llamacpp":
+            start_llamacpp(agent.current_model)
         return True
 
     if command == "verbose":

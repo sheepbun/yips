@@ -78,7 +78,18 @@ def start_llamacpp(model_path: str | None = None) -> bool:
     if is_llamacpp_running():
         # Check 1: Is it the same model?
         if _current_model_path == resolved_path:
-            return True # Assume running optimized
+            # Check 2: Optimization - if it fits in VRAM (10GB) but is on CPU, restart to try GPU
+            try:
+                size_bytes = os.path.getsize(resolved_path)
+                limit_bytes = 10 * 1024 * 1024 * 1024 # 10 GB
+                
+                if size_bytes < limit_bytes and _current_strategy == "CPU Only":
+                    console.print(f"[yellow]Model fits in VRAM ({size_bytes/1024**3:.2f} GB) but is running on CPU. Restarting on GPU...[/yellow]")
+                    stop_llamacpp()
+                else:
+                    return True # Running and optimal
+            except OSError:
+                return True # Can't check size, assume fine
         else:
             # Different model, must restart
             stop_llamacpp()
@@ -123,6 +134,8 @@ def start_llamacpp(model_path: str | None = None) -> bool:
             if is_llamacpp_running():
                 _current_model_path = resolved_path
                 _current_strategy = strategy_name
+                if strategy_name != strategies[0][0]:
+                     console.print(f"[yellow]Note: Model failed to load with GPU. Running in {strategy_name} mode.[/yellow]")
                 return True
             
             time.sleep(1)

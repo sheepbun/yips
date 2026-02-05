@@ -47,7 +47,7 @@ ToolRequest = ActionToolRequest | IdentityToolRequest | SkillToolRequest | Thoug
 # Configuration
 class YipsConfig(TypedDict, total=False):
     """User configuration for Yips CLI."""
-    backend: Literal["claude", "lmstudio"]
+    backend: Literal["claude", "llamacpp"]
     model: str
     verbose: bool
     streaming: bool
@@ -60,23 +60,6 @@ class SessionState(TypedDict, total=False):
     thought_signature: str  # The high-level plan or "thought" for this task
     error_count: int        # Number of consecutive errors encountered
     last_action: str        # The last tool/action attempted
-
-
-# LM Studio response content blocks
-class TextContentBlock(TypedDict):
-    """A text content block from LM Studio response."""
-    type: Literal["text"]
-    text: str
-
-
-class ToolUseContentBlock(TypedDict):
-    """A tool use content block from LM Studio response."""
-    type: Literal["tool_use"]
-    name: str
-    input: dict[str, Any]
-
-
-ContentBlock = TextContentBlock | ToolUseContentBlock
 
 
 # Tool call tracking during streaming

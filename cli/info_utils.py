@@ -297,7 +297,6 @@ def get_friendly_backend_name(backend_name: str) -> str:
     """Convert internal backend name to display-friendly name."""
     mapping = {
         "claude": "Claude Pro",
-        "lmstudio": "LM Studio",
         "llamacpp": "llama.cpp",
     }
     return mapping.get(backend_name, backend_name)

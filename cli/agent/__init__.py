@@ -20,9 +20,6 @@ if TYPE_CHECKING:
 from cli.color_utils import console
 from cli.config import (
     load_config,
-)
-from cli.lmstudio import (
-    LM_STUDIO_MODEL,
     CLAUDE_CLI_MODEL,
 )
 from cli.llamacpp import (
@@ -94,14 +91,11 @@ class YipsAgent(
             self.use_claude_cli = True
             if not self.current_model:
                 self.current_model = CLAUDE_CLI_MODEL
-        elif self.backend == "lmstudio":
-            self.use_claude_cli = False
-            if not self.current_model:
-                self.current_model = LM_STUDIO_MODEL
-        else: # llamacpp
+        else: # llamacpp (default and fallback for deprecated lmstudio)
             self.backend = "llamacpp"
             self.use_claude_cli = False
-            if not self.current_model:
+            if not self.current_model or self.backend == "lmstudio":
+                # If was using deprecated lmstudio, switch to llamacpp default
                 self.current_model = LLAMA_DEFAULT_MODEL
 
     @property
@@ -126,9 +120,6 @@ class YipsAgent(
             if self.backend == "llamacpp":
                 from cli.llamacpp import stop_llamacpp
                 stop_llamacpp()
-            else:
-                from cli.lmstudio import unload_all_models
-                unload_all_models()
 
         # Cancel any pending resize timer
         if self._resize_timer is not None:

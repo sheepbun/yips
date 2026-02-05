@@ -23,7 +23,7 @@ from cli.info_utils import (
     get_session_list,
 )
 from cli.lmstudio import get_available_models as get_lm_models, unload_all_models
-from cli.llamacpp import get_available_models as get_llama_models, stop_llamacpp
+from cli.llamacpp import get_available_models as get_llama_models, stop_llamacpp, start_llamacpp
 
 
 class YipsAgentProtocol(Protocol):
@@ -235,7 +235,13 @@ def handle_model_command(agent: YipsAgentProtocol, args: str) -> None:
             config = load_config()
             config.update({"backend": "llamacpp", "model": matched, "verbose": agent.verbose_mode})
             save_config(config)
-            console.print(f"[green]Switched to {get_friendly_backend_name('llamacpp')} with model: {get_friendly_model_name(matched)}[/green]")
+
+            console.print(f"[dim]Starting {get_friendly_model_name(matched)}...[/dim]")
+            if start_llamacpp(matched):
+                console.print(f"[green]Switched to {get_friendly_backend_name('llamacpp')} with model: {get_friendly_model_name(matched)}[/green]")
+            else:
+                console.print(f"[red]Error: Failed to start server for {get_friendly_model_name(matched)}[/red]")
+
             agent.refresh_display()
 
     elif args in lm_models or any(args.lower() in m.lower() for m in lm_models):

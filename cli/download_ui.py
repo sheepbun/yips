@@ -470,6 +470,7 @@ class DownloadUI:
         )
         self.selected_file_index = 0
         self._refresh_task = None
+        self._style_cache = {} # Cache for gradient styles
         
         # Layout construction
         
@@ -520,7 +521,7 @@ class DownloadUI:
             floats=self.floats
         )
         
-        self.layout = Layout(self.main_layout_container, focused_element=self.search_area)
+        self.layout = Layout(self.main_layout_container, focused_element=self.model_list_control)
         
         self.kb = KeyBindings()
         self._setup_global_bindings()
@@ -611,15 +612,22 @@ class DownloadUI:
                 if self.is_dimmed:
                     lines.append(("bg:#555555 #000000", text + "\n"))
                 else:
+                    line_len = len(text)
+                    cache_key = (line_len, is_focused)
+                    if cache_key not in self._style_cache:
+                        styles = []
+                        for col in range(line_len):
+                            if col == 0 and is_focused:
+                                styles.append("bg:#ffccff #000000")
+                            else:
+                                progress = col / max(line_len - 1, 1)
+                                r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, progress)
+                                styles.append(f"bg:#{r:02x}{g:02x}{b:02x} #000000")
+                        self._style_cache[cache_key] = styles
+                    
+                    cached_styles = self._style_cache[cache_key]
                     for col, char in enumerate(text):
-                        if col == 0 and is_focused:
-                            # Only the cursor character gets solid pink background when focused
-                            lines.append(("bg:#ffccff #000000", char))
-                        else:
-                            # The rest of the line (or everything if not focused) uses the gradient
-                            progress = col / max(len(text) - 1, 1)
-                            r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, progress)
-                            lines.append((f"bg:#{r:02x}{g:02x}{b:02x} #000000", char))
+                        lines.append((cached_styles[col], char))
                     lines.append(("", "\n"))
             else:
                 lines.append(("", text + "\n"))
@@ -655,15 +663,22 @@ class DownloadUI:
                 if self.is_dimmed:
                     lines.append(("bg:#555555 #000000", full_selected_text + "\n"))
                 else:
+                    line_len = len(full_selected_text)
+                    cache_key = (line_len, is_focused)
+                    if cache_key not in self._style_cache:
+                        styles = []
+                        for col in range(line_len):
+                            if col == 0 and is_focused:
+                                styles.append("bg:#ffccff #000000")
+                            else:
+                                progress = col / max(line_len - 1, 1)
+                                r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, progress)
+                                styles.append(f"bg:#{r:02x}{g:02x}{b:02x} #000000")
+                        self._style_cache[cache_key] = styles
+                    
+                    cached_styles = self._style_cache[cache_key]
                     for col, char in enumerate(full_selected_text):
-                        if col == 0 and is_focused:
-                            # Only the cursor character gets solid pink background when focused
-                            lines.append(("bg:#ffccff #000000", char))
-                        else:
-                            # The rest of the line uses the gradient
-                            progress = col / max(len(full_selected_text) - 1, 1)
-                            r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, progress)
-                            lines.append((f"bg:#{r:02x}{g:02x}{b:02x} #000000", char))
+                        lines.append((cached_styles[col], char))
                     lines.append(("", "\n"))
             else:
                 lines.append(("", text))
@@ -711,20 +726,9 @@ class DownloadUI:
         @self.kb.add("tab")
         def _(event):
             if self.app.layout.has_focus(self.search_area):
-                self.app.layout.focus(self.model_list_window)
+                self.app.layout.focus(self.model_list_control)
             else:
                 self.app.layout.focus(self.search_area)
-
-    def _update_refresh(self):
-        """Debounce UI invalidation to reduce latency during rapid navigation."""
-        if self._refresh_task:
-            self._refresh_task.cancel()
-        
-        async def _task():
-            await asyncio.sleep(0.01) # Tiny debounce
-            self.app.invalidate()
-            
-        self._refresh_task = self.app.create_background_task(_task())
 
     def _get_list_key_bindings(self):
         kb = KeyBindings()
@@ -736,7 +740,7 @@ class DownloadUI:
             curr_idx = tabs.index(self.current_tab)
             self.current_tab = tabs[(curr_idx - 1) % len(tabs)]
             self.refresh_data()
-            self._update_refresh()
+            event.app.invalidate()
 
         @kb.add("right")
         def _(event):
@@ -745,7 +749,7 @@ class DownloadUI:
             curr_idx = tabs.index(self.current_tab)
             self.current_tab = tabs[(curr_idx + 1) % len(tabs)]
             self.refresh_data()
-            self._update_refresh()
+            event.app.invalidate()
         
         @kb.add("up")
         def _(event):
@@ -754,7 +758,7 @@ class DownloadUI:
                 # Scroll up if needed
                 if self.selected_model_index < self.list_scroll_offset:
                     self.list_scroll_offset = self.selected_model_index
-                self._update_refresh()
+                event.app.invalidate()
                 
         @kb.add("down")
         def _(event):
@@ -765,7 +769,7 @@ class DownloadUI:
                 height = 12
                 if self.selected_model_index >= self.list_scroll_offset + height:
                     self.list_scroll_offset = self.selected_model_index - height + 1
-                self._update_refresh()
+                event.app.invalidate()
 
         @kb.add("enter")
         def _(event):
@@ -781,13 +785,13 @@ class DownloadUI:
         def _(event):
             if self.selected_file_index > 0:
                 self.selected_file_index -= 1
-                self._update_refresh()
+                event.app.invalidate()
             
         @kb.add("down")
         def _(event):
             if self.selected_file_index < len(self.files_data) - 1:
                 self.selected_file_index += 1
-                self._update_refresh()
+                event.app.invalidate()
             
         @kb.add("escape")
         def _(event):
@@ -796,7 +800,7 @@ class DownloadUI:
             # Remove the popup float (last one added)
             if len(self.floats) > 1:
                 self.floats.pop()
-            self.app.layout.focus(self.model_list_window)
+            self.app.layout.focus(self.model_list_control)
 
         @kb.add("enter")
         def _(event):
@@ -881,7 +885,7 @@ class DownloadUI:
             
         # If results are already there from live search, just focus the list
         if self.models_data:
-            self.app.layout.focus(self.model_list_window)
+            self.app.layout.focus(self.model_list_control)
         else:
             # Fallback to manual refresh if live search hasn't finished
             self.search_query = self.search_area.text

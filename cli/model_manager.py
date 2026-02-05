@@ -193,6 +193,7 @@ class ModelManagerUI:
         
         self._scroll_delay_active = True
         self._refresh_task = None
+        self._style_cache = {} # Cache for gradient styles: (length, is_focused) -> [styles]
         
         self.refresh_models()
         
@@ -236,7 +237,7 @@ class ModelManagerUI:
             floats=[]
         )
         
-        self.layout = Layout(self.root_container, focused_element=self.search_area)
+        self.layout = Layout(self.root_container, focused_element=self.model_list_control)
         
         self.kb = KeyBindings()
         @self.kb.add("escape")
@@ -262,7 +263,7 @@ class ModelManagerUI:
         @self.kb.add("tab")
         def _(event):
             if self.layout.has_focus(self.search_area):
-                self.layout.focus(self.model_list_window)
+                self.layout.focus(self.model_list_control)
             else:
                 self.layout.focus(self.search_area)
 
@@ -479,6 +480,9 @@ class ModelManagerUI:
         
         visible_items = self.models_data[start:end]
         
+        # Calculate available width once per render call
+        avail_width = self.available_name_width
+        
         for i, model in enumerate(visible_items):
             real_idx = start + i
             is_selected = (real_idx == self.selected_index)
@@ -540,8 +544,7 @@ class ModelManagerUI:
             cursor = ">" if is_selected else " "
             prefix = f"{cursor}{current_marker}"
             
-            # Available width for formal name (the scrolling one)
-            avail_width = self.available_name_width
+            # Use pre-calculated avail_width
             name = model['name'].strip()
             
             if is_selected and len(name) > avail_width:
@@ -555,20 +558,27 @@ class ModelManagerUI:
                 display_name = f" {name.ljust(avail_width)} "
             
             text = prefix + host_col + backend_col + friendly_col + hw_size_col + display_name
-            # Total line length: 2 + 15 + 13 + 18 + 15 + avail_width + 2 = 63 + avail_width
-            # = 63 + (total_width - 65) + 2 = total_width - 2.
             
             if is_selected:
                 if self.is_dimmed:
                     lines.append(("bg:#555555 #000000", text + "\n"))
                 else:
+                    line_len = len(text)
+                    cache_key = (line_len, is_focused)
+                    if cache_key not in self._style_cache:
+                        styles = []
+                        for col in range(line_len):
+                            if col == 0 and is_focused:
+                                styles.append("bg:#ffccff #000000")
+                            else:
+                                progress = col / max(line_len - 1, 1)
+                                r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, progress)
+                                styles.append(f"bg:#{r:02x}{g:02x}{b:02x} #000000")
+                        self._style_cache[cache_key] = styles
+                    
+                    cached_styles = self._style_cache[cache_key]
                     for col, char in enumerate(text):
-                        if col == 0 and is_focused:
-                            lines.append(("bg:#ffccff #000000", char))
-                        else:
-                            progress = col / max(len(text) - 1, 1)
-                            r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, progress)
-                            lines.append((f"bg:#{r:02x}{g:02x}{b:02x} #000000", char))
+                        lines.append((cached_styles[col], char))
                     lines.append(("", "\n"))
             else:
                 style = ""
@@ -579,17 +589,6 @@ class ModelManagerUI:
                 lines.append((style, text + "\n"))
             
         return lines
-
-    def _update_refresh(self):
-        """Debounce UI invalidation to reduce latency during rapid navigation."""
-        if self._refresh_task:
-            self._refresh_task.cancel()
-        
-        async def _task():
-            await asyncio.sleep(0.01) # Tiny debounce
-            self.app.invalidate()
-            
-        self._refresh_task = self.app.create_background_task(_task())
 
     def _get_list_key_bindings(self):
         kb = KeyBindings()
@@ -602,7 +601,7 @@ class ModelManagerUI:
             self.scroll_offset = 0
             self._scroll_delay_active = True
             self.refresh_models()
-            self._update_refresh()
+            event.app.invalidate()
 
         @kb.add("right")
         def _(event):
@@ -612,7 +611,7 @@ class ModelManagerUI:
             self.scroll_offset = 0
             self._scroll_delay_active = True
             self.refresh_models()
-            self._update_refresh()
+            event.app.invalidate()
 
         @kb.add("up")
         def _(event):
@@ -627,7 +626,7 @@ class ModelManagerUI:
                 self._scroll_delay_active = True
                 if self.selected_index < self.scroll_offset:
                     self.scroll_offset = self.selected_index
-                self._update_refresh()
+                event.app.invalidate()
                 
         @kb.add("down")
         def _(event):
@@ -642,7 +641,7 @@ class ModelManagerUI:
                 self._scroll_delay_active = True
                 if self.selected_index >= self.scroll_offset + 12:
                     self.scroll_offset = self.selected_index - 11
-                self._update_refresh()
+                event.app.invalidate()
 
         @kb.add("enter")
         def _(event):

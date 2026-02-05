@@ -184,9 +184,9 @@ class SlashCommandCompleter(Completer):
 
                 # Calculate replacement position.
                 # If the line starts with the slash (ignoring whitespace), replace the whole line.
+                # This ensures any leading whitespace is removed so it's a valid slash command.
                 # Otherwise, replace just the current word starting with the slash.
-                stripped_before = text_before_cursor.lstrip()
-                if stripped_before.startswith('/'):
+                if text_before_cursor[:last_slash_idx].isspace() or not text_before_cursor[:last_slash_idx]:
                     start_position = -len(text_before_cursor)
                 else:
                     start_position = -len(after_slash)

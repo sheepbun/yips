@@ -30,6 +30,7 @@ from prompt_toolkit.layout.containers import (
 from prompt_toolkit.layout.controls import FormattedTextControl, BufferControl
 from prompt_toolkit.data_structures import Point
 from prompt_toolkit.layout.layout import Layout
+from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.widgets import (
     Frame,
     TextArea,
@@ -499,7 +500,18 @@ class DownloadUI:
             Box(self.search_area, padding=0),
         ])
         
-        self.layout = Layout(self.root_container, focused_element=self.search_area)
+        # We need a FloatContainer to show the completion menu (and other popups)
+        self.floats = [
+            Float(xcursor=True,
+                  ycursor=True,
+                  content=CompletionsMenu(max_height=16, scrollbar=True))
+        ]
+        self.main_layout_container = FloatContainer(
+            content=self.root_container,
+            floats=self.floats
+        )
+        
+        self.layout = Layout(self.main_layout_container, focused_element=self.search_area)
         
         self.kb = KeyBindings()
         self._setup_global_bindings()
@@ -751,7 +763,9 @@ class DownloadUI:
         def _(event):
             # Close popup
             self.active_view = "model_list"
-            self.layout.container = self.root_container
+            # Remove the popup float (last one added)
+            if len(self.floats) > 1:
+                self.floats.pop()
             self.app.layout.focus(self.model_list_window)
 
         @kb.add("enter")
@@ -882,14 +896,12 @@ class DownloadUI:
             title=f"Files for {model_id}"
         )
         
-        self.layout.container = FloatContainer(
-            content=self.root_container,
-            floats=[
-                Float(
-                    content=popup_body,
-                    top=5, bottom=5, left=10, right=10
-                )
-            ]
+        # Add the popup to existing floats (keep completion menu etc)
+        self.floats.append(
+            Float(
+                content=popup_body,
+                top=5, bottom=5, left=10, right=10
+            )
         )
         self.app.layout.focus(self.file_list_control)
 

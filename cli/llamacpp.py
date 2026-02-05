@@ -101,6 +101,8 @@ def start_llamacpp(model_path: str | None = None) -> bool:
     stop_llamacpp()
 
     # Define strategies: (name, list_of_flags)
+    # We request 999 layers to force max GPU offload. 
+    # llama.cpp will automatically fallback to CPU/RAM for layers that don't fit.
     strategies = [
         ("GPU (Auto-Offload)", ["-ngl", "999"]),
         ("Hybrid (Default)", []),
@@ -134,8 +136,6 @@ def start_llamacpp(model_path: str | None = None) -> bool:
             if is_llamacpp_running():
                 _current_model_path = resolved_path
                 _current_strategy = strategy_name
-                if strategy_name != strategies[0][0]:
-                     console.print(f"[yellow]Note: Model failed to load with GPU. Running in {strategy_name} mode.[/yellow]")
                 return True
             
             time.sleep(1)
@@ -148,6 +148,7 @@ def stop_llamacpp() -> bool:
     """Stop llama-server if it's running."""
     global _server_process, _current_model_path, _current_strategy
 
+    # Method 1: Stop the process we started
     if _server_process:
         try:
             _server_process.terminate()
@@ -162,22 +163,25 @@ def stop_llamacpp() -> bool:
         _current_model_path = None
         _current_strategy = None
 
+    # Method 2: Cleanup any orphaned processes (try graceful first)
     try:
         subprocess.run(["pkill", "-f", "llama-server"], check=False)
     except Exception:
         pass
 
+    # Wait for the server to actually stop responding
     for _ in range(10): 
         if not is_llamacpp_running():
             return True
         time.sleep(0.5)
 
+    # Method 3: Aggressive cleanup (SIGKILL)
     try:
         subprocess.run(["pkill", "-9", "-f", "llama-server"], check=False)
     except Exception:
         pass
     
-    time.sleep(1)
+    time.sleep(1) # Give OS a moment to reclaim VRAM
     return not is_llamacpp_running()
 
 def get_available_models() -> list[str]:

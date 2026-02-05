@@ -26,9 +26,11 @@ from cli.config import (
 from cli.llamacpp import (
     LLAMA_SERVER_URL,
     LLAMA_DEFAULT_MODEL,
+    LLAMA_SERVER_PATH,
     is_llamacpp_running,
     start_llamacpp,
 )
+from cli.setup import install_llama_server, download_default_model
 from cli.info_utils import (
     get_friendly_backend_name,
 )
@@ -58,7 +60,43 @@ class AgentBackendMixin:
         if self.backend == "llamacpp":
             if not is_llamacpp_running():
                 if not start_llamacpp(self.current_model):
-                    self.console.print(f"[yellow]{get_friendly_backend_name('llamacpp')} unavailable, falling back to {get_friendly_backend_name('claude')}...[/yellow]")
+                    # Check if we should attempt self-correction
+                    from rich.prompt import Confirm
+                    import os
+                    
+                    self.console.print(f"[yellow]{get_friendly_backend_name('llamacpp')} unavailable.[/yellow]")
+                    
+                    # Diagnose the issue
+                    server_exists = os.path.exists(LLAMA_SERVER_PATH)
+                    
+                    if not server_exists:
+                        msg = "llama.cpp binary not found."
+                        action = "attempt to download and build it"
+                        should_ask = True
+                    else:
+                        msg = "llama.cpp failed to start (tried GPU and CPU modes)."
+                        action = "attempt to rebuild it (might fix compatibility issues)"
+                        # If it exists but fails, it's risky to just rebuild without asking, 
+                        # but we should offer it.
+                        should_ask = True
+
+                    self.console.print(f"[red]{msg}[/red]")
+
+                    if should_ask and Confirm.ask(f"Would you like me to {action}?"):
+                         # 1. Download Model (idempotent-ish)
+                         if not download_default_model():
+                             self.console.print("[red]Failed to verify default model.[/red]")
+                         
+                         # 2. Install/Rebuild Server
+                         install_llama_server()
+                         
+                         # 3. Retry Start
+                         if start_llamacpp(self.current_model):
+                             self.console.print("[green]Successfully started llama.cpp![/green]")
+                             self.backend_initialized = True
+                             return
+
+                    self.console.print(f"[yellow]Falling back to {get_friendly_backend_name('claude')}...[/yellow]")
                     self.use_claude_cli = True
                     self.backend = "claude"
                     self.current_model = CLAUDE_CLI_MODEL

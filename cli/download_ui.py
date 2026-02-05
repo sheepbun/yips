@@ -815,6 +815,14 @@ class DownloadUI:
         try:
             await asyncio.sleep(0.3) # Debounce delay
             
+            # Disengage model search if user is typing a slash command
+            if self.search_query.lstrip().startswith("/"):
+                # Optionally clear results or just return
+                # Let's keep existing results for now, or clear if preferred.
+                # User said "disengage/disregard trying to search", 
+                # implying we should not perform the API call.
+                return
+
             # Determine sort mode
             sort_mode = "Downloads"
             if self.current_tab == "Top Rated":
@@ -861,6 +869,9 @@ class DownloadUI:
 
     def refresh_data(self):
         """Synchronous refresh for initial load or when async is not available."""
+        if self.search_query.lstrip().startswith("/"):
+            return
+
         # Adjust params based on tabs
         sort_mode = "Downloads"
         if self.current_tab == "Top Rated":

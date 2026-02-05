@@ -299,7 +299,7 @@ def handle_slash_command(agent: YipsAgentProtocol, user_input: str) -> str | boo
         agent.refresh_display()
         return True
 
-    if command == "download":
+    if command in ("download", "dl"):
         from cli.download_ui import run_download_ui
         result = run_download_ui()
         if isinstance(result, str) and result.startswith("/"):

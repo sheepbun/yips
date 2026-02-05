@@ -299,6 +299,13 @@ def handle_slash_command(agent: YipsAgentProtocol, user_input: str) -> str | boo
                 console.print(f"[red]Error running /models: {e}[/red]")
                 return True
 
+    if command == "download":
+        from cli.download_ui import run_download_ui
+        result = run_download_ui()
+        if isinstance(result, str) and result.startswith("/"):
+            return handle_slash_command(agent, result)
+        return True
+
     # Check for command directory (case-insensitive) in tools then skills
     cmd_dir = None
     # Priority 1: Tools
@@ -384,7 +391,7 @@ def handle_slash_command(agent: YipsAgentProtocol, user_input: str) -> str | boo
         available.extend([d.name.lower() for d in TOOLS_DIR.iterdir() if d.is_dir()])
     if SKILLS_DIR.exists():
         available.extend([d.name.lower() for d in SKILLS_DIR.iterdir() if d.is_dir()])
-    available.extend(["exit", "model", "backend", "verbose", "stream", "sessions", "clear", "new"])
+    available.extend(["exit", "model", "backend", "verbose", "stream", "sessions", "clear", "new", "download", "models"])
     console.print(f"[dim]Available: /{', /'.join(sorted(list(set(available))))}[/dim]")
     return True
 
@@ -392,5 +399,3 @@ def handle_slash_command(agent: YipsAgentProtocol, user_input: str) -> str | boo
 def handle_command(agent: YipsAgentProtocol, user_input: str) -> str | bool:
     """Unified command handler for all slash commands."""
     return handle_slash_command(agent, user_input)
-
-

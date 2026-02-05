@@ -469,6 +469,7 @@ class DownloadUI:
             get_cursor_position=self._get_file_list_cursor_position
         )
         self.selected_file_index = 0
+        self._refresh_task = None
         
         # Layout construction
         
@@ -714,6 +715,17 @@ class DownloadUI:
             else:
                 self.app.layout.focus(self.search_area)
 
+    def _update_refresh(self):
+        """Debounce UI invalidation to reduce latency during rapid navigation."""
+        if self._refresh_task:
+            self._refresh_task.cancel()
+        
+        async def _task():
+            await asyncio.sleep(0.01) # Tiny debounce
+            self.app.invalidate()
+            
+        self._refresh_task = self.app.create_background_task(_task())
+
     def _get_list_key_bindings(self):
         kb = KeyBindings()
         
@@ -724,6 +736,7 @@ class DownloadUI:
             curr_idx = tabs.index(self.current_tab)
             self.current_tab = tabs[(curr_idx - 1) % len(tabs)]
             self.refresh_data()
+            self._update_refresh()
 
         @kb.add("right")
         def _(event):
@@ -732,22 +745,27 @@ class DownloadUI:
             curr_idx = tabs.index(self.current_tab)
             self.current_tab = tabs[(curr_idx + 1) % len(tabs)]
             self.refresh_data()
+            self._update_refresh()
         
         @kb.add("up")
         def _(event):
-            self.selected_model_index = max(0, self.selected_model_index - 1)
-            # Scroll up if needed
-            if self.selected_model_index < self.list_scroll_offset:
-                self.list_scroll_offset = self.selected_model_index
+            if self.selected_model_index > 0:
+                self.selected_model_index -= 1
+                # Scroll up if needed
+                if self.selected_model_index < self.list_scroll_offset:
+                    self.list_scroll_offset = self.selected_model_index
+                self._update_refresh()
                 
         @kb.add("down")
         def _(event):
-            self.selected_model_index = min(len(self.models_data) - 1, self.selected_model_index + 1)
-            # Scroll down if needed
-            # Fixed height 12
-            height = 12
-            if self.selected_model_index >= self.list_scroll_offset + height:
-                self.list_scroll_offset = self.selected_model_index - height + 1
+            if self.selected_model_index < len(self.models_data) - 1:
+                self.selected_model_index += 1
+                # Scroll down if needed
+                # Fixed height 12
+                height = 12
+                if self.selected_model_index >= self.list_scroll_offset + height:
+                    self.list_scroll_offset = self.selected_model_index - height + 1
+                self._update_refresh()
 
         @kb.add("enter")
         def _(event):
@@ -761,11 +779,15 @@ class DownloadUI:
         
         @kb.add("up")
         def _(event):
-            self.selected_file_index = max(0, self.selected_file_index - 1)
+            if self.selected_file_index > 0:
+                self.selected_file_index -= 1
+                self._update_refresh()
             
         @kb.add("down")
         def _(event):
-            self.selected_file_index = min(len(self.files_data) - 1, self.selected_file_index + 1)
+            if self.selected_file_index < len(self.files_data) - 1:
+                self.selected_file_index += 1
+                self._update_refresh()
             
         @kb.add("escape")
         def _(event):

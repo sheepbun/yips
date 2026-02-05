@@ -71,7 +71,7 @@ class SlashCommandCompleter(Completer):
         all_items = {
             '/exit': {'desc': 'Exit the application', 'type': 'tool'},
             '/quit': {'desc': 'Exit the application', 'type': 'tool'},
-            '/model': {'desc': 'Switch or list AI models', 'type': 'tool'},
+            '/model': {'desc': 'Open the Model Manager or switch to a specific model', 'type': 'tool'},
             '/sessions': {'desc': 'Interactively select and load a session', 'type': 'tool'},
             '/clear': {'desc': 'Clear context and start a new session', 'type': 'tool'},
             '/new': {'desc': 'Start a new session', 'type': 'tool'},
@@ -79,7 +79,8 @@ class SlashCommandCompleter(Completer):
             '/stream': {'desc': 'Toggle streaming responses', 'type': 'tool'},
             '/backend': {'desc': 'Switch AI backends (llamacpp, claude)', 'type': 'tool'},
             '/download': {'desc': 'Open the interactive model downloader', 'type': 'tool'},
-            '/models': {'desc': 'List or search for models on Hugging Face', 'type': 'tool'}
+            '/models': {'desc': 'Open the interactive Model Manager', 'type': 'tool'},
+            '/nick': {'desc': 'Set a custom nickname for a model', 'type': 'tool'}
         }
 
         # 2. Discover commands from directories

@@ -150,7 +150,7 @@ def handle_sessions_command(agent: YipsAgentProtocol) -> None:
         agent.refresh_title_box_only()
 
 
-def handle_model_command(agent: YipsAgentProtocol, args: str) -> None:
+def handle_model_command(agent: YipsAgentProtocol, args: str) -> str | bool:
     """Handle the /model command to display or switch models."""
     args = args.strip()
 
@@ -161,26 +161,9 @@ def handle_model_command(agent: YipsAgentProtocol, args: str) -> None:
     llama_models = get_llama_models()
 
     if not args:
-        # Display model table
-        table = Table(title="Available Models")
-        table.add_column("Model", style="cyan")
-        table.add_column("Backend", style="magenta")
-        table.add_column("Status", style="green")
-
-        # Claude models
-        for model in ["haiku", "sonnet", "opus"]:
-            is_current = agent.use_claude_cli and agent.current_model == model
-            status = "← current" if is_current else ""
-            table.add_row(get_friendly_model_name(model), get_friendly_backend_name("claude"), status)
-
-        # llama.cpp models
-        for model in llama_models:
-            is_current = not agent.use_claude_cli and agent.backend == "llamacpp" and agent.current_model == model
-            status = "← current" if is_current else ""
-            table.add_row(get_friendly_model_name(model), get_friendly_backend_name("llamacpp"), status)
-
-        console.print(table)
-        return
+        from cli.model_manager import run_model_manager_ui
+        result = run_model_manager_ui(agent.current_model, agent.backend)
+        return result
 
     # Switch model
     model_name_lower = args.lower()
@@ -230,6 +213,31 @@ def handle_model_command(agent: YipsAgentProtocol, args: str) -> None:
 
 
 
+def handle_nick_command(agent: YipsAgentProtocol, args: str) -> None:
+    """Handle the /nick command to set a custom nickname for a model."""
+    import shlex
+    from cli.info_utils import set_model_nickname
+    try:
+        parts = shlex.split(args)
+    except ValueError as e:
+        console.print(f"[red]Error parsing arguments: {e}[/red]")
+        return
+
+    if len(parts) < 2:
+        console.print("[yellow]Usage: /nick <model_name_or_filename> <nickname>[/yellow]")
+        console.print("[dim]Example: /nick gpt-oss-20b-MXFP4 gpt-oss[/dim]")
+        console.print("[dim]Example: /nick opus \"4.5 Opus\"[/dim]")
+        return
+
+    model_target = parts[0]
+    nickname = parts[1]
+
+    set_model_nickname(model_target, nickname)
+
+    console.print(f"[green]Nickname set: {model_target} → {nickname}[/green]")
+    agent.refresh_display()
+
+
 def handle_slash_command(agent: YipsAgentProtocol, user_input: str) -> str | bool:
     """Handle slash commands (Tools and Skills). Returns 'exit' to quit, True if handled, False otherwise."""
     if not user_input.startswith("/"):
@@ -245,8 +253,10 @@ def handle_slash_command(agent: YipsAgentProtocol, user_input: str) -> str | boo
         agent.graceful_exit()
         return "exit"
 
-    if command == "model":
-        handle_model_command(agent, args)
+    if command in ("model", "models"):
+        result = handle_model_command(agent, args)
+        if isinstance(result, str) and result.startswith("/"):
+            return handle_slash_command(agent, result)
         return True
 
     if command == "backend":
@@ -255,6 +265,10 @@ def handle_slash_command(agent: YipsAgentProtocol, user_input: str) -> str | boo
 
     if command == "sessions":
         handle_sessions_command(agent)
+        return True
+
+    if command == "nick":
+        handle_nick_command(agent, args)
         return True
 
     if command in ("clear", "new"):
@@ -284,20 +298,6 @@ def handle_slash_command(agent: YipsAgentProtocol, user_input: str) -> str | boo
         console.print(f"[green]Streaming mode: {status}[/green]")
         agent.refresh_display()
         return True
-
-    if command == "models":
-        # Execute the MODELS tool directly
-        cmd_dir = TOOLS_DIR / "MODELS"
-        tool_path = cmd_dir / "MODELS.py"
-        if tool_path.exists():
-            try:
-                venv_python = PROJECT_ROOT / ".venv" / "bin" / "python3"
-                executable = str(venv_python) if venv_python.exists() else sys.executable
-                subprocess.run([executable, str(tool_path)], env={**os.environ, "PYTHONPATH": str(PROJECT_ROOT)})
-                return True
-            except Exception as e:
-                console.print(f"[red]Error running /models: {e}[/red]")
-                return True
 
     if command == "download":
         from cli.download_ui import run_download_ui

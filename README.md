@@ -43,8 +43,8 @@ Use the `/backend` command within Yips to switch between them.
 
 ## 🧠 Model Management
 
-Yips features a hardware-aware model recommendation engine. Run:
+Yips features a hardware-aware Model Manager. Run:
 ```bash
-/models
+/model
 ```
-within the CLI to see popular Hugging Face models filtered by your system's detected RAM and VRAM.
+within the CLI to manage your local models, switch between backends, or jump to the interactive downloader.

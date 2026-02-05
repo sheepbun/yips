@@ -306,11 +306,25 @@ def get_friendly_model_name(model_name: str) -> str:
     """Convert internal model name to display-friendly name."""
     if not model_name: return "Default"
     
+    # Check for custom nicknames in config
+    from cli.config import load_config
+    config = load_config()
+    nicknames = config.get("nicknames", {})
+    if model_name in nicknames:
+        return nicknames[model_name]
+    
     # Handle long paths in llamacpp
     if "/" in model_name:
-        model_name = model_name.split("/")[-1]
-    if model_name.endswith(".gguf"):
-        model_name = model_name[:-5]
+        pure_name = model_name.split("/")[-1]
+    else:
+        pure_name = model_name
+
+    if pure_name.endswith(".gguf"):
+        pure_name = pure_name[:-5]
+
+    # Also check nickname for the pure name (filename only)
+    if pure_name in nicknames:
+        return nicknames[pure_name]
 
     mapping = {
         "haiku": "4.5 Haiku",
@@ -325,4 +339,14 @@ def get_friendly_model_name(model_name: str) -> str:
         "Qwen3-4B-Thinking-2507-Q4_K_M": "qwen-3",
         "gemma-3-12b-it-Q4_K_M": "gemma-3",
     }
-    return mapping.get(model_name, model_name)
+    return mapping.get(pure_name, pure_name)
+
+
+def set_model_nickname(model_target: str, nickname: str) -> None:
+    """Set a custom nickname for a model and save to config."""
+    from cli.config import load_config, save_config
+    config = load_config()
+    nicknames = config.get("nicknames", {})
+    nicknames[model_target] = nickname
+    config["nicknames"] = nicknames
+    save_config(config)

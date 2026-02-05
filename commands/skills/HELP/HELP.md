@@ -4,7 +4,7 @@ Welcome to **Yips**, your agentic desktop companion.
 
 ## Built-in Commands
 - `/help` - Show this help message.
-- `/model [name]` - List available models or switch to a specific model.
+- `/model` - Open the Model Manager to list or switch models.
 - `/sessions` - Interactively select and load a past session.
 - `/clear` or `/new` - Start a new, empty conversation.
 - `/verbose` - Toggle verbose mode (shows underlying tool calls).

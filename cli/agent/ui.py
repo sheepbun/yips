@@ -37,6 +37,8 @@ from cli.ui_rendering import (
     safe_center,
     render_top_border,
     render_bottom_border,
+    get_top_border_text,
+    get_bottom_border_text,
     render_tool_call,
     render_thinking_block,
     LOGO_WIDTH,
@@ -58,7 +60,11 @@ class AgentUIMixin:
         elif layout_mode in ("compact", "single"):
             self._render_single_column_title(layout_mode)
         else:
-            self._render_two_column_title()
+            self.console.print(self._get_two_column_title_group())
+
+    def get_title_box_group(self, scroll_offset: int = 0) -> Group:
+        """Get the title box renderable group (mostly for animation)."""
+        return self._get_two_column_title_group(scroll_offset)
 
     def _get_model_info_string(self) -> str:
         """Generate the model info string with context size if available."""
@@ -268,14 +274,18 @@ class AgentUIMixin:
         render_bottom_border(terminal_width, self.current_session_name)
         self.console.print()
 
-    def _render_two_column_title(self) -> None:
-        """Render two-column title box for wide terminals (>= 80 chars)."""
+    def _get_two_column_title_group(self, scroll_step: int = 0) -> Group:
+        """Generate two-column title box group (for wide terminals >= 80 chars)."""
         terminal_width = self.console.width
 
         # If logo width exceeds 50% of terminal, hide right column (render single-column)
+        # We can't easily return a single column group yet if we are in this method, 
+        # but we can try. Ideally caller checks this, but we'll handle it gracefully.
         if LOGO_WIDTH > terminal_width * 0.5:
-            self._render_single_column_title("single")
-            return
+            # Fallback for now: capture output or return empty?
+            # Since get_title_box_group calls this, and we promised to return a Group...
+            # We'll just return a simplified single column text block for now.
+            return Group(Text("Terminal too narrow for 2-column view"))
 
         # Reserve space for borders and divider: │ + left + │ + right + │
         available_width = terminal_width - 3
@@ -299,8 +309,7 @@ class AgentUIMixin:
             for i, s in enumerate(visible_sessions):
                 actual_idx = start_idx + i
                 is_selected = (actual_idx == self.session_selection_idx)
-                prefix = "> " if is_selected else "  "
-                # We'll handle the styling in the render loop below
+                prefix = "> " if is_selected else ""
                 activity.append((prefix + s['display'], is_selected))
         else:
             activity = [(a, False) for a in get_recent_activity()]
@@ -317,8 +326,6 @@ class AgentUIMixin:
         left_col.append("")  # [11] blank padding
 
         # Build right column
-        verbose_status = "on" if self.verbose_mode else "off"
-        streaming_status = "on" if self.streaming_enabled else "off"
         right_col_data = [
             ("Tips for getting started:", False),  # [0]
             ("- Ask questions, edit files, or run commands.", False),  # [1]
@@ -333,11 +340,11 @@ class AgentUIMixin:
         while len(right_col_data) < len(left_col):
             right_col_data.append(("", False))
 
-        # Blank line before title box
-        self.console.print()
+        renderables = []
+        renderables.append(Text("")) # Blank line
 
-        # Render top border
-        render_top_border(terminal_width)
+        # Top border
+        renderables.append(get_top_border_text(terminal_width))
 
         # Render content lines
         max_lines = max(len(left_col), len(right_col_data))
@@ -404,7 +411,7 @@ class AgentUIMixin:
             # Divider bar
             styled_line.append("│", style=divider_style)
 
-            # Right content with styling - truncate if needed
+            # Right content with styling
             def truncate_right(text: str) -> str:
                 if len(text) > right_width:
                     return text[:right_width]
@@ -414,12 +421,60 @@ class AgentUIMixin:
 
             if is_highlighted:
                 # Highlighted session: pink bold
-                padded_text = truncate_right(right_text)
-                # First two chars might be "> "
+                # We need to handle the cursor "> " and separate Timestamp from Title
+                prefix_marker = "> "
+                full_text = right_text
+                
+                # Check if we have the expected prefix
+                if full_text.startswith(prefix_marker):
+                    # Remove prefix for parsing
+                    content_text = full_text[len(prefix_marker):]
+                    
+                    # Split Timestamp and Title
+                    # Format: "YYYY-MM-DD @ HH:MM XX: Title"
+                    if ": " in content_text:
+                        timestamp_part, title_part = content_text.split(": ", 1)
+                        timestamp_part += ": "
+                    else:
+                        timestamp_part = ""
+                        title_part = content_text
+
+                    # Construct fixed prefix: "> " + "Timestamp: "
+                    full_fixed_prefix = prefix_marker + timestamp_part
+                    avail_title_width = right_width - len(full_fixed_prefix)
+                    
+                    if avail_title_width > 5 and len(title_part) > avail_title_width:
+                        # Ping-pong scroll logic for TITLE ONLY
+                        limit = len(title_part) - avail_title_width
+                        pause = 8 
+                        cycle = limit * 2 + pause * 2
+                        
+                        pos = scroll_step % cycle
+                        offset = 0
+                        
+                        if pos < pause:
+                            offset = 0
+                        elif pos < pause + limit:
+                            offset = pos - pause
+                        elif pos < pause + limit + pause:
+                            offset = limit
+                        else:
+                            offset = limit - (pos - (pause + limit + pause))
+                            
+                        visible_title = title_part[offset : offset + avail_title_width]
+                        display_text = full_fixed_prefix + visible_title
+                    else:
+                        # No scroll needed or too narrow
+                        display_text = truncate_right(full_text)
+                else:
+                    display_text = truncate_right(full_text)
+
+                padded_text = truncate_right(display_text)
                 cursor_part = padded_text[:2]
                 text_part = padded_text[2:]
                 styled_line.append(cursor_part, style="bold #ffccff")
                 styled_line.append(text_part, style="bold #ffccff")
+
             elif line_num == 0:  # Tips header - gradient, bold
                 padded_text = truncate_right(right_text)
                 for i, char in enumerate(padded_text):
@@ -460,11 +515,13 @@ class AgentUIMixin:
             # Right bar
             styled_line.append("│", style=right_bar_style)
 
-            self.console.print(styled_line)
+            renderables.append(styled_line)
 
-        # Render bottom border
-        render_bottom_border(terminal_width, self.current_session_name)
-        self.console.print()
+        # Bottom border
+        renderables.append(get_bottom_border_text(terminal_width, self.current_session_name))
+        renderables.append(Text("")) # Trailing newline matching print() behavior
+
+        return Group(*renderables)
 
     def refresh_display(self) -> None:
         """Clear terminal and re-render title box and history."""

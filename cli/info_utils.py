@@ -10,6 +10,9 @@ from datetime import datetime
 from cli.config import BASE_DIR, MEMORIES_DIR
 
 
+from functools import lru_cache
+
+@lru_cache(maxsize=1)
 def get_username() -> str:
     """Get user's preferred name from HUMAN.md, fallback to Katherine."""
     try:
@@ -159,9 +162,13 @@ def get_recent_activity(limit: int = 5) -> list[str]:
                                 else:
                                     display_hour = hour_int - 12
                                     am_pm = "PM"
-                                display = f"{dt.strftime('%Y-%-m-%-d')} @ {display_hour}:{minute} {am_pm}: {title}"
+                                
+                                # Fixed width formatting: %m-%d (zero padded), hour (space padded >2)
+                                date_str = dt.strftime('%Y-%m-%d')
+                                time_str = f"{display_hour:>2}:{minute} {am_pm}"
+                                display = f"{date_str} @ {time_str}: {title}"
                             else:
-                                display = f"{dt.strftime('%Y-%-m-%-d')}: {title}"
+                                display = f"{dt.strftime('%Y-%m-%d')}: {title}"
                         except (ValueError, IndexError):
                             display = f"{date_part}: {title}"
                     else:
@@ -185,9 +192,13 @@ def get_recent_activity(limit: int = 5) -> list[str]:
                                 else:
                                     display_hour = hour_int - 12
                                     am_pm = "PM"
-                                display = f"{dt.strftime('%Y-%-m-%-d')} @ {display_hour}:{minute} {am_pm}: {title}"
+                                
+                                # Fixed width formatting
+                                date_str = dt.strftime('%Y-%m-%d')
+                                time_str = f"{display_hour:>2}:{minute} {am_pm}"
+                                display = f"{date_str} @ {time_str}: {title}"
                             else:
-                                display = f"{dt.strftime('%Y-%-m-%-d')}: {title}"
+                                display = f"{dt.strftime('%Y-%m-%d')}: {title}"
                         except (ValueError, IndexError):
                             display = f"{date_part}: {title}"
                 else:
@@ -206,7 +217,10 @@ def get_recent_activity(limit: int = 5) -> list[str]:
                     else:
                         display_hour = hour_int - 12
                         am_pm = "PM"
-                    display = f"{dt.strftime('%Y-%-m-%-d')} @ {display_hour}:{dt.strftime('%M')} {am_pm}: {name}"
+                    
+                    date_str = dt.strftime('%Y-%m-%d')
+                    time_str = f"{display_hour:>2}:{dt.strftime('%M')} {am_pm}"
+                    display = f"{date_str} @ {time_str}: {name}"
 
                 activities.append(display)
             except Exception:
@@ -273,16 +287,22 @@ def get_session_list() -> list[dict]:
                         minute = time_parts[1]
                         period = "AM" if hour < 12 else "PM"
                         hour = 12 if hour == 0 else (hour if hour <= 12 else hour - 12)
-                        display = f"{dt.strftime('%Y-%-m-%-d')} @ {hour}:{minute} {period}: {title}"
+                        
+                        date_str = dt.strftime('%Y-%m-%d')
+                        time_str = f"{hour:>2}:{minute} {period}"
+                        display = f"{date_str} @ {time_str}: {title}"
                     else:
                         # Old format
                         hour = int(time_part[:2])
                         minute = time_part[2:4]
                         period = "AM" if hour < 12 else "PM"
                         hour = 12 if hour == 0 else (hour if hour <= 12 else hour - 12)
-                        display = f"{dt.strftime('%Y-%-m-%-d')} @ {hour}:{minute} {period}: {title}"
+                        
+                        date_str = dt.strftime('%Y-%m-%d')
+                        time_str = f"{hour:>2}:{minute} {period}"
+                        display = f"{date_str} @ {time_str}: {title}"
                 else:
-                    display = f"{dt.strftime('%Y-%-m-%-d %H:%M')}: {f.stem}"
+                    display = f"{dt.strftime('%Y-%m-%d %H:%M')}: {f.stem}"
                 
                 sessions.append({'path': f, 'display': display})
             except Exception:

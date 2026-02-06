@@ -9,7 +9,7 @@ import re
 import subprocess
 import sys
 import time
-from typing import Protocol
+from typing import Protocol, Any
 
 from rich.console import Console
 from rich.table import Table
@@ -43,6 +43,7 @@ class YipsAgentProtocol(Protocol):
     def load_session(self, file_path: any) -> bool: ...
     def new_session(self) -> None: ...
     def initialize_backend(self) -> None: ...
+    def get_title_box_group(self, scroll_step: int = 0) -> Any: ...
 
 
 def handle_backend_command(agent: YipsAgentProtocol, args: str) -> None:
@@ -109,45 +110,114 @@ def handle_sessions_command(agent: YipsAgentProtocol) -> None:
     agent.session_selection_idx = 0
     agent.session_selection_active = True
     
-    # Refresh to show cursor in Recent activity cell
-    agent.refresh_title_box_only()
+    # Clear screen to prepare for Live view
+    subprocess.run('clear' if os.name != 'nt' else 'cls', shell=True)
     
+    from rich.live import Live
+    import sys
+    import select
     from prompt_toolkit.input import create_input
     from prompt_toolkit.keys import Keys
 
-    # Capture keys
     input_obj = create_input()
+    scroll_step = 0
     
+    # Render initial frame
     try:
-        with input_obj.raw_mode():
-            while True:
-                # Read keys
-                keys = input_obj.read_keys()
-                for key_press in keys:
-                    key = key_press.key
-                    
-                    if key == Keys.Up:
-                        agent.session_selection_idx = (agent.session_selection_idx - 1) % len(sessions)
-                        agent.refresh_title_box_only()
-                    elif key == Keys.Down:
-                        agent.session_selection_idx = (agent.session_selection_idx + 1) % len(sessions)
-                        agent.refresh_title_box_only()
-                    elif key == Keys.Enter or key == "\r" or key == "\n":
-                        # Load session
-                        selected_session = sessions[agent.session_selection_idx]
-                        agent.session_selection_active = False
-                        agent.load_session(selected_session['path'])
-                        return
-                    elif key == Keys.Escape:
-                        agent.session_selection_active = False
-                        agent.refresh_title_box_only()
-                        return
-                
-                time.sleep(0.05)
-    except Exception as e:
-        agent.session_selection_active = False
-        console.print(f"[red]Error in session selection: {e}[/red]")
+        initial_group = agent.get_title_box_group(scroll_step)
+    except AttributeError:
+        # Fallback if method missing (shouldn't happen with updated agent)
         agent.refresh_title_box_only()
+        return
+
+    # Use Live for smooth animation
+    # screen=False allows us to render "in place" but since we cleared, it's at top
+    # auto_refresh=False gives us manual control loop
+    selected_session_path = None
+    last_render_time = 0
+    render_interval = 0.1
+    
+    with Live(initial_group, console=agent.console, auto_refresh=False, transient=True) as live:
+        try:
+            with input_obj.raw_mode():
+                key = None
+                while True:
+                    # Drain all pending input
+                    input_processed = False
+                    
+                    while True:
+                        # Check for input availability
+                        has_data = False
+                        if sys.platform != "win32":
+                             r, _, _ = select.select([sys.stdin], [], [], 0)
+                             has_data = bool(r)
+                        else:
+                             try:
+                                 import msvcrt
+                                 has_data = msvcrt.kbhit()
+                             except:
+                                 pass
+
+                        if not has_data:
+                            break
+                            
+                        # Read available keys
+                        keys = input_obj.read_keys()
+                        if not keys:
+                            break
+                            
+                        key = None
+                        for key_press in keys:
+                            key = key_press.key
+                            
+                            if key == Keys.Up:
+                                agent.session_selection_idx = (agent.session_selection_idx - 1) % len(sessions)
+                                scroll_step = 0
+                                input_processed = True
+                            elif key == Keys.Down:
+                                agent.session_selection_idx = (agent.session_selection_idx + 1) % len(sessions)
+                                scroll_step = 0
+                                input_processed = True
+                            elif key == Keys.Enter or key == "\r" or key == "\n":
+                                selected_session_path = sessions[agent.session_selection_idx]['path']
+                                break
+                            elif key == Keys.Escape:
+                                break
+                        
+                        if selected_session_path is not None or (key == Keys.Escape):
+                            break
+                    
+                    if selected_session_path is not None or (key == Keys.Escape):
+                        break
+                    
+                    # Animate/Render
+                    # Render if we processed input (responsiveness) OR if time elapsed (animation)
+                    now = time.time()
+                    if input_processed or (now - last_render_time >= render_interval):
+                        if not input_processed:
+                            # Only increment scroll if this is an animation frame, not user interaction
+                            # (User interaction resets scroll_step to 0)
+                            scroll_step += 1
+                        
+                        group = agent.get_title_box_group(scroll_step)
+                        live.update(group)
+                        live.refresh()
+                        last_render_time = now
+                    
+                    # Short sleep to prevent CPU spinning
+                    time.sleep(0.01)
+
+        except Exception as e:
+            console.print(f"[red]Error in session selection: {e}[/red]")
+            time.sleep(2) # Show error
+
+    # Restore normal view
+    agent.session_selection_active = False
+    
+    if selected_session_path:
+        agent.load_session(selected_session_path)
+    else:
+        agent.refresh_display()
 
 
 def handle_model_command(agent: YipsAgentProtocol, args: str) -> str | bool:

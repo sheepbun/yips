@@ -193,8 +193,8 @@ def show_booting(message: str = "Initializing...") -> Live:
     return Live(BootingSpinner(message), console=console, transient=True, refresh_per_second=10)
 
 
-def render_top_border(terminal_width: int) -> None:
-    """Render the top border with gradient."""
+def get_top_border_text(terminal_width: int) -> Text:
+    """Generate the top border text with gradient."""
     # For very narrow terminals, use simplified border
     if terminal_width < 25:
         border = "╭" + "─" * max(terminal_width - 2, 0) + "╮"
@@ -203,8 +203,7 @@ def render_top_border(terminal_width: int) -> None:
             progress = i / max(len(border) - 1, 1)
             r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, progress)
             top_text.append(char, style=f"rgb({r},{g},{b})")
-        console.print(top_text)
-        return
+        return top_text
 
     title_text = "Yips CLI"
     version_text = APP_VERSION
@@ -225,8 +224,7 @@ def render_top_border(terminal_width: int) -> None:
                 progress = i / max(len(border) - 1, 1)
                 r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, progress)
                 top_text.append(char, style=f"rgb({r},{g},{b})")
-            console.print(top_text)
-            return
+            return top_text
 
     top_text = Text()
     position = 0
@@ -263,11 +261,16 @@ def render_top_border(terminal_width: int) -> None:
         top_text.append(char, style=f"rgb({r},{g},{b})")
         position += 1
 
-    console.print(top_text)
+    return top_text
 
 
-def render_bottom_border(terminal_width: int, session_name: str | None = None) -> None:
-    """Render the bottom border with gradient, optionally containing session name."""
+def render_top_border(terminal_width: int) -> None:
+    """Render the top border with gradient."""
+    console.print(get_top_border_text(terminal_width))
+
+
+def get_bottom_border_text(terminal_width: int, session_name: str | None = None) -> Text:
+    """Generate the bottom border text with gradient."""
     border_chars = ["─"] * (terminal_width - 2)
 
     if session_name:
@@ -285,8 +288,13 @@ def render_bottom_border(terminal_width: int, session_name: str | None = None) -
         progress = i / max(len(bottom_border_str) - 1, 1)
         r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, progress)
         bottom_text.append(char, style=f"rgb({r},{g},{b})")
+    
+    return bottom_text
 
-    console.print(bottom_text)
+
+def render_bottom_border(terminal_width: int, session_name: str | None = None) -> None:
+    """Render the bottom border with gradient, optionally containing session name."""
+    console.print(get_bottom_border_text(terminal_width, session_name))
 
 
 def _add_tool_node_to_tree(tree: Tree, tool_name: str, parameters: Any, result: str | None = None, is_running: bool = False) -> None:

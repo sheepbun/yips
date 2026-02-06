@@ -418,7 +418,8 @@ class AgentBackendMixin:
                                             live.update(display_text)
                                         else:
                                             live.update(spinner)
-                                            
+                                        
+                                        live.refresh()
                                         self.console.print(render_thinking_block(thinking_part))
                                         time.sleep(1.5)
                                 accumulated_text += text

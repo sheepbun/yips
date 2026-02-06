@@ -3,6 +3,7 @@ Backend communication logic for YipsAgent.
 """
 
 import json
+import re
 import subprocess
 import sys
 import time
@@ -39,6 +40,7 @@ from cli.ui_rendering import (
     show_loading,
     render_tool_call,
     render_thinking_block,
+    calculate_reading_pause,
 )
 from cli.tool_execution import clean_response
 
@@ -106,7 +108,7 @@ class AgentBackendMixin:
 
         self.backend_initialized = True
 
-    def check_and_prune_context(self) -> None:
+    def check_and_prune_context(self, additional_text: str = "") -> None:
         """Check if context exceeds limit and prune/summarize if necessary."""
         # Ensure limits are initialized
         if not hasattr(self, 'token_limits'):
@@ -117,11 +119,14 @@ class AgentBackendMixin:
 
         system_prompt = self.load_context()
         
-        # Estimate total tokens: System + Summary + History
+        # Estimate total tokens: System + Summary + History + New Message
         current_est = self._estimate_tokens(system_prompt, self.conversation_history)
         if hasattr(self, 'running_summary') and self.running_summary:
-            current_est += len(self.running_summary) // 4
+            current_est += len(self.running_summary) // 3  # Conservative estimate
             
+        if additional_text:
+            current_est += len(additional_text) // 3
+
         threshold = self.token_limits.get("pruning_threshold", 15000)
         
         if current_est < threshold:
@@ -132,90 +137,74 @@ class AgentBackendMixin:
             self.console.print(f"[yellow]Context limit approached ({current_est}/{threshold}). Pruning...[/yellow]")
             
         prune_amount_tokens = self.token_limits.get("prune_amount", 4000)
-        
-        # Find how many messages to remove to free up ~prune_amount_tokens
-        to_prune_count = 0
+        self.force_prune_context(prune_amount_tokens)
+
+    def force_prune_context(self, amount_tokens: int) -> None:
+        """Force prune the conversation history by a specific token amount."""
         pruned_tokens = 0
         
-        # We prune from the beginning of conversation_history
-        # But we must keep at least the last 5 messages for context
-        max_prunable = max(0, len(self.conversation_history) - 5)
-        
-        for i in range(max_prunable):
-            msg = self.conversation_history[i]
-            # Estimate msg tokens
-            msg_tokens = len(msg.get("content", "")) // 4
+        if self.verbose_mode:
+            self.console.print(f"[dim]Force pruning requesting removal of ~{amount_tokens} tokens...[/dim]")
+
+        # 1. Prune whole messages from the beginning, keeping at least the last 1
+        # (We use a loop to pop one by one until satisfied)
+        while len(self.conversation_history) > 1 and pruned_tokens < amount_tokens:
+            msg = self.conversation_history.pop(0)
+            
+            # Add to archive
+            if not hasattr(self, 'archived_history'):
+                self.archived_history = []
+            self.archived_history.append(msg)
+            
+            # Calculate tokens removed
+            msg_len = len(msg.get("content", ""))
+            msg_tokens = msg_len // 3
+            if msg_tokens == 0: msg_tokens = 1
+            
             pruned_tokens += msg_tokens
-            to_prune_count += 1
-            if pruned_tokens >= prune_amount_tokens:
-                break
-                
-        if to_prune_count == 0:
+            
+        if pruned_tokens >= amount_tokens:
+            if self.verbose_mode:
+                 self.console.print(f"[dim]Pruned ~{pruned_tokens} tokens (removed whole messages).[/dim]")
             return
 
-        # Slice messages
-        messages_to_summarize = self.conversation_history[:to_prune_count]
-        self.conversation_history = self.conversation_history[to_prune_count:]
+        # 2. If still need to prune, truncate the content of remaining messages
+        # We start from the oldest remaining message.
+        remaining_needed = amount_tokens - pruned_tokens
         
-        # Add to archived history
-        if not hasattr(self, 'archived_history'):
-            self.archived_history = []
-        self.archived_history.extend(messages_to_summarize)
-        
-        # Generate Summary
-        summary_text = "\n".join([f"{m['role'].upper()}: {m['content']}" for m in messages_to_summarize])
-        
-        prompt = (
-            "You are an expert summarizer. Consolidate the following conversation lines into a concise, narrative summary. "
-            "Focus on key facts, decisions, and user preferences. "
-        )
-        
-        if hasattr(self, 'running_summary') and self.running_summary:
-            prompt += f"\n\nEXISTING SUMMARY:\n{self.running_summary}\n"
-            prompt += f"\nNEW LINES TO INTEGRATE:\n{summary_text}\n"
-            prompt += "\nUpdate the existing summary to include the new information."
-        else:
-            prompt += f"\n\nCONVERSATION:\n{summary_text}\n"
+        if self.verbose_mode:
+            self.console.print(f"[dim]Still need to prune ~{remaining_needed} tokens. Truncating content...[/dim]")
+
+        for i in range(len(self.conversation_history)):
+            if remaining_needed <= 0:
+                break
+                
+            msg = self.conversation_history[i]
+            content = msg.get("content", "")
+            content_len = len(content)
+            current_tokens = content_len // 3
             
-        # Perform non-recursive LLM call for summary
-        # We use a temporary simple call to avoid infinite recursion
-        try:
-            # We can use the existing backend but we must NOT call 'get_response' 
-            # as it triggers this check. We call the low-level provider directly.
-            
-            summary_response = ""
-            if getattr(self, 'use_claude_cli', False):
-                # Simple one-shot Claude call
-                cmd = [CLAUDE_CLI_PATH, "-p", prompt]
-                res = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-                if res.returncode == 0:
-                    summary_response = res.stdout.strip()
-            elif self.backend == "llamacpp":
-                # Simple one-shot Llama call
-                try:
-                    res = requests.post(
-                        f"{LLAMA_SERVER_URL}/v1/chat/completions",
-                        json={
-                            "model": self.current_model,
-                            "messages": [{"role": "user", "content": prompt}],
-                            "max_tokens": 1024, # Short summary
-                            "temperature": 0.3, # Deterministic
-                        },
-                        timeout=60
-                    )
-                    if res.status_code == 200:
-                        data = res.json()
-                        summary_response = data.get("choices", [{}])[0].get("message", {}).get("content", "")
-                except Exception:
-                    pass
-            
-            if summary_response:
-                self.running_summary = clean_response(summary_response)
-                if self.verbose_mode:
-                    self.console.print("[dim]Context summarized and archived.[/dim]")
+            # Only truncate if it has significant content
+            if current_tokens > 50:
+                # Calculate chars to remove
+                # 1 token ~= 3 chars. 
+                chars_to_remove = int(remaining_needed * 3.5) # slightly aggressive
+                
+                # Ensure we don't delete the whole thing, leave a tail
+                max_remove = content_len - 100 
+                if max_remove < 0: max_remove = 0
+                
+                if chars_to_remove > max_remove:
+                    chars_to_remove = max_remove
+                
+                if chars_to_remove > 0:
+                    # Truncate from the beginning (assuming older context in the message is less critical)
+                    new_content = f"...[TRUNCATED {chars_to_remove} chars]...\n" + content[chars_to_remove:]
+                    msg["content"] = new_content
                     
-        except Exception as e:
-            self.console.print(f"[red]Failed to summarize context: {e}[/red]")
+                    removed_tokens = chars_to_remove // 3
+                    remaining_needed -= removed_tokens
+                    pruned_tokens += removed_tokens
 
     def get_response(self, message: str) -> str:
         """Get response using available backend (llamacpp or Claude CLI)."""
@@ -223,7 +212,7 @@ class AgentBackendMixin:
             return "[Error: Backend not initialized]"
 
         # Check and prune context before generation
-        self.check_and_prune_context()
+        self.check_and_prune_context(additional_text=message)
 
         self.emit_gui_event("status", "thinking")
 
@@ -250,105 +239,213 @@ class AgentBackendMixin:
     def call_llamacpp(self, message: str) -> str:
         """Call llama-server API using OpenAI-compatible endpoint with retries."""
         system_prompt = self.load_context()
-
-        raw_messages = [{"role": "system", "content": system_prompt}]
         
-        # Inject Running Summary if available
-        if hasattr(self, 'running_summary') and self.running_summary:
-            raw_messages.append({
-                "role": "system", 
-                "content": f"PREVIOUS CONVERSATION SUMMARY:\n{self.running_summary}"
-            })
+        # Max retries for context overflow handling
+        max_overflow_retries = 2
+        overflow_retry_count = 0
 
-        for msg in self.conversation_history:
-            if msg["role"] == "system":
-                content = msg["content"]
-                try:
-                    if content.startswith('{') and content.endswith('}'):
-                        data = json.loads(content)
-                        if "result" in data:
-                            content = data["result"]
-                except:
-                    pass
-                raw_messages.append({"role": "user", "content": f"[Observation]: {content}"})
-            else:
-                raw_messages.append({"role": msg["role"], "content": msg["content"]})
-        
-        if not raw_messages or raw_messages[-1]["content"] != message:
-            raw_messages.append({"role": "user", "content": message})
-
-        # Ensure strict alternation for llama.cpp (required by Gemma-3 and others)
-        messages = []
-        for msg in raw_messages:
-            if not messages:
-                messages.append(msg)
-                continue
+        while True: # Outer loop for context overflow retries
+            raw_messages = [{"role": "system", "content": system_prompt}]
             
-            if messages[-1]["role"] == msg["role"]:
-                # Merge consecutive messages of same role
-                messages[-1]["content"] += "\n\n" + msg["content"]
-            else:
-                messages.append(msg)
+            # Inject Running Summary if available
+            if hasattr(self, 'running_summary') and self.running_summary:
+                raw_messages.append({
+                    "role": "system", 
+                    "content": f"PREVIOUS CONVERSATION SUMMARY:\n{self.running_summary}"
+                })
 
-        if self.streaming_enabled:
-            try:
-                return self._stream_llamacpp(messages)
-            except Exception as e:
-                self.console.print(f"[yellow]Streaming failed ({e}), using non-streaming mode[/yellow]")
+            for msg in self.conversation_history:
+                if msg["role"] == "system":
+                    content = msg["content"]
+                    try:
+                        if content.startswith('{') and content.endswith('}'):
+                            data = json.loads(content)
+                            if "result" in data:
+                                content = data["result"]
+                    except:
+                        pass
+                    raw_messages.append({"role": "user", "content": f"[Observation]: {content}"})
+                else:
+                    raw_messages.append({"role": msg["role"], "content": msg["content"]})
+            
+            if not raw_messages or raw_messages[-1]["content"] != message:
+                raw_messages.append({"role": "user", "content": message})
 
-        last_error = ""
-        for attempt in range(3):
-            try:
-                est_tokens = self._estimate_tokens(system_prompt, messages)
+            # Ensure strict alternation for llama.cpp (required by Gemma-3 and others)
+            messages = []
+            for msg in raw_messages:
+                if not messages:
+                    messages.append(msg)
+                    continue
                 
-                loading_msg = "Waiting for llama.cpp response..."
-                if attempt > 0:
-                    loading_msg = f"Retrying llama.cpp (attempt {attempt+1}/3)..."
+                if messages[-1]["role"] == msg["role"]:
+                    # Merge consecutive messages of same role
+                    messages[-1]["content"] += "\n\n" + msg["content"]
+                else:
+                    messages.append(msg)
 
-                with show_loading(loading_msg, token_count=est_tokens):
-                    response = requests.post(
-                        f"{LLAMA_SERVER_URL}/v1/chat/completions",
-                        json={
-                            "model": self.current_model,
-                            "messages": messages,
-                            "max_tokens": 2048,
-                            "temperature": 0.7,
-                        },
-                        timeout=120
-                    )
+            if self.streaming_enabled and overflow_retry_count == 0:
+                # We only try streaming on the first pass. If we overflowed, we fall back to blocking for stability (or we could just stream again)
+                try:
+                    # Note: Streaming method doesn't currently handle overflow retries. 
+                    # If it fails with 400, it returns an error string.
+                    # Ideally we should refactor stream to also handle it, but for now let's use the blocking call for retries if streaming fails with context error.
+                    result = self._stream_llamacpp(messages)
+                    if not result.startswith("[Error from llama.cpp (400)"):
+                        return result
+                    # If it WAS a 400 error, fall through to blocking retry logic
+                except Exception as e:
+                    self.console.print(f"[yellow]Streaming failed ({e}), using non-streaming mode[/yellow]")
+
+            last_error = ""
+            for attempt in range(3):
+                try:
+                    est_tokens = self._estimate_tokens(system_prompt, messages)
                     
-                    if response.status_code != 200:
-                        last_error = f"{response.status_code}: {response.text}"
-                        continue
+                    loading_msg = "Waiting for llama.cpp response..."
+                    if attempt > 0:
+                        loading_msg = f"Retrying llama.cpp (attempt {attempt+1}/3)..."
+                    if overflow_retry_count > 0:
+                        loading_msg = f"Retrying with pruned context ({overflow_retry_count})..."
 
-                    data = response.json()
-                    msg_data = data.get("choices", [{}])[0].get("message", {})
-                    content = msg_data.get("content", "")
-                    reasoning = msg_data.get("reasoning_content", "")
+                    with show_loading(loading_msg, token_count=est_tokens):
+                        response = requests.post(
+                            f"{LLAMA_SERVER_URL}/v1/chat/completions",
+                            json={
+                                "model": self.current_model,
+                                "messages": messages,
+                                "max_tokens": 2048,
+                                "temperature": 0.7,
+                            },
+                            timeout=120
+                        )
+                        
+                        if response.status_code == 400:
+                            # Check for context overflow
+                            try:
+                                err_json = response.json()
+                                if "error" in err_json:
+                                    err_type = err_json["error"].get("type", "")
+                                    err_msg = err_json["error"].get("message", "")
+                                    
+                                    if "exceed_context_size_error" in err_type or "exceeds the available context size" in err_msg:
+                                        if overflow_retry_count < max_overflow_retries:
+                                            # Calculate overflow amount
+                                            n_prompt = err_json["error"].get("n_prompt_tokens", 0)
+                                            n_ctx = err_json["error"].get("n_ctx", 0)
+                                            
+                                            self.console.print(f"[yellow]Context limit exceeded (Prompt: {n_prompt}, Limit: {n_ctx}). Pruning history and retrying...[/yellow]")
+                                            
+                                            if n_prompt > 0 and n_ctx > 0:
+                                                overflow = n_prompt - n_ctx
+                                                # Prune overflow + 20% buffer
+                                                to_prune = overflow + int(n_ctx * 0.2)
+                                            else:
+                                                # Fallback if numbers aren't provided
+                                                to_prune = 4000
+                                                
+                                            self.force_prune_context(to_prune)
+                                            overflow_retry_count += 1
+                                            break # Break inner loop to rebuild messages in outer loop
+                                        else:
+                                            return f"[Error: Context limit exceeded even after pruning. Try starting a new session with /clear.]"
+                            except Exception:
+                                pass
+                                
+                        if response.status_code != 200:
+                            last_error = f"{response.status_code}: {response.text}"
+                            continue
 
-                    if reasoning and self.verbose_mode:
-                        self.console.print(render_thinking_block(reasoning))
-                    
-                    if reasoning and not content.startswith("<think>"):
-                        content = f"<think>\n{reasoning}\n</think>\n{content}"
-                    
-                    usage = data.get("usage", {})
-                    if self.verbose_mode and usage:
-                        output_tokens = usage.get("completion_tokens", 0)
-                        if output_tokens > 0:
-                            token_str = f"{output_tokens/1000:.1f}k" if output_tokens >= 1000 else str(output_tokens)
-                            self.console.print(f"[dim]↓ {token_str} tokens[/dim]", style=TOOL_COLOR)
+                        data = response.json()
+                        msg_data = data.get("choices", [{}])[0].get("message", {})
+                        content = msg_data.get("content", "")
+                        reasoning = msg_data.get("reasoning_content", "")
 
-                    return content
+                        if reasoning and self.verbose_mode:
+                            self.console.print(render_thinking_block(reasoning))
+                        
+                        if reasoning and not content.startswith("<think>"):
+                            content = f"<think>\n{reasoning}\n</think>\n{content}"
+                        
+                        usage = data.get("usage", {})
+                        if self.verbose_mode and usage:
+                            output_tokens = usage.get("completion_tokens", 0)
+                            if output_tokens > 0:
+                                token_str = f"{output_tokens/1000:.1f}k" if output_tokens >= 1000 else str(output_tokens)
+                                self.console.print(f"[dim]↓ {token_str} tokens[/dim]", style=TOOL_COLOR)
 
-            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
-                last_error = str(e)
-                time.sleep(attempt + 1)
+                        return content
+
+                except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+                    last_error = str(e)
+                    time.sleep(attempt + 1)
+                    continue
+                except Exception as e:
+                    return f"[Error calling llama.cpp: {e}]"
+            
+            # If we exited the inner loop without 'break' (for retry) and without returning, it implies failure
+            if overflow_retry_count > 0 and attempt == 2:
+                 return f"[Error calling llama.cpp after pruning and retrying. Last error: {last_error}]"
+            elif attempt == 2:
+                 return f"[Error calling llama.cpp after 3 attempts. Last error: {last_error}]"
+            
+            # If we hit the break, we continue to outer loop
+            pass
+
+    def _extract_thinking_points(self, thinking_text: str, is_streaming: bool = False) -> list[str]:
+        """Extract summary points from thinking text (mirrors render_thinking_block logic)."""
+        text = thinking_text.strip()
+        if text.startswith("<think>"):
+            text = text[7:].strip()
+        if text.endswith("</think>"):
+            text = text[:-8].strip()
+        if not text:
+            return []
+
+        noise_prefixes = [
+            r"^i (will|need to|should|can|am going to|think|believe|want to|'m going to|'m thinking about)\b",
+            r"^let's (try to|check|see|look)\b",
+            r"^i'll\b",
+            r"^now\b",
+            r"^first(ly)?,\b",
+            r"^second(ly)?,\b",
+            r"^third(ly)?,\b",
+            r"^then,\b",
+            r"^next,\b",
+            r"^finally,\b",
+            r"^okay,\b",
+            r"^so,\b",
+            r"^actually,\b",
+            r"^it seems (that|like)?\b",
+            r"^i should (probably)?\b",
+        ]
+
+        raw_parts = re.split(r'(?:(?<=[.!?])\s+)|(?:\n+)', text)
+        points = []
+
+        last_char = text[-1] if text else ""
+        is_text_finished = last_char in ('.', '!', '?', '\n')
+
+        for i, part in enumerate(raw_parts):
+            part = part.strip()
+            if not part:
                 continue
-            except Exception as e:
-                return f"[Error calling llama.cpp: {e}]"
-        
-        return f"[Error calling llama.cpp after 3 attempts. Last error: {last_error}]"
+
+            is_last = (i == len(raw_parts) - 1)
+            if is_streaming and is_last and not is_text_finished:
+                continue
+
+            part = re.sub(r'^[-*•\d\.\s]+', '', part).strip()
+            for pattern in noise_prefixes:
+                part = re.sub(pattern, '', part, flags=re.IGNORECASE).strip()
+
+            if part:
+                part = part[0].upper() + part[1:]
+                part = part.rstrip(':').strip()
+                if len(part) >= 3 and part not in points:
+                    points.append(part)
+
+        return points
 
     def _stream_llamacpp(self, messages: list[dict]) -> str:
         """Stream response from llama-server API with real-time display."""
@@ -376,6 +473,7 @@ class AgentBackendMixin:
 
             accumulated_text = ""
             in_thinking_block = False
+            self._thinking_lines_shown = 0
             
             with Live(spinner, console=self.console, refresh_per_second=20, transient=True) as live:
                 for line in response.iter_lines():
@@ -421,7 +519,8 @@ class AgentBackendMixin:
                                         
                                         live.refresh()
                                         self.console.print(render_thinking_block(thinking_part))
-                                        time.sleep(1.5)
+                                        time.sleep(0.3)
+                                        self._thinking_lines_shown = 0
                                 accumulated_text += text
                         if accumulated_text:
                             renderables = []
@@ -429,7 +528,28 @@ class AgentBackendMixin:
                                 start_idx = accumulated_text.rfind("<think>")
                                 if start_idx != -1:
                                     thinking_part = accumulated_text[start_idx:]
-                                    renderables.append(render_thinking_block(thinking_part, is_streaming=True))
+
+                                    # Show only the latest single line during streaming
+                                    current_points = self._extract_thinking_points(thinking_part, is_streaming=True)
+                                    new_line_count = len(current_points) - self._thinking_lines_shown
+
+                                    if new_line_count > 0 and self._thinking_lines_shown > 0:
+                                        # Pause on the previous line before switching
+                                        pause = calculate_reading_pause(current_points[self._thinking_lines_shown - 1])
+                                        time.sleep(pause)
+                                        self._thinking_lines_shown = len(current_points)
+
+                                    elif new_line_count > 0:
+                                        self._thinking_lines_shown = len(current_points)
+
+                                    # Display only the most recent line
+                                    latest_idx = max(1, len(current_points))
+                                    renderables.append(render_thinking_block(
+                                        thinking_part,
+                                        is_streaming=True,
+                                        visible_lines=latest_idx,
+                                        show_only_last=True
+                                    ))
                             display_accumulated = clean_response(accumulated_text)
                             if display_accumulated:
                                 display_text = Text()
@@ -457,7 +577,8 @@ class AgentBackendMixin:
                 if start_idx != -1 and end_idx != -1:
                     thinking_part = accumulated_text[start_idx:end_idx]
                     self.console.print(render_thinking_block(thinking_part))
-                    time.sleep(1.5)
+                    time.sleep(0.3)
+                    self._thinking_lines_shown = 0
             cleaned_text = clean_response(accumulated_text)
             if cleaned_text:
                 final_text = Text()

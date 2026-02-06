@@ -431,7 +431,59 @@ def render_tool_batch(tools: list[dict], title: str | None = None, compact: bool
     return Panel(tree, title=blue_gradient_text(title_text), border_style=TOOL_COLOR, expand=False, padding=(0, 1))
 
 
-def render_thinking_block(thinking_text: str, is_streaming: bool = False) -> Group:
+def calculate_optimal_summary_lines(thinking_text: str, is_streaming: bool = False) -> int:
+    """
+    Calculate optimal number of summary lines based on content.
+
+    Uses character count as primary metric (correlates with complexity),
+    adjusted by actual extractable sentence/point count.
+    """
+    char_count = len(thinking_text.strip())
+
+    # Base calculation from character thresholds
+    if char_count < 100:
+        base_lines = 2
+    elif char_count < 300:
+        base_lines = 3
+    elif char_count < 600:
+        base_lines = 5
+    elif char_count < 1000:
+        base_lines = 7
+    else:
+        base_lines = 9
+
+    # Adjust based on actual point extraction
+    raw_parts = re.split(r'(?:(?<=[.!?])\s+)|(?:\n+)', thinking_text.strip())
+    viable_points = sum(1 for part in raw_parts if len(part.strip()) > 3)
+
+    # If fewer viable points than base, reduce
+    if viable_points < base_lines:
+        base_lines = max(2, viable_points)
+
+    # If significantly more points, increase slightly (with cap)
+    if viable_points > base_lines * 1.5:
+        base_lines = min(10, int(base_lines * 1.2))
+
+    # During streaming, show slightly fewer lines (more focused)
+    if is_streaming:
+        base_lines = max(2, int(base_lines * 0.8))
+
+    return max(2, min(10, base_lines))
+
+
+def calculate_reading_pause(text: str) -> float:
+    """
+    Calculate pause time for comfortable reading based on 250 WPM.
+    Returns seconds to pause after displaying this text.
+    """
+    words = len(text.split())
+    # ~500 words/min = 8.33 words/sec (skimming speed, not deep reading)
+    pause = words / 16.66
+    # Clamp: minimum 0.2s, maximum 0.6s
+    return max(0.2, min(0.6, pause))
+
+
+def render_thinking_block(thinking_text: str, is_streaming: bool = False, max_display_lines: int | None = None, visible_lines: int | None = None, show_only_last: bool = False) -> Group:
     """Render a thinking block with manual gradient borders."""
     # Clean up the thinking text
     text = thinking_text.strip()
@@ -495,34 +547,64 @@ def render_thinking_block(thinking_text: str, is_streaming: bool = False) -> Gro
     # UI Styles
     header_text = yellow_blue_gradient_text("🧠 Thinking Process")
     
-    # Consistent display: Show FIRST 5 points in both cases
-    MAX_DISPLAY = 5
-    display_points = summarized_points[:MAX_DISPLAY]
+    # Dynamic display: calculate optimal line count based on content
+    if max_display_lines is None:
+        max_display_lines = calculate_optimal_summary_lines(text, is_streaming)
+    display_points = summarized_points[:max_display_lines]
+
+    # For animation: only show subset if specified
+    if visible_lines is not None:
+        display_points = display_points[:visible_lines]
+
+    # Show only the last (most recent) line
+    if show_only_last and display_points:
+        display_points = display_points[-1:]
     
     content_lines = []
     if not display_points:
         if not text:
-            content_lines.append(yellow_blue_gradient_text("• Initializing..."))
+            content_lines.append(yellow_blue_gradient_text("✧ Initializing..."))
         elif is_streaming:
-            content_lines.append(yellow_blue_gradient_text("• Thinking..."))
+            content_lines.append(yellow_blue_gradient_text("✧ Thinking..."))
         else:
-            content_lines.append(yellow_blue_gradient_text("• Task analyzed"))
+            content_lines.append(yellow_blue_gradient_text("✧ Task analyzed"))
     else:
         for point in display_points:
-            content_lines.append(yellow_blue_gradient_text(f"• {point}"))
+            content_lines.append(yellow_blue_gradient_text(f"✧ {point}"))
 
     # Calculate width
-    max_content_w = max(cell_len(l.plain) for l in content_lines) if content_lines else 0
     header_plain = "🧠 Thinking Process"
     header_w = cell_len(header_plain)
-    
+    term_width = console.width or 80
+    max_content_w = max(cell_len(l.plain) for l in content_lines) if content_lines else 0
+
     # Box needs space for borders (2) and padding (2)
     # For header in border, we need at least ╭─── [header] ───╮ which is header_w + 10
     width = max(max_content_w + 4, header_w + 10)
-    
-    # Constrain to terminal width
-    term_width = console.width or 80
     width = min(width, term_width - 2)
+
+    # Wrap content lines that exceed the inner width (width - 4 for borders + padding)
+    inner_width = width - 4
+    wrapped_lines = []
+    for line in content_lines:
+        plain = line.plain
+        if cell_len(plain) <= inner_width:
+            wrapped_lines.append(plain)
+        else:
+            # Word-wrap: first line has bullet, continuation lines indented
+            words = plain.split(' ')
+            current = ""
+            for word in words:
+                test = f"{current} {word}" if current else word
+                if cell_len(test) <= inner_width:
+                    current = test
+                else:
+                    if current:
+                        wrapped_lines.append(current)
+                    current = f"  {word}"  # indent continuation
+            if current:
+                wrapped_lines.append(current)
+    content_lines = [yellow_blue_gradient_text(l) for l in wrapped_lines]
     
     # Build the box
     renderables = []
@@ -576,21 +658,9 @@ def render_thinking_block(thinking_text: str, is_streaming: bool = False) -> Gro
         row.append("│", style=f"rgb({r},{g},{b})")
         row.append(" ")
         
-        # Truncate content
         l_plain = line.plain
         l_len = cell_len(l_plain)
-        if l_len > width - 4:
-            truncated_plain = ""
-            current_cells = 0
-            for char in l_plain:
-                char_cells = cell_len(char)
-                if current_cells + char_cells > width - 7:
-                    break
-                truncated_plain += char
-                current_cells += char_cells
-            l_plain = truncated_plain + "..."
-            l_len = cell_len(l_plain)
-            
+
         # Color line content
         for i, char in enumerate(l_plain):
             v_p = row_idx / max(total_rows - 1, 1)

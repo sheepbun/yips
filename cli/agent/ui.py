@@ -60,6 +60,22 @@ class AgentUIMixin:
         else:
             self._render_two_column_title()
 
+    def _get_model_info_string(self) -> str:
+        """Generate the model info string with context size if available."""
+        backend_key = "claude" if getattr(self, 'use_claude_cli', False) else self.backend
+        display_backend = get_friendly_backend_name(backend_key)
+        display_model = get_friendly_model_name(self.current_model)
+        
+        info = f"{display_backend} · {display_model}"
+        
+        ctx = getattr(self, 'context_size', None)
+        if ctx:
+            # Format: 20480 -> 20.5k tokens
+            ctx_str = f"{ctx / 1000:.1f}k"
+            info += f" · {ctx_str} tokens"
+            
+        return info
+
     def _render_minimal_title(self) -> None:
         """Render minimal title box for very narrow terminals (< 45 chars)."""
         terminal_width = self.console.width
@@ -78,9 +94,6 @@ class AgentUIMixin:
         right_bar_style = f"rgb({r_right},{g_right},{b_right})"
 
         # Get info
-        backend_key = "claude" if getattr(self, 'use_claude_cli', False) else self.backend
-        display_backend = get_friendly_backend_name(backend_key)
-        display_model = get_friendly_model_name(self.current_model)
         logo = generate_yips_logo()
         logo_width = len(logo[0]) if logo else 1
 
@@ -96,7 +109,7 @@ class AgentUIMixin:
             # Show abbreviated "YIPS" text instead
             lines.append("YIPS")
 
-        model_info = f"{display_backend} · {display_model}"
+        model_info = self._get_model_info_string()
         lines.append(model_info)
         lines.append("")  # blank line
 
@@ -169,9 +182,6 @@ class AgentUIMixin:
 
         # Gather content
         username = get_username()
-        backend_key = "claude" if getattr(self, 'use_claude_cli', False) else self.backend
-        display_backend = get_friendly_backend_name(backend_key)
-        display_model = get_friendly_model_name(self.current_model)
         cwd = get_display_directory()
         logo = generate_yips_logo()
         logo_width = len(logo[0]) if logo else 1
@@ -194,7 +204,7 @@ class AgentUIMixin:
             lines.append("YIPS")  # [3] abbreviated text
             model_info_index = 4
 
-        lines.append(f"{display_backend} · {display_model}")  # model info
+        lines.append(self._get_model_info_string())  # model info
         cwd_index = len(lines) if layout_mode == "single" else -1
         if layout_mode == "single":
             lines.append(cwd)
@@ -274,9 +284,6 @@ class AgentUIMixin:
 
         # Gather content
         username = get_username()
-        backend_key = "claude" if getattr(self, 'use_claude_cli', False) else self.backend
-        display_backend = get_friendly_backend_name(backend_key)
-        display_model = get_friendly_model_name(self.current_model)
         cwd = get_display_directory()
         logo = generate_yips_logo()
         logo_height = len(logo)
@@ -305,7 +312,7 @@ class AgentUIMixin:
             "",  # [2] blank
         ]
         left_col.extend(logo)  # [3-8] logo lines (6 lines)
-        left_col.append(f"{display_backend} · {display_model}")  # [9]
+        left_col.append(self._get_model_info_string())  # [9]
         left_col.append(cwd)  # [10]
         left_col.append("")  # [11] blank padding
 

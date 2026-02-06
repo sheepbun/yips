@@ -11,6 +11,7 @@ import requests
 import shutil
 from pathlib import Path
 from cli.color_utils import console
+from cli.hw_utils import get_system_specs
 
 # llama.cpp configuration
 def _resolve_llama_server_path() -> str:
@@ -50,6 +51,21 @@ def is_llamacpp_running() -> bool:
         return response.status_code == 200
     except requests.RequestException:
         return False
+
+def get_optimal_context_size() -> int:
+    """Calculate optimal context size based on available system memory (RAM + VRAM)."""
+    specs = get_system_specs()
+    total_mem_gb = specs["ram_gb"] + specs["vram_gb"]
+    
+    # Heuristic: 512 tokens per GB of total memory
+    # e.g., 16GB -> 8192, 32GB -> 16384, 64GB -> 32768
+    raw_ctx = int(total_mem_gb * 512)
+    
+    # Round down to nearest 1024
+    ctx = (raw_ctx // 1024) * 1024
+    
+    # Enforce minimum of 2048
+    return max(2048, ctx)
 
 def start_llamacpp(model_path: str | None = None) -> bool:
     """Start llama-server with the specified model, using fallbacks if necessary."""
@@ -109,12 +125,15 @@ def start_llamacpp(model_path: str | None = None) -> bool:
         ("CPU Only", ["-ngl", "0"]),
     ]
 
+    ctx_size = get_optimal_context_size()
+    # console.print(f"[dim]Calculated optimal context size: {ctx_size} tokens[/dim]")
+
     for strategy_name, flags in strategies:
         # Start llama-server
         cmd = [
             LLAMA_SERVER_PATH,
             "-m", resolved_path,
-            "-c", "8192",
+            "-c", str(ctx_size),
             "--port", "8080",
             "--embedding", # Enable embeddings for tools if needed
             "--log-disable"

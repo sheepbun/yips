@@ -117,11 +117,8 @@ def handle_sessions_command(agent: YipsAgentProtocol) -> None:
     import sys
     import select
     from prompt_toolkit.input import create_input
-    from prompt_toolkit.keys import Keys
-
-    input_obj = create_input()
     scroll_step = 0
-    
+
     # Render initial frame
     try:
         initial_group = agent.get_title_box_group(scroll_step)
@@ -136,57 +133,66 @@ def handle_sessions_command(agent: YipsAgentProtocol) -> None:
     selected_session_path = None
     last_render_time = 0
     render_interval = 0.1
-    key = None
-    
+
+    def _read_key(fd):
+        """Read a single keypress from raw fd, resolving escape sequences with a short timeout."""
+        data = os.read(fd, 1)
+        if not data:
+            return None
+        ch = data[0]
+        if ch == 0x1b:  # Escape
+            # Check if more bytes follow (escape sequence) or bare Escape
+            r, _, _ = select.select([fd], [], [], 0.05)
+            if r:
+                data2 = os.read(fd, 1)
+                if data2 and data2[0] == 0x5b:  # '['
+                    data3 = os.read(fd, 1)
+                    if data3:
+                        if data3[0] == 0x41:  # 'A'
+                            return 'up'
+                        elif data3[0] == 0x42:  # 'B'
+                            return 'down'
+                # Unknown sequence, consume and ignore
+                return None
+            return 'escape'
+        elif ch in (0x0d, 0x0a):  # \r, \n
+            return 'enter'
+        return None
+
+    input_obj = create_input()
+    fd = sys.stdin.fileno()
+
     with Live(initial_group, console=agent.console, auto_refresh=False, transient=True) as live:
         try:
             with input_obj.raw_mode():
                 while True:
                     # Drain all pending input
                     input_processed = False
-                    
+                    escaped = False
+
                     while True:
                         # Check for input availability
-                        has_data = False
-                        if sys.platform != "win32":
-                             r, _, _ = select.select([sys.stdin], [], [], 0)
-                             has_data = bool(r)
-                        else:
-                             try:
-                                 import msvcrt
-                                 has_data = msvcrt.kbhit()
-                             except:
-                                 pass
+                        r, _, _ = select.select([fd], [], [], 0)
+                        if not r:
+                            break
 
-                        if not has_data:
+                        key = _read_key(fd)
+                        if key == 'up':
+                            agent.session_selection_idx = (agent.session_selection_idx - 1) % len(sessions)
+                            scroll_step = 0
+                            input_processed = True
+                        elif key == 'down':
+                            agent.session_selection_idx = (agent.session_selection_idx + 1) % len(sessions)
+                            scroll_step = 0
+                            input_processed = True
+                        elif key == 'enter':
+                            selected_session_path = sessions[agent.session_selection_idx]['path']
                             break
-                            
-                        # Read available keys
-                        keys = input_obj.read_keys()
-                        if not keys:
+                        elif key == 'escape':
+                            escaped = True
                             break
-                            
-                        for key_press in keys:
-                            key = key_press.key
-                            
-                            if key == Keys.Up:
-                                agent.session_selection_idx = (agent.session_selection_idx - 1) % len(sessions)
-                                scroll_step = 0
-                                input_processed = True
-                            elif key == Keys.Down:
-                                agent.session_selection_idx = (agent.session_selection_idx + 1) % len(sessions)
-                                scroll_step = 0
-                                input_processed = True
-                            elif key == Keys.Enter or key == "\r" or key == "\n":
-                                selected_session_path = sessions[agent.session_selection_idx]['path']
-                                break
-                            elif key == Keys.Escape:
-                                break
-                        
-                        if selected_session_path is not None or (key == Keys.Escape):
-                            break
-                    
-                    if selected_session_path is not None or (key == Keys.Escape):
+
+                    if selected_session_path is not None or escaped:
                         break
                     
                     # Animate/Render

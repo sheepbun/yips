@@ -136,11 +136,11 @@ def handle_sessions_command(agent: YipsAgentProtocol) -> None:
     selected_session_path = None
     last_render_time = 0
     render_interval = 0.1
+    key = None
     
     with Live(initial_group, console=agent.console, auto_refresh=False, transient=True) as live:
         try:
             with input_obj.raw_mode():
-                key = None
                 while True:
                     # Drain all pending input
                     input_processed = False
@@ -166,7 +166,6 @@ def handle_sessions_command(agent: YipsAgentProtocol) -> None:
                         if not keys:
                             break
                             
-                        key = None
                         for key_press in keys:
                             key = key_press.key
                             

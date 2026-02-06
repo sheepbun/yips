@@ -14,11 +14,8 @@ from cli.color_utils import (
 
 
 class SlashCommandCompleter(Completer):
-    """
-    Completer for Yips commands with gradient styling.
-    Provides styled command text and pink-to-yellow gradient descriptions.
-    All commands use the / prefix.
-    """
+    def __init__(self):
+        self._cache = None
 
     def _get_description(self, path: Path) -> str:
         """Extract description from a .py or .md file."""
@@ -67,6 +64,9 @@ class SlashCommandCompleter(Completer):
         Discover commands from SKILLS_DIR, TOOLS_DIR and built-ins.
         Returns: (list of words, meta_dict)
         """
+        if self._cache:
+            return self._cache
+
         # 1. Built-in commands (default to tool style)
         all_items = {
             '/exit': {'desc': 'Exit the application', 'type': 'tool'},
@@ -122,6 +122,7 @@ class SlashCommandCompleter(Completer):
         words = sorted(all_items.keys())
         meta_dict = all_items
 
+        self._cache = (words, meta_dict)
         return words, meta_dict
 
     def _create_command_formatted_text(self, text: str, cmd_type: str = 'skill') -> FormattedText:

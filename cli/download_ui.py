@@ -398,6 +398,7 @@ class DownloadUI:
         self.selected_model_id = None
         self.files_data = []
         self.is_dimmed = False
+        self.is_loading = False
         
         # State
         self.current_tab = "Most Downloaded" # Most Downloaded, Top Rated, Newest
@@ -532,8 +533,15 @@ class DownloadUI:
             style=self.style,
             full_screen=False,
             mouse_support=True,
-            color_depth=ColorDepth.TRUE_COLOR
+            color_depth=ColorDepth.TRUE_COLOR,
+            before_render=self._on_render
         )
+
+    def _on_render(self, _app):
+        """Start background tasks on first render."""
+        if not hasattr(self, '_task_started'):
+            self._task_started = True
+            self.app.create_background_task(self._initial_load())
 
     def _get_model_list_cursor_position(self):
         row = self.selected_model_index - self.list_scroll_offset
@@ -576,8 +584,11 @@ class DownloadUI:
         return ""
 
     def _get_model_list_text(self):
+        if self.is_loading:
+            return [("", " ⏳ Loading models from Hugging Face...")]
+
         if not self.models_data:
-            return "Loading or no models found..."
+            return "No models found."
             
         lines = []
         height = 12
@@ -836,6 +847,24 @@ class DownloadUI:
             # Fallback if no loop is available (unlikely in prompt_toolkit 3)
             pass
 
+    async def _fetch_models(self, sort_mode, query):
+        """Execute the API call in background."""
+        self.is_loading = True
+        try:
+            loop = asyncio.get_event_loop()
+            results = await loop.run_in_executor(
+                None,
+                partial(self.manager.list_gguf_models, sort=sort_mode, search=query, limit=100)
+            )
+            self.models_data = results
+            self.selected_model_index = 0
+            self.list_scroll_offset = 0
+        except Exception:
+            self.models_data = []
+        finally:
+            self.is_loading = False
+            self.app.invalidate()
+
     async def _do_live_search(self):
         """Async task to debounce and fetch results."""
         try:
@@ -843,10 +872,6 @@ class DownloadUI:
             
             # Disengage model search if user is typing a slash command
             if self.search_query.lstrip().startswith("/"):
-                # Optionally clear results or just return
-                # Let's keep existing results for now, or clear if preferred.
-                # User said "disengage/disregard trying to search", 
-                # implying we should not perform the API call.
                 return
 
             # Determine sort mode
@@ -856,26 +881,10 @@ class DownloadUI:
             elif self.current_tab == "Newest":
                 sort_mode = "Updated"
 
-            # Execute blocking API call in a thread
-            loop = asyncio.get_event_loop()
-            results = await loop.run_in_executor(
-                None,
-                partial(self.manager.list_gguf_models, sort=sort_mode, search=self.search_query, limit=100)
-            )
+            await self._fetch_models(sort_mode, self.search_query)
 
-            self.models_data = results
-            self.selected_model_index = 0
-            self.list_scroll_offset = 0
-            
-            # Request UI re-render
-            if hasattr(self, 'app') and self.app:
-                self.app.invalidate()
         except asyncio.CancelledError:
             pass # Task was cancelled by a newer keystroke
-        except Exception:
-            self.models_data = []
-            if hasattr(self, 'app') and self.app:
-                self.app.invalidate()
 
     def _on_search(self, buff):
         text = self.search_area.text.strip()
@@ -894,7 +903,7 @@ class DownloadUI:
         return True
 
     def refresh_data(self):
-        """Synchronous refresh for initial load or when async is not available."""
+        """Trigger a refresh of the data."""
         if self.search_query.lstrip().startswith("/"):
             return
 
@@ -909,9 +918,11 @@ class DownloadUI:
         if hasattr(self, 'app') and self.app.is_running:
             if self._search_task:
                 self._search_task.cancel()
-            self._search_task = self.app.create_background_task(self._do_live_search())
+            # Call _fetch_models directly without debounce for tab switches/refresh
+            self._search_task = self.app.create_background_task(self._fetch_models(sort_mode, self.search_query))
             return
 
+        # Fallback for sync (should typically not be reached in new flow)
         try:
             results = self.manager.list_gguf_models(
                 sort=sort_mode,
@@ -950,9 +961,12 @@ class DownloadUI:
         )
         self.app.layout.focus(self.file_list_control)
 
-    def run(self):
-        # Initial fetch
+    async def _initial_load(self):
+        """Initial load task."""
         self.refresh_data()
+
+    def run(self):
+        # Initial fetch handled via on_startup to be async
         return self.app.run()
 
 

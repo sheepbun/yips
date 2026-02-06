@@ -195,17 +195,9 @@ class ModelManagerUI:
         self._refresh_task = None
         self._style_cache = {} # Cache for gradient styles: (length, is_focused) -> [styles]
         
-        self.refresh_models()
+        self.is_loading = True
+        self.models_data = []
         
-        # Initial selection should be the current model if found
-        for i, m in enumerate(self.models_data):
-            if m['id'] == self.current_model and m['backend'] == self.current_backend:
-                self.selected_index = i
-                # Ensure it's in view
-                if self.selected_index >= 12:
-                    self.scroll_offset = self.selected_index - 11
-                break
-
         main_content = HSplit([
             VSplit([
                 Window(content=FormattedTextControl(self._get_header_text), height=1),
@@ -282,6 +274,7 @@ class ModelManagerUI:
         if not hasattr(self, '_task_started'):
             self._task_started = True
             self.app.create_background_task(self._scroll_animation_task())
+            self.app.create_background_task(self._fetch_models_task())
 
     async def _scroll_animation_task(self):
         """Task to animate scrolling for long text in columns when selected and focused."""
@@ -383,7 +376,8 @@ class ModelManagerUI:
             if needs_invalidate:
                 self.app.invalidate()
 
-    def refresh_models(self):
+    def _get_models_data(self):
+        """Synchronous helper to gather model data."""
         models = []
         
         if self.current_tab == "Cloud":
@@ -433,8 +427,45 @@ class ModelManagerUI:
                     "suitability": suitability,
                     "path": full_path
                 })
+        return models
+
+    async def _fetch_models_task(self):
+        """Async task to refresh models."""
+        self.is_loading = True
+        self.app.invalidate()
+        
+        try:
+            loop = asyncio.get_event_loop()
+            self.models_data = await loop.run_in_executor(None, self._get_models_data)
             
-        self.models_data = models
+            # Initial selection should be the current model if found (only on first load or if matching)
+            # Or always try to find current model if we switched tabs?
+            # Let's try to maintain selection if possible, or select current model
+            found = False
+            for i, m in enumerate(self.models_data):
+                if m['id'] == self.current_model and m['backend'] == self.current_backend:
+                    self.selected_index = i
+                    if self.selected_index >= 12:
+                        self.scroll_offset = self.selected_index - 11
+                    found = True
+                    break
+            
+            if not found:
+                self.selected_index = 0
+                self.scroll_offset = 0
+
+        except Exception:
+            self.models_data = []
+        finally:
+            self.is_loading = False
+            self.app.invalidate()
+
+    def refresh_models(self):
+        if hasattr(self, 'app') and self.app.is_running:
+            self.app.create_background_task(self._fetch_models_task())
+        else:
+            # Fallback (mostly for testing or non-running state)
+            self.models_data = self._get_models_data()
 
     def _get_model_list_cursor_position(self):
         row = self.selected_index - self.scroll_offset
@@ -469,6 +500,9 @@ class ModelManagerUI:
         return " [Tab] Focus  [Enter] Select  [Del] Delete Local  [T] Downloader  [Esc] Quit"
 
     def _get_model_list_text(self):
+        if self.is_loading:
+            return [("", " ⏳ Loading models...")]
+            
         if not self.models_data:
             return "No models found."
             

@@ -106,10 +106,124 @@ class AgentBackendMixin:
 
         self.backend_initialized = True
 
+    def check_and_prune_context(self) -> None:
+        """Check if context exceeds limit and prune/summarize if necessary."""
+        # Ensure limits are initialized
+        if not hasattr(self, 'token_limits'):
+            if hasattr(self, 'calculate_context_limits'):
+                self.calculate_context_limits()
+            else:
+                return
+
+        system_prompt = self.load_context()
+        
+        # Estimate total tokens: System + Summary + History
+        current_est = self._estimate_tokens(system_prompt, self.conversation_history)
+        if hasattr(self, 'running_summary') and self.running_summary:
+            current_est += len(self.running_summary) // 4
+            
+        threshold = self.token_limits.get("pruning_threshold", 15000)
+        
+        if current_est < threshold:
+            return
+
+        # Pruning needed
+        if self.verbose_mode:
+            self.console.print(f"[yellow]Context limit approached ({current_est}/{threshold}). Pruning...[/yellow]")
+            
+        prune_amount_tokens = self.token_limits.get("prune_amount", 4000)
+        
+        # Find how many messages to remove to free up ~prune_amount_tokens
+        to_prune_count = 0
+        pruned_tokens = 0
+        
+        # We prune from the beginning of conversation_history
+        # But we must keep at least the last 5 messages for context
+        max_prunable = max(0, len(self.conversation_history) - 5)
+        
+        for i in range(max_prunable):
+            msg = self.conversation_history[i]
+            # Estimate msg tokens
+            msg_tokens = len(msg.get("content", "")) // 4
+            pruned_tokens += msg_tokens
+            to_prune_count += 1
+            if pruned_tokens >= prune_amount_tokens:
+                break
+                
+        if to_prune_count == 0:
+            return
+
+        # Slice messages
+        messages_to_summarize = self.conversation_history[:to_prune_count]
+        self.conversation_history = self.conversation_history[to_prune_count:]
+        
+        # Add to archived history
+        if not hasattr(self, 'archived_history'):
+            self.archived_history = []
+        self.archived_history.extend(messages_to_summarize)
+        
+        # Generate Summary
+        summary_text = "\n".join([f"{m['role'].upper()}: {m['content']}" for m in messages_to_summarize])
+        
+        prompt = (
+            "You are an expert summarizer. Consolidate the following conversation lines into a concise, narrative summary. "
+            "Focus on key facts, decisions, and user preferences. "
+        )
+        
+        if hasattr(self, 'running_summary') and self.running_summary:
+            prompt += f"\n\nEXISTING SUMMARY:\n{self.running_summary}\n"
+            prompt += f"\nNEW LINES TO INTEGRATE:\n{summary_text}\n"
+            prompt += "\nUpdate the existing summary to include the new information."
+        else:
+            prompt += f"\n\nCONVERSATION:\n{summary_text}\n"
+            
+        # Perform non-recursive LLM call for summary
+        # We use a temporary simple call to avoid infinite recursion
+        try:
+            # We can use the existing backend but we must NOT call 'get_response' 
+            # as it triggers this check. We call the low-level provider directly.
+            
+            summary_response = ""
+            if getattr(self, 'use_claude_cli', False):
+                # Simple one-shot Claude call
+                cmd = [CLAUDE_CLI_PATH, "-p", prompt]
+                res = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+                if res.returncode == 0:
+                    summary_response = res.stdout.strip()
+            elif self.backend == "llamacpp":
+                # Simple one-shot Llama call
+                try:
+                    res = requests.post(
+                        f"{LLAMA_SERVER_URL}/v1/chat/completions",
+                        json={
+                            "model": self.current_model,
+                            "messages": [{"role": "user", "content": prompt}],
+                            "max_tokens": 1024, # Short summary
+                            "temperature": 0.3, # Deterministic
+                        },
+                        timeout=60
+                    )
+                    if res.status_code == 200:
+                        data = res.json()
+                        summary_response = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                except Exception:
+                    pass
+            
+            if summary_response:
+                self.running_summary = clean_response(summary_response)
+                if self.verbose_mode:
+                    self.console.print("[dim]Context summarized and archived.[/dim]")
+                    
+        except Exception as e:
+            self.console.print(f"[red]Failed to summarize context: {e}[/red]")
+
     def get_response(self, message: str) -> str:
         """Get response using available backend (llamacpp or Claude CLI)."""
         if not getattr(self, 'backend_initialized', False):
             return "[Error: Backend not initialized]"
+
+        # Check and prune context before generation
+        self.check_and_prune_context()
 
         self.emit_gui_event("status", "thinking")
 
@@ -138,6 +252,14 @@ class AgentBackendMixin:
         system_prompt = self.load_context()
 
         raw_messages = [{"role": "system", "content": system_prompt}]
+        
+        # Inject Running Summary if available
+        if hasattr(self, 'running_summary') and self.running_summary:
+            raw_messages.append({
+                "role": "system", 
+                "content": f"PREVIOUS CONVERSATION SUMMARY:\n{self.running_summary}"
+            })
+
         for msg in self.conversation_history:
             if msg["role"] == "system":
                 content = msg["content"]
@@ -351,7 +473,13 @@ class AgentBackendMixin:
     def call_claude_cli(self, message: str) -> str:
         """Fallback: Call Claude Code CLI."""
         system_prompt = self.load_context()
+        
         history_parts = []
+        
+        # Inject Running Summary
+        if hasattr(self, 'running_summary') and self.running_summary:
+            history_parts.append(f"System: PREVIOUS CONVERSATION SUMMARY:\n{self.running_summary}")
+
         for msg in self.conversation_history:
             content = msg["content"]
             if msg["role"] == "user": role = "User"

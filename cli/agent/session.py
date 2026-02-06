@@ -2,14 +2,65 @@
 Session and memory management for YipsAgent.
 """
 
+import json
 import re
 from datetime import datetime
 from pathlib import Path
-from cli.config import MEMORIES_DIR
+from cli.config import MEMORIES_DIR, DOT_YIPS_DIR
+from cli.hw_utils import get_system_specs
 
 
 class AgentSessionMixin:
     """Mixin providing session and memory management to YipsAgent."""
+
+    def calculate_context_limits(self) -> None:
+        """Calculate dynamic context limits based on available RAM."""
+        # Defaults
+        self.token_limits = {
+            "max_tokens": 8192,
+            "pruning_threshold": 6192,
+            "prune_amount": 2000
+        }
+
+        # Check for user override
+        pref_file = DOT_YIPS_DIR / "preferences.json"
+        if pref_file.exists():
+            try:
+                prefs = json.loads(pref_file.read_text())
+                if "max_context_tokens" in prefs:
+                    max_tokens = int(prefs["max_context_tokens"])
+                    self.token_limits["max_tokens"] = max_tokens
+                    self.token_limits["pruning_threshold"] = max_tokens - 2000
+                    self.token_limits["prune_amount"] = int(max_tokens * 0.25)
+                    if hasattr(self, 'console'):
+                        self.console.print(f"[dim]Using user-defined context limit: {max_tokens} tokens[/dim]")
+                    return
+            except Exception:
+                pass
+
+        # Calculate based on hardware
+        try:
+            specs = get_system_specs()
+            ram_gb = specs.get("ram_gb", 8)
+            
+            # Formula: (RAM - 6GB buffer) * 1500 tokens/GB
+            # 6GB buffer covers OS (4GB) + Model overhead (~2GB min)
+            available_gb = max(0, ram_gb - 6)
+            calc_tokens = int(available_gb * 1500)
+            
+            # Clamp between 4k and 128k
+            max_tokens = max(4096, min(128000, calc_tokens))
+            
+            self.token_limits["max_tokens"] = max_tokens
+            self.token_limits["pruning_threshold"] = max(2048, max_tokens - 2000)
+            self.token_limits["prune_amount"] = int(max_tokens * 0.25)
+            
+            if hasattr(self, 'console') and getattr(self, 'verbose_mode', False):
+                self.console.print(f"[dim]Dynamic context limit: {max_tokens} tokens (RAM: {ram_gb}GB)[/dim]")
+                
+        except Exception as e:
+            if hasattr(self, 'console'):
+                self.console.print(f"[dim]Error calculating context limits: {e}. Using defaults.[/dim]")
 
     def generate_session_summary(self) -> str:
         """Generate a short summary of the conversation for the session filename."""
@@ -90,6 +141,28 @@ class AgentSessionMixin:
 
         # Format conversation for file
         conversation_lines = []
+        
+        # Add Running Summary if it exists
+        if hasattr(self, 'running_summary') and self.running_summary:
+            conversation_lines.append("### Running Summary")
+            conversation_lines.append(f"{self.running_summary}\n")
+            conversation_lines.append("### Archived Conversation")
+
+        # Add Archived History
+        if hasattr(self, 'archived_history') and self.archived_history:
+            for entry in self.archived_history:
+                role = entry.get("role", "unknown")
+                content = entry.get("content", "")
+                if role == "user":
+                    conversation_lines.append(f"**Katherine**: {content}")
+                elif role == "assistant":
+                    conversation_lines.append(f"**Yips**: {content}")
+                elif role == "system":
+                    conversation_lines.append(f"*[System: {content[:100]}...]*")
+            
+            conversation_lines.append("\n### Active Conversation")
+
+        # Add Active History
         for entry in self.conversation_history:
             role = entry.get("role", "unknown")
             content = entry.get("content", "")
@@ -177,34 +250,122 @@ class AgentSessionMixin:
             content = file_path.read_text()
             
             # Extract conversation part
+            if "## Conversation" not in content:
+                return False
+
             conv_section = content.split("## Conversation")[-1].split("---")[0].strip()
+            
+            # Check for Running Summary
+            self.running_summary = ""
+            self.archived_history = []
+            self.conversation_history = []
+            
+            current_section = "active" # active, archived, summary
+            
+            # Simple parsing state machine
             lines = conv_section.split('\n')
             
-            new_history = []
+            # Pre-scan for structure
+            has_summary = "### Running Summary" in conv_section
+            has_archived = "### Archived Conversation" in conv_section
+            
+            temp_history = []
             
             for line in lines:
                 line = line.strip()
                 if not line:
                     continue
                 
-                if line.startswith("**Katherine**:"):
-                    new_history.append({"role": "user", "content": line[len("**Katherine**:") :].strip()})
-                elif line.startswith("**Yips**:"):
-                    new_history.append({"role": "assistant", "content": line[len("**Yips**:") :].strip()})
-                elif line.startswith("*[System:"):
-                    # Remove *[System: and ]*
-                    sys_content = line[9:-2].strip()
-                    new_history.append({"role": "system", "content": sys_content})
-                elif new_history:
-                    # Append to previous message if it's a multi-line response
-                    new_history[-1]["content"] += "\n" + line
+                if line == "### Running Summary":
+                    current_section = "summary"
+                    continue
+                elif line == "### Archived Conversation":
+                    current_section = "archived"
+                    continue
+                elif line == "### Active Conversation":
+                    current_section = "active"
+                    continue
+                
+                if current_section == "summary":
+                    if self.running_summary:
+                        self.running_summary += "\n" + line
+                    else:
+                        self.running_summary = line
+                else:
+                    # Parsing chat lines
+                    msg = None
+                    if line.startswith("**Katherine**:"):
+                        msg = {"role": "user", "content": line[len("**Katherine**:") :].strip()}
+                    elif line.startswith("**Yips**:"):
+                        msg = {"role": "assistant", "content": line[len("**Yips**:") :].strip()}
+                    elif line.startswith("*[System:"):
+                        sys_content = line[9:-2].strip()
+                        msg = {"role": "system", "content": sys_content}
+                    elif temp_history:
+                        # Append to previous message
+                        temp_history[-1]["content"] += "\n" + line
+                    
+                    if msg:
+                        temp_history.append(msg)
+                        # Determine where to put it based on section
+                        if current_section == "archived":
+                            self.archived_history.append(msg)
+                            # Remove from temp_history to keep it clean for next iteration
+                            # (Actually we just need to track where the last msg went)
+                            pass
+                        elif current_section == "active":
+                            self.conversation_history.append(msg)
+                            pass
+                        # Note: The logic above is slightly flawed because 'temp_history' 
+                        # accumulates everything. Let's fix it by appending to specific lists.
+                        
+            # Re-process cleanly
+            # Reset
+            self.running_summary = ""
+            self.archived_history = []
+            self.conversation_history = []
+            
+            current_section = "active" # Default if no headers found
+            last_list = self.conversation_history
+            
+            for line in lines:
+                line = line.strip()
+                if not line: continue
+                
+                if line == "### Running Summary":
+                    current_section = "summary"
+                    continue
+                elif line == "### Archived Conversation":
+                    current_section = "archived"
+                    last_list = self.archived_history
+                    continue
+                elif line == "### Active Conversation":
+                    current_section = "active"
+                    last_list = self.conversation_history
+                    continue
+                
+                if current_section == "summary":
+                    if self.running_summary:
+                        self.running_summary += "\n" + line
+                    else:
+                        self.running_summary = line
+                else:
+                    if line.startswith("**Katherine**:"):
+                        last_list.append({"role": "user", "content": line[len("**Katherine**:") :].strip()})
+                    elif line.startswith("**Yips**:"):
+                        last_list.append({"role": "assistant", "content": line[len("**Yips**:") :].strip()})
+                    elif line.startswith("*[System:"):
+                        sys_content = line[9:-2].strip()
+                        last_list.append({"role": "system", "content": sys_content})
+                    elif last_list:
+                        last_list[-1]["content"] += "\n" + line
 
-            if new_history:
-                self.conversation_history = new_history
+            if self.conversation_history or self.archived_history:
                 self.session_file_path = file_path
                 self._session_created = True
+                self.calculate_context_limits() # Recalculate limits on load
                 
-                # Extract session name from filename
+                # Extract session name
                 name = file_path.stem
                 parts = name.split('_', 2)
                 if len(parts) >= 3:
@@ -224,7 +385,13 @@ class AgentSessionMixin:
     def new_session(self) -> None:
         """Clear current conversation and start a new session."""
         self.conversation_history = []
+        self.archived_history = []
+        self.running_summary = ""
         self.session_file_path = None
         self._session_created = False
         self.current_session_name = None
+        
+        # Recalculate limits for the new session
+        self.calculate_context_limits()
+        
         self.refresh_display()

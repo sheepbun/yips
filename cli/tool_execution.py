@@ -339,6 +339,10 @@ def execute_tool(request: ToolRequest, agent: Any = None) -> str:
         skill_name: str = str(request["skill"]).upper()
         args: str = str(request["args"])
 
+        # Guardrail: Prevent searching for the literal word "query"
+        if skill_name == "SEARCH" and args.strip().lower() == "query":
+            return "[Error: You searched for the literal placeholder 'query'. Please search for a specific topic (e.g. 'current LLM context limits', 'weather in Tokyo').]"
+
         # Search for skill in commands/skills/<NAME>/<NAME>.py OR commands/tools/<NAME>/<NAME>.py
         from cli.config import SKILLS_DIR, TOOLS_DIR
         skill_path = SKILLS_DIR / skill_name / f"{skill_name}.py"

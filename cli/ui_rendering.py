@@ -29,7 +29,6 @@ from cli.color_utils import (
     PROMPT_COLOR,
     blue_gradient_text,
     yellow_blue_gradient_text,
-    gradient_text,
 )
 from cli.config import APP_VERSION
 
@@ -106,38 +105,6 @@ class PulsingSpinner:
 
         elapsed = time.time() - self.start_time
         time_str = self._format_time(elapsed)
-
-        # Calculate current animated token count
-        if self.is_animating_input and self.animation_start_time:
-            # Animate input tokens counting up rapidly
-            anim_elapsed = time.time() - self.animation_start_time
-            progress = min(1.0, anim_elapsed / self.input_animation_duration)
-            # Ease-out animation for smooth finish
-            progress = 1 - (1 - progress) ** 2
-            display_count = int(self.animated_input +
-                              (self.target_input_tokens - self.animated_input) * progress)
-            arrow = "↑"
-
-            # Check if animation complete
-            if progress >= 1.0:
-                self.is_animating_input = False
-                display_count = self.target_input_tokens
-
-        elif self.is_animating_output:
-            # Show real-time output tokens (already animated by streaming)
-            # Include input tokens to show total context
-            display_count = self.input_tokens + self.animated_output
-            arrow = "↓"
-        else:
-            # Fallback: show whatever we have
-            display_count = self.input_tokens + self.output_tokens if self.token_count > 0 else 0
-            arrow = "↑"
-
-        # Format tokens (5.6k for thousands)
-        if display_count >= 1000:
-            token_str = f"{display_count/1000:.1f}k"
-        else:
-            token_str = str(display_count)
 
         status_text = f" ({time_str})"
 
@@ -297,7 +264,7 @@ def render_bottom_border(terminal_width: int, session_name: str | None = None) -
     console.print(get_bottom_border_text(terminal_width, session_name))
 
 
-def _add_tool_node_to_tree(tree: Tree, tool_name: str, parameters: Any, result: str | None = None, is_running: bool = False) -> None:
+def _add_tool_node_to_tree(tree: Tree, tool_name: str, parameters: dict[str, Any] | str | None, result: str | None = None, is_running: bool = False) -> None:
     """Helper to add a tool node to an existing tree in a concise, project-consistent style."""
     # Strip prefix like (1/4) or ↻ to find the actual tool name for icon selection
     clean_name = re.sub(r"^[↻\s\d\(\)/▶]+", "", tool_name).strip()
@@ -323,7 +290,7 @@ def _add_tool_node_to_tree(tree: Tree, tool_name: str, parameters: Any, result: 
             if len(parameters) == 1:
                 param_str = str(next(iter(parameters.values()))).strip()
             else:
-                items = []
+                items: list[str] = []
                 for k, v in parameters.items():
                     if k.lower() in ('query', 'args', 'command', 'params'):
                         items.append(str(v).strip())
@@ -392,7 +359,7 @@ def _add_tool_node_to_tree(tree: Tree, tool_name: str, parameters: Any, result: 
             node.add(Text(f"✓ {res_preview}", style="dim"))
 
 
-def render_tool_call(tool_name: str, parameters: dict[str, Any] | str, result: str | None = None, is_running: bool = False) -> Any:
+def render_tool_call(tool_name: str, parameters: dict[str, Any] | str, result: str | None = None, is_running: bool = False) -> Panel | dict[str, Any]:
     """Render a tool call in a beautiful way using Tree and Panel.
     Returns the Panel object for use with Live or direct printing.
     """
@@ -411,7 +378,7 @@ def render_tool_call(tool_name: str, parameters: dict[str, Any] | str, result: s
     return Panel(tree, title=blue_gradient_text("Tool Execution"), border_style=TOOL_COLOR, expand=False, padding=(0, 1))
 
 
-def render_tool_batch(tools: list[dict], title: str | None = None, compact: bool = False) -> Any:
+def render_tool_batch(tools: list[dict[str, Any]], title: str | None = None, compact: bool = False) -> Panel | dict[str, Any]:
     """Render a batch of tools in a single panel. If compact is True, only shows the most recent tool."""
     import os
     if os.environ.get("YIPS_GUI_MODE") == "1":
@@ -513,7 +480,7 @@ def render_thinking_block(thinking_text: str, is_streaming: bool = False, max_di
 
     # Split into sentences or major lines to identify steps
     raw_parts = re.split(r'(?:(?<=[.!?])\s+)|(?:\n+)', text)
-    summarized_points = []
+    summarized_points: list[str] = []
     
     # Check if the very last part of the raw text is finished
     last_char = text[-1] if text else ""
@@ -545,12 +512,10 @@ def render_thinking_block(thinking_text: str, is_streaming: bool = False, max_di
                 summarized_points.append(part)
 
     # UI Styles
-    header_text = yellow_blue_gradient_text("🧠 Thinking Process")
-    
     # Dynamic display: calculate optimal line count based on content
     if max_display_lines is None:
         max_display_lines = calculate_optimal_summary_lines(text, is_streaming)
-    display_points = summarized_points[:max_display_lines]
+    display_points: list[str] = summarized_points[:max_display_lines]
 
     # For animation: only show subset if specified
     if visible_lines is not None:
@@ -560,7 +525,7 @@ def render_thinking_block(thinking_text: str, is_streaming: bool = False, max_di
     if show_only_last and display_points:
         display_points = display_points[-1:]
     
-    content_lines = []
+    content_lines: list[Text] = []
     if not display_points:
         if not text:
             content_lines.append(yellow_blue_gradient_text("✧ Initializing..."))
@@ -585,7 +550,7 @@ def render_thinking_block(thinking_text: str, is_streaming: bool = False, max_di
 
     # Wrap content lines that exceed the inner width (width - 4 for borders + padding)
     inner_width = width - 4
-    wrapped_lines = []
+    wrapped_lines: list[str] = []
     for line in content_lines:
         plain = line.plain
         if cell_len(plain) <= inner_width:
@@ -607,7 +572,7 @@ def render_thinking_block(thinking_text: str, is_streaming: bool = False, max_di
     content_lines = [yellow_blue_gradient_text(l) for l in wrapped_lines]
     
     # Build the box
-    renderables = []
+    renderables: list[Text] = []
     total_rows = 2 + len(content_lines) # top + bottom + content
     
     def get_diag_text(text_str: str, row_idx: int) -> Text:

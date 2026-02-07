@@ -2,16 +2,61 @@
 Context loading logic for YipsAgent.
 """
 
+from __future__ import annotations
+
 import json
+import platform
 import subprocess
-from pathlib import Path
-from cli.config import BASE_DIR, DOT_YIPS_DIR, MEMORIES_DIR, TOOLS_DIR, SKILLS_DIR
+from typing import TYPE_CHECKING, Any
+from cli.config import BASE_DIR, DOT_YIPS_DIR, MEMORIES_DIR, TOOLS_DIR, SKILLS_DIR, load_config
+from cli.version import get_version
+from cli.hw_utils import get_system_specs
+
+if TYPE_CHECKING:
+    from cli.type_defs import YipsAgentProtocol, Message
 
 
 class AgentContextMixin:
     """Mixin providing context loading capabilities to YipsAgent."""
 
-    def load_context(self) -> str:
+    def build_system_info(self: YipsAgentProtocol) -> str:
+        """Build dynamic system information section."""
+        config = load_config()
+        specs = get_system_specs()
+        version = get_version()
+
+        lines = [
+            f"- **Agent**: Yips {version}",
+            f"- **Backend**: {config.get('backend', 'unknown')}",
+            f"- **Model**: {config.get('model', 'unknown')}",
+            f"- **Streaming**: {'enabled' if config.get('streaming', True) else 'disabled'}",
+            f"- **RAM**: {specs['ram_gb']} GB",
+        ]
+
+        if specs["vram_gb"] > 0:
+            gpu = specs.get("gpu_type") or "unknown"
+            lines.append(f"- **VRAM**: {specs['vram_gb']} GB ({gpu})")
+
+        if hasattr(self, 'token_limits'):
+            max_tok = self.token_limits.get('max_tokens', 0)
+            threshold = self.token_limits.get('pruning_threshold', 0)
+            lines.append(f"- **Context Limit**: {max_tok} tokens")
+            lines.append(f"- **Pruning Threshold**: {threshold} tokens")
+
+            # Estimate current context usage from conversation history
+            if hasattr(self, 'conversation_history'):
+                used = self.estimate_tokens("", self.conversation_history)
+                if hasattr(self, 'running_summary') and self.running_summary:
+                    used += len(self.running_summary) // 3
+                pct = round(used / max_tok * 100) if max_tok else 0
+                lines.append(f"- **Context Used**: ~{used}/{max_tok} tokens ({pct}%)")
+
+        lines.append(f"- **Platform**: {platform.system().lower()}")
+        lines.append(f"- **Working Directory**: {BASE_DIR}")
+
+        return "# SYSTEM INFORMATION\n\n" + "\n".join(lines)
+
+    def load_context(self: YipsAgentProtocol) -> str:
         """Load all context documents into a system prompt."""
         sections: list[str] = []
 
@@ -30,10 +75,8 @@ class AgentContextMixin:
         if human_md.exists():
             sections.append(f"# ABOUT KATHERINE\n\n{human_md.read_text()}")
 
-        # Specifications
-        specs_md = BASE_DIR / "system" / "SPECIFICATIONS.md"
-        if specs_md.exists():
-            sections.append(f"# SPECIFICATIONS\n\n{specs_md.read_text()}")
+        # System Information (dynamic)
+        sections.append(self.build_system_info())
 
         # Focus Area
         focus_md = DOT_YIPS_DIR / "FOCUS.md"
@@ -72,7 +115,7 @@ class AgentContextMixin:
                 sections.append(f"# RECENT MEMORIES\n\n" + "\n\n".join(mem_content))
 
         # Available commands
-        available_cmds = []
+        available_cmds: list[str] = []
         if TOOLS_DIR.exists():
             available_cmds.extend([d.name.lower() for d in TOOLS_DIR.iterdir() if d.is_dir()])
         if SKILLS_DIR.exists():
@@ -87,19 +130,24 @@ class AgentContextMixin:
             )
 
         # Thought Signature / Current Task State
-        if hasattr(self, 'session_state') and self.session_state.get("thought_signature"):
-            sections.append(f"# CURRENT TASK PLAN (Thought Signature)\n\n{self.session_state['thought_signature']}")
+        thought = self.session_state.get("thought_signature")
+        if thought:
+            sections.append(f"# CURRENT TASK PLAN (Thought Signature)\n\n{thought}")
 
         return "\n\n" + "=" * 60 + "\n\n".join(sections)
 
-    def _estimate_tokens(self, system_prompt: str, messages: list[dict] | str) -> int:
+    def estimate_tokens(self: YipsAgentProtocol, system_prompt: str, messages: list[Message] | list[dict[str, Any]] | str) -> int:
         """Estimate token count for prompt."""
         if isinstance(messages, str):
             text = system_prompt + messages
         else:
             text = system_prompt
+            # Handle both list[Message] and list[dict[str, Any]]
             for msg in messages:
-                text += str(msg.get("content", ""))
+                # Accessing content safely for TypedDict/dict
+                # (msg is guaranteed to be a dict by the type hint)
+                content = msg.get("content", "")
+                text += str(content)
         
-        # Rough estimate: 1 token ~= 4 chars
-        return len(text) // 4
+        # Rough estimate: 1 token ~= 3 chars (conservative)
+        return len(text) // 3

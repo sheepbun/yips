@@ -1,17 +1,19 @@
 "UI rendering and display management for YipsAgent."
 
+from __future__ import annotations
+
 import os
 import re
 import subprocess
 import time
 import json
+from typing import TYPE_CHECKING, Any
 from rich.text import Text
 from rich.live import Live
 from rich.console import Group
 
 from cli.color_utils import (
     gradient_text,
-    blue_gradient_text,
     apply_gradient_to_text,
     get_yips_prefix,
     interpolate_color,
@@ -39,34 +41,36 @@ from cli.ui_rendering import (
     render_bottom_border,
     get_top_border_text,
     get_bottom_border_text,
-    render_tool_call,
     render_thinking_block,
     LOGO_WIDTH,
 )
 from cli.tool_execution import clean_response
 
+if TYPE_CHECKING:
+    from cli.type_defs import YipsAgentProtocol
+
 
 class AgentUIMixin:
     """Mixin providing UI rendering capabilities to YipsAgent."""
 
-    def render_title_box(self) -> None:
+    def render_title_box(self: YipsAgentProtocol) -> None:
         """Render the title box with responsive layout."""
         terminal_width = self.console.width
         self.last_width = terminal_width
-        layout_mode = self._get_layout_mode(terminal_width)
+        layout_mode = self.get_layout_mode(terminal_width)
 
         if layout_mode == "minimal":
-            self._render_minimal_title()
+            self.render_minimal_title()
         elif layout_mode in ("compact", "single"):
-            self._render_single_column_title(layout_mode)
+            self.render_single_column_title(layout_mode)
         else:
-            self.console.print(self._get_two_column_title_group())
+            self.console.print(self.get_two_column_title_group())
 
-    def get_title_box_group(self, scroll_offset: int = 0) -> Group:
+    def get_title_box_group(self: YipsAgentProtocol, scroll_offset: int = 0) -> Group:
         """Get the title box renderable group (mostly for animation)."""
-        return self._get_two_column_title_group(scroll_offset)
+        return self.get_two_column_title_group(scroll_offset)
 
-    def _get_model_info_string(self) -> str:
+    def get_model_info_string(self: YipsAgentProtocol) -> str:
         """Generate the model info string with context size if available."""
         backend_key = "claude" if getattr(self, 'use_claude_cli', False) else self.backend
         display_backend = get_friendly_backend_name(backend_key)
@@ -74,15 +78,32 @@ class AgentUIMixin:
         
         info = f"{display_backend} · {display_model}"
         
-        ctx = getattr(self, 'context_size', None)
-        if ctx:
-            # Format: 20480 -> 20.5k tokens
-            ctx_str = f"{ctx / 1000:.1f}k"
-            info += f" · {ctx_str} tokens"
+        # Prefer token_limits (dynamic, RAM-based) over context_size (llama.cpp)
+        max_tok = None
+        if hasattr(self, 'token_limits') and self.token_limits:
+            max_tok = self.token_limits.get('max_tokens')
+        if not max_tok:
+            max_tok = getattr(self, 'context_size', None)
+        if max_tok:
+            ctx_str = f"{max_tok / 1000:.1f}k"
+            # Show current usage if conversation exists
+            used = 0
+            if hasattr(self, 'conversation_history') and self.conversation_history:
+                used = self.estimate_tokens("", self.conversation_history)
+                if hasattr(self, 'running_summary') and self.running_summary:
+                    used += len(self.running_summary) // 3
+            if used > 0:
+                if used >= 1000:
+                    used_str = f"{used / 1000:.1f}k"
+                else:
+                    used_str = str(used)
+                info += f" · {used_str}/{ctx_str} tokens"
+            else:
+                info += f" · {ctx_str} tokens"
             
         return info
 
-    def _render_minimal_title(self) -> None:
+    def render_minimal_title(self: YipsAgentProtocol) -> None:
         """Render minimal title box for very narrow terminals (< 45 chars)."""
         terminal_width = self.console.width
         content_width = terminal_width - 2  # Account for │ borders
@@ -115,12 +136,11 @@ class AgentUIMixin:
             # Show abbreviated "YIPS" text instead
             lines.append("YIPS")
 
-        model_info = self._get_model_info_string()
+        model_info = self.get_model_info_string()
         lines.append(model_info)
         lines.append("")  # blank line
 
         logo_height = len(logo) if show_logo else 0
-        total_logo_cells = logo_height * logo_width if show_logo else 1
 
         for line_num, line_text in enumerate(lines):
             styled_line = Text()
@@ -169,7 +189,7 @@ class AgentUIMixin:
         render_bottom_border(terminal_width, self.current_session_name)
         self.console.print()
 
-    def _render_single_column_title(self, layout_mode: str) -> None:
+    def render_single_column_title(self: YipsAgentProtocol, layout_mode: str) -> None:
         """Render single-column title box for narrow terminals (45-79 chars)."""
         terminal_width = self.console.width
         content_width = terminal_width - 2  # Account for │ borders
@@ -210,14 +230,13 @@ class AgentUIMixin:
             lines.append("YIPS")  # [3] abbreviated text
             model_info_index = 4
 
-        lines.append(self._get_model_info_string())  # model info
+        lines.append(self.get_model_info_string())  # model info
         cwd_index = len(lines) if layout_mode == "single" else -1
         if layout_mode == "single":
             lines.append(cwd)
         lines.append("")  # blank padding
 
         logo_height = len(logo) if show_logo else 0
-        total_logo_cells = logo_height * logo_width if show_logo else 1
 
         for line_num, line_text in enumerate(lines):
             styled_line = Text()
@@ -274,7 +293,7 @@ class AgentUIMixin:
         render_bottom_border(terminal_width, self.current_session_name)
         self.console.print()
 
-    def _get_two_column_title_group(self, scroll_step: int = 0) -> Group:
+    def get_two_column_title_group(self: YipsAgentProtocol, scroll_step: int = 0) -> Group:
         """Generate two-column title box group (for wide terminals >= 80 chars)."""
         terminal_width = self.console.width
 
@@ -305,12 +324,12 @@ class AgentUIMixin:
             max_slots = 5
             start_idx = max(0, min(self.session_selection_idx - max_slots // 2, len(self.session_list) - max_slots))
             visible_sessions = self.session_list[start_idx : start_idx + max_slots]
-            activity = []
+            activity: list[tuple[str, bool]] = []
             for i, s in enumerate(visible_sessions):
                 actual_idx = start_idx + i
                 is_selected = (actual_idx == self.session_selection_idx)
                 prefix = "> " if is_selected else ""
-                activity.append((prefix + s['display'], is_selected))
+                activity.append((prefix + str(s['display']), is_selected))
         else:
             activity = [(a, False) for a in get_recent_activity()]
 
@@ -321,7 +340,7 @@ class AgentUIMixin:
             "",  # [2] blank
         ]
         left_col.extend(logo)  # [3-8] logo lines (6 lines)
-        left_col.append(self._get_model_info_string())  # [9]
+        left_col.append(self.get_model_info_string())  # [9]
         left_col.append(cwd)  # [10]
         left_col.append("")  # [11] blank padding
 
@@ -340,7 +359,7 @@ class AgentUIMixin:
         while len(right_col_data) < len(left_col):
             right_col_data.append(("", False))
 
-        renderables = []
+        renderables: list[Any] = []
         renderables.append(Text("")) # Blank line
 
         # Top border
@@ -360,7 +379,6 @@ class AgentUIMixin:
         r_right, g_right, b_right = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, 1.0)
         right_bar_style = f"rgb({r_right},{g_right},{b_right})"
 
-        total_logo_cells = logo_height * logo_width
         for line_num in range(max_lines):
             left_text = left_col[line_num] if line_num < len(left_col) else ""
             right_item = right_col_data[line_num] if line_num < len(right_col_data) else ("", False)
@@ -523,13 +541,13 @@ class AgentUIMixin:
 
         return Group(*renderables)
 
-    def refresh_display(self) -> None:
+    def refresh_display(self: YipsAgentProtocol) -> None:
         """Clear terminal and re-render title box and history."""
         subprocess.run('clear' if os.name != 'nt' else 'cls', shell=True)
         self.render_title_box()
-        self._replay_conversation_history()
+        self.replay_conversation_history()
 
-    def _replay_conversation_history(self) -> None:
+    def replay_conversation_history(self: YipsAgentProtocol) -> None:
         """Re-render all messages from conversation_history to screen."""
         from cli.color_utils import print_yips, PROMPT_COLOR
         from cli.config import INTERNAL_REPROMPT
@@ -563,7 +581,7 @@ class AgentUIMixin:
                 idx += 1
             elif role == "system":
                 # Look ahead to group consecutive tool calls
-                tool_batch = []
+                tool_batch: list[dict[str, Any]] = []
                 while idx < history_len:
                     msg = self.conversation_history[idx]
                     if msg.get("role") != "system":
@@ -606,26 +624,26 @@ class AgentUIMixin:
         if history_len > 0:
             self.console.print()
 
-    def refresh_title_box_only(self) -> None:
+    def refresh_title_box_only(self: YipsAgentProtocol) -> None:
         """Re-render the title box and conversation history."""
         if getattr(self, 'prompt_session', None) is not None:
             try:
                 from prompt_toolkit.application import get_app
                 subprocess.run('clear' if os.name != 'nt' else 'cls', shell=True)
                 self.render_title_box()
-                self._replay_conversation_history()
+                self.replay_conversation_history()
                 app = get_app()
                 app.invalidate()
             except Exception:
                 subprocess.run('clear' if os.name != 'nt' else 'cls', shell=True)
                 self.render_title_box()
-                self._replay_conversation_history()
+                self.replay_conversation_history()
         else:
             subprocess.run('clear' if os.name != 'nt' else 'cls', shell=True)
             self.render_title_box()
-            self._replay_conversation_history()
+            self.replay_conversation_history()
 
-    def _get_layout_mode(self, width: int) -> str:
+    def get_layout_mode(self: YipsAgentProtocol, width: int) -> str:
         """Determine layout mode based on terminal width."""
         if width >= LAYOUT_FULL_MIN_WIDTH:
             return "full"
@@ -636,7 +654,7 @@ class AgentUIMixin:
         else:
             return "minimal"
 
-    def stream_text(self, text: str) -> None:
+    def stream_text(self: YipsAgentProtocol, text: str) -> None:
         """Simulate streaming for a static piece of text."""
         prefix = get_yips_prefix()
         indent = " " * len(prefix)

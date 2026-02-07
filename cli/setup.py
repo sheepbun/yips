@@ -2,11 +2,10 @@
 Setup utilities for Yips CLI dependencies.
 """
 
-import os
 import shutil
 import subprocess
-import sys
 import requests
+from typing import List
 from pathlib import Path
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, DownloadColumn, TransferSpeedColumn
 from cli.color_utils import console
@@ -14,7 +13,7 @@ from cli.llamacpp import LLAMA_MODELS_DIR, LLAMA_DEFAULT_MODEL
 
 def check_build_tools() -> bool:
     """Check if git, make, and compiler are available."""
-    missing = []
+    missing: List[str] = []
     if not shutil.which("git"):
         missing.append("git")
     if not shutil.which("make"):

@@ -5,7 +5,6 @@ heartbeat.py - Background monitoring for Yips.
 Wakes up periodically to check for linting errors and failed tests.
 """
 
-import os
 import subprocess
 import sys
 from datetime import datetime

@@ -1,15 +1,13 @@
 import ast
 from pathlib import Path
-from prompt_toolkit.completion import Completer, Completion
+from prompt_toolkit.completion import Completer, Completion, CompleteEvent
+from prompt_toolkit.document import Document
 from prompt_toolkit.formatted_text import FormattedText
-from cli.config import COMMANDS_DIR, SKILLS_DIR, TOOLS_DIR
+from cli.config import SKILLS_DIR, TOOLS_DIR
 from cli.color_utils import (
     GRADIENT_PINK,
     GRADIENT_YELLOW,
-    GRADIENT_BLUE,
-    GRADIENT_BLUE_DARK,
-    interpolate_color,
-    PROMPT_COLOR
+    interpolate_color
 )
 
 
@@ -139,7 +137,7 @@ class SlashCommandCompleter(Completer):
         if not text:
             return FormattedText([])
 
-        parts = []
+        parts: list[tuple[str, str]] = []
         length = len(text)
 
         # Apply gradient to the entire string character by character
@@ -156,7 +154,7 @@ class SlashCommandCompleter(Completer):
 
         return FormattedText(parts)
 
-    def get_completions(self, document, complete_event):
+    def get_completions(self, document: Document, complete_event: CompleteEvent):
         """Get completions for commands with styling."""
         # Get text before cursor
         text_before_cursor = document.text_before_cursor

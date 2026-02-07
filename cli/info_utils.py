@@ -6,6 +6,8 @@ Provides functions for retrieving user info, activity history, and display names
 
 import re
 from datetime import datetime
+from pathlib import Path
+from typing import Any
 
 from cli.config import BASE_DIR, MEMORIES_DIR
 
@@ -81,40 +83,40 @@ def get_recent_activity(limit: int = 5) -> list[str]:
             return ["No recent activity"]
 
         # Build list of (datetime, filepath) tuples by parsing filenames
-        dated_files: list[tuple[datetime, any]] = []
+        dated_files: list[tuple[datetime, Path]] = []
         for f in MEMORIES_DIR.glob("*.md"):
             try:
-                name = f.stem  # Remove .md extension
-                parts = name.split('_', 2)
+                name: str = f.stem  # Remove .md extension
+                parts: list[str] = name.split('_', 2)
 
                 if len(parts) >= 3:
-                    date_part = parts[0]
-                    time_part = parts[1]
+                    date_part: str = parts[0]
+                    time_part: str = parts[1]
 
                     # Detect format by checking for hyphens in date part
                     if '-' in date_part:
                         # New format: YYYY-MM-DD_HH-MM-SS
                         try:
-                            dt_str = f"{date_part} {time_part.replace('-', ':')}"
-                            dt = datetime.strptime(dt_str, '%Y-%m-%d %H:%M:%S')
+                            dt_str: str = f"{date_part} {time_part.replace('-', ':')}"
+                            dt: datetime = datetime.strptime(dt_str, '%Y-%m-%d %H:%M:%S')
                             dated_files.append((dt, f))
                         except ValueError:
                             # Fallback to st_mtime if parsing fails
-                            dt = datetime.fromtimestamp(f.stat().st_mtime)
+                            dt: datetime = datetime.fromtimestamp(f.stat().st_mtime)
                             dated_files.append((dt, f))
                     else:
                         # Old format: YYYYMMDD_HHMMSS
                         try:
-                            dt_str = f"{date_part} {time_part}"
-                            dt = datetime.strptime(dt_str, '%Y%m%d %H%M%S')
+                            dt_str: str = f"{date_part} {time_part}"
+                            dt: datetime = datetime.strptime(dt_str, '%Y%m%d %H%M%S')
                             dated_files.append((dt, f))
                         except ValueError:
                             # Fallback to st_mtime if parsing fails
-                            dt = datetime.fromtimestamp(f.stat().st_mtime)
+                            dt: datetime = datetime.fromtimestamp(f.stat().st_mtime)
                             dated_files.append((dt, f))
                 else:
                     # Fallback for malformed filenames
-                    dt = datetime.fromtimestamp(f.stat().st_mtime)
+                    dt: datetime = datetime.fromtimestamp(f.stat().st_mtime)
                     dated_files.append((dt, f))
             except Exception:
                 # Skip files that cause exceptions
@@ -125,34 +127,34 @@ def get_recent_activity(limit: int = 5) -> list[str]:
 
         # Sort by datetime descending (most recent first)
         dated_files.sort(key=lambda x: x[0], reverse=True)
-        memory_files = [f for _, f in dated_files[:limit]]
+        memory_files: list[Path] = [f for _, f in dated_files[:limit]]
 
         activities: list[str] = []
         for f in memory_files:
             try:
-                name = f.stem  # Remove .md extension
-                parts = name.split('_', 2)
+                name: str = f.stem  # Remove .md extension
+                parts: list[str] = name.split('_', 2)
 
                 if len(parts) >= 3:
-                    date_part = parts[0]
-                    time_part = parts[1]
-                    title = '_'.join(parts[2:])
+                    date_part: str = parts[0]
+                    time_part: str = parts[1]
+                    title: str = '_'.join(parts[2:])
                     title = title.replace('_', ' ').title()
 
                     # Detect format by checking for hyphens in date part
                     if '-' in date_part:
                         # New format: YYYY-MM-DD_HH-MM-SS
                         try:
-                            dt = datetime.strptime(date_part, '%Y-%m-%d')
+                            dt: datetime = datetime.strptime(date_part, '%Y-%m-%d')
                             # Extract hour and minute from HH-MM-SS format
-                            time_parts = time_part.split('-')
+                            time_parts: list[str] = time_part.split('-')
                             if len(time_parts) >= 2:
-                                hour_int = int(time_parts[0])
-                                minute = time_parts[1]
+                                hour_int: int = int(time_parts[0])
+                                minute: str = time_parts[1]
                                 # Convert to 12-hour format with AM/PM
                                 if hour_int == 0:
-                                    display_hour = 12
-                                    am_pm = "AM"
+                                    display_hour: int = 12
+                                    am_pm: str = "AM"
                                 elif hour_int < 12:
                                     display_hour = hour_int
                                     am_pm = "AM"
@@ -164,9 +166,9 @@ def get_recent_activity(limit: int = 5) -> list[str]:
                                     am_pm = "PM"
                                 
                                 # Fixed width formatting: %m-%d (zero padded), hour (space padded >2)
-                                date_str = dt.strftime('%Y-%m-%d')
-                                time_str = f"{display_hour:>2}:{minute} {am_pm}"
-                                display = f"{date_str} @ {time_str}: {title}"
+                                date_str: str = dt.strftime('%Y-%m-%d')
+                                time_str: str = f"{display_hour:>2}:{minute} {am_pm}"
+                                display: str = f"{date_str} @ {time_str}: {title}"
                             else:
                                 display = f"{dt.strftime('%Y-%m-%d')}: {title}"
                         except (ValueError, IndexError):
@@ -174,11 +176,11 @@ def get_recent_activity(limit: int = 5) -> list[str]:
                     else:
                         # Old format: YYYYMMDD_HHMMSS
                         try:
-                            dt = datetime.strptime(date_part, '%Y%m%d')
+                            dt: datetime = datetime.strptime(date_part, '%Y%m%d')
                             # Extract hour and minute from HHMMSS (first 4 chars: HHMM)
                             if len(time_part) >= 4:
-                                hour_int = int(time_part[:2])
-                                minute = time_part[2:4]
+                                hour_int: int = int(time_part[:2])
+                                minute: str = time_part[2:4]
                                 # Convert to 12-hour format with AM/PM
                                 if hour_int == 0:
                                     display_hour = 12
@@ -194,8 +196,8 @@ def get_recent_activity(limit: int = 5) -> list[str]:
                                     am_pm = "PM"
                                 
                                 # Fixed width formatting
-                                date_str = dt.strftime('%Y-%m-%d')
-                                time_str = f"{display_hour:>2}:{minute} {am_pm}"
+                                date_str: str = dt.strftime('%Y-%m-%d')
+                                time_str: str = f"{display_hour:>2}:{minute} {am_pm}"
                                 display = f"{date_str} @ {time_str}: {title}"
                             else:
                                 display = f"{dt.strftime('%Y-%m-%d')}: {title}"
@@ -203,8 +205,8 @@ def get_recent_activity(limit: int = 5) -> list[str]:
                             display = f"{date_part}: {title}"
                 else:
                     # Fallback for malformed filenames
-                    dt = datetime.fromtimestamp(f.stat().st_mtime)
-                    hour_int = dt.hour
+                    dt: datetime = datetime.fromtimestamp(f.stat().st_mtime)
+                    hour_int: int = dt.hour
                     if hour_int == 0:
                         display_hour = 12
                         am_pm = "AM"
@@ -218,8 +220,8 @@ def get_recent_activity(limit: int = 5) -> list[str]:
                         display_hour = hour_int - 12
                         am_pm = "PM"
                     
-                    date_str = dt.strftime('%Y-%m-%d')
-                    time_str = f"{display_hour:>2}:{dt.strftime('%M')} {am_pm}"
+                    date_str: str = dt.strftime('%Y-%m-%d')
+                    time_str: str = f"{display_hour:>2}:{dt.strftime('%M')} {am_pm}"
                     display = f"{date_str} @ {time_str}: {name}"
 
                 activities.append(display)
@@ -232,7 +234,7 @@ def get_recent_activity(limit: int = 5) -> list[str]:
         return ["No recent activity"]
 
 
-def get_session_list() -> list[dict]:
+def get_session_list() -> list[dict[str, Any]]:
     """Get list of session files with formatted display names and full paths.
     
     Returns a list of dicts: {'path': Path, 'display': str}
@@ -243,66 +245,66 @@ def get_session_list() -> list[dict]:
             return []
 
         # Build list of (datetime, filepath) tuples
-        dated_files: list[tuple[datetime, any]] = []
+        dated_files: list[tuple[datetime, Path]] = []
         for f in MEMORIES_DIR.glob("*.md"):
             try:
-                name = f.stem
-                parts = name.split('_', 2)
+                name: str = f.stem
+                parts: list[str] = name.split('_', 2)
 
                 if len(parts) >= 3:
-                    date_part = parts[0]
-                    time_part = parts[1]
+                    date_part: str = parts[0]
+                    time_part: str = parts[1]
                     if '-' in date_part:
-                        dt_str = f"{date_part} {time_part.replace('-', ':')}"
-                        dt = datetime.strptime(dt_str, '%Y-%m-%d %H:%M:%S')
+                        dt_str: str = f"{date_part} {time_part.replace('-', ':')}"
+                        dt: datetime = datetime.strptime(dt_str, '%Y-%m-%d %H:%M:%S')
                     else:
-                        dt_str = f"{date_part} {time_part}"
-                        dt = datetime.strptime(dt_str, '%Y%m%d %H%M%S')
+                        dt_str: str = f"{date_part} {time_part}"
+                        dt: datetime = datetime.strptime(dt_str, '%Y%m%d %H%M%S')
                     dated_files.append((dt, f))
                 else:
-                    dt = datetime.fromtimestamp(f.stat().st_mtime)
+                    dt: datetime = datetime.fromtimestamp(f.stat().st_mtime)
                     dated_files.append((dt, f))
             except Exception:
-                dt = datetime.fromtimestamp(f.stat().st_mtime)
+                dt: datetime = datetime.fromtimestamp(f.stat().st_mtime)
                 dated_files.append((dt, f))
 
         # Sort by datetime descending
         dated_files.sort(key=lambda x: x[0], reverse=True)
 
-        sessions = []
+        sessions: list[dict[str, Any]] = []
         for dt, f in dated_files:
             try:
-                name = f.stem
-                parts = name.split('_', 2)
+                name: str = f.stem
+                parts: list[str] = name.split('_', 2)
                 if len(parts) >= 3:
-                    date_part = parts[0]
-                    time_part = parts[1]
-                    title = '_'.join(parts[2:])
+                    date_part: str = parts[0]
+                    time_part: str = parts[1]
+                    title: str = '_'.join(parts[2:])
                     title = title.replace('_', ' ').title()
                     
                     if '-' in date_part:
                         # Convert HH-MM-SS to 12h format
-                        time_parts = time_part.split('-')
-                        hour = int(time_parts[0])
-                        minute = time_parts[1]
-                        period = "AM" if hour < 12 else "PM"
+                        time_parts: list[str] = time_part.split('-')
+                        hour: int = int(time_parts[0])
+                        minute: str = time_parts[1]
+                        period: str = "AM" if hour < 12 else "PM"
                         hour = 12 if hour == 0 else (hour if hour <= 12 else hour - 12)
                         
-                        date_str = dt.strftime('%Y-%m-%d')
-                        time_str = f"{hour:>2}:{minute} {period}"
-                        display = f"{date_str} @ {time_str}: {title}"
+                        date_str: str = dt.strftime('%Y-%m-%d')
+                        time_str: str = f"{hour:>2}:{minute} {period}"
+                        display: str = f"{date_str} @ {time_str}: {title}"
                     else:
                         # Old format
-                        hour = int(time_part[:2])
-                        minute = time_part[2:4]
-                        period = "AM" if hour < 12 else "PM"
+                        hour: int = int(time_part[:2])
+                        minute: str = time_part[2:4]
+                        period: str = "AM" if hour < 12 else "PM"
                         hour = 12 if hour == 0 else (hour if hour <= 12 else hour - 12)
                         
-                        date_str = dt.strftime('%Y-%m-%d')
-                        time_str = f"{hour:>2}:{minute} {period}"
-                        display = f"{date_str} @ {time_str}: {title}"
+                        date_str: str = dt.strftime('%Y-%m-%d')
+                        time_str: str = f"{hour:>2}:{minute} {period}"
+                        display: str = f"{date_str} @ {time_str}: {title}"
                 else:
-                    display = f"{dt.strftime('%Y-%m-%d %H:%M')}: {f.stem}"
+                    display: str = f"{dt.strftime('%Y-%m-%d %H:%M')}: {f.stem}"
                 
                 sessions.append({'path': f, 'display': display})
             except Exception:
@@ -322,7 +324,7 @@ def get_friendly_backend_name(backend_name: str) -> str:
     return mapping.get(backend_name, backend_name)
 
 
-def get_friendly_model_name(model_name: str) -> str:
+def get_friendly_model_name(model_name: str | None) -> str:
     """Convert internal model name to display-friendly name."""
     if not model_name: return "Default"
     

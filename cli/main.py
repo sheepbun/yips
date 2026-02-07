@@ -8,23 +8,21 @@ import os
 import sys
 import subprocess
 import termios
-import tty
-from typing import Any
+from typing import Any, cast
 
 from prompt_toolkit import PromptSession
+from prompt_toolkit.key_binding.key_processor import KeyPressEvent
 from prompt_toolkit.formatted_text import HTML as HTMLText
 from prompt_toolkit.styles import Style as PromptStyle
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.output import ColorDepth
 import time
 from rich.live import Live
-from rich.text import Text
+from rich.console import RenderableType
 
 from cli.agent import YipsAgent
+from cli.type_defs import YipsAgentProtocol
 from cli.ui_rendering import (
-    render_top_border,
-    render_bottom_border,
-    render_tool_call,
     render_tool_batch,
     show_booting,
 )
@@ -32,8 +30,6 @@ from cli.color_utils import (
     console,
     print_yips,
     PROMPT_COLOR,
-    TOOL_COLOR,
-    blue_gradient_text,
 )
 from cli.commands import handle_command
 from cli.config import COMMANDS_DIR
@@ -41,10 +37,10 @@ from cli.tool_execution import parse_tool_requests, execute_tool, clean_response
 from cli.completer import SlashCommandCompleter
 
 
-def process_response_and_tools(agent: YipsAgent, response: str, depth: int = 0) -> None:
+def process_response_and_tools(agent: YipsAgentProtocol, response: str, depth: int = 0) -> None:
     """Recursively process response, execute tools, and handle standardized ReAct loop."""
     from cli.config import load_config, DEFAULT_MAX_DEPTH
-    
+
     config = load_config()
     max_depth = config.get("max_depth", DEFAULT_MAX_DEPTH)
 
@@ -67,9 +63,9 @@ def process_response_and_tools(agent: YipsAgent, response: str, depth: int = 0) 
 
     # 3. Execute tool requests
     total_requests = len(tool_requests)
-    
+
     # Batch tracking for UI
-    tool_history: list[dict] = []
+    tool_history: list[dict[str, Any]] = []
     summary_text = ""
     if depth == 0:
         summary_text = f"⚡ Executing {total_requests} tool call{'s' if total_requests != 1 else ''}..."
@@ -78,16 +74,14 @@ def process_response_and_tools(agent: YipsAgent, response: str, depth: int = 0) 
 
     has_reprompt = False
     reprompt_msg = ""
-    
-    with Live(render_tool_batch(tool_history, summary_text, compact=True), console=console, refresh_per_second=10, transient=False) as live:
+
+    if agent.is_gui:
+        # GUI Mode: Just process tools without Live display
         for i, request in enumerate(tool_requests, 1):
-            # ... (lines omitted for brevity but logic remains same)
-            # Handle pseudo-tool THOUGHT (updates agent state)
             if request["type"] == "thought":
                 agent.session_state["thought_signature"] = request["signature"]
                 continue
 
-            # Get tool name and params
             tool_name = "unknown"
             params: Any = ""
             if request["type"] == "action":
@@ -100,60 +94,18 @@ def process_response_and_tools(agent: YipsAgent, response: str, depth: int = 0) 
                 tool_name = request["skill"]
                 params = request["args"]
 
-            # Display tool with prefix
-            prefix = f"({i}/{total_requests})" if total_requests > 1 else "▶"
-            display_name = f"{prefix} {tool_name}"
-            
-            # Add to history for batch rendering
-            current_tool_info = {
-                "name": display_name,
-                "params": params,
-                "is_running": True,
-                "result": None
-            }
-            tool_history.append(current_tool_info)
-            live.update(render_tool_batch(tool_history, summary_text, compact=True))
-            
-            # Add a tiny delay before starting next tool for visual separation
-            if i > 1:
-                time.sleep(0.3)
-
-            # Execute the tool
             result = execute_tool(request, agent)
-            
-            # Update tool info with result
-            current_tool_info["is_running"] = False
-            current_tool_info["result"] = result
-            live.update(render_tool_batch(tool_history, summary_text, compact=True))
-            
-            # ... (rest of the loop)
-            # Update error tracking
-            if isinstance(result, str) and ("[Error" in result or "failed" in result.lower()):
+
+            if "[Error" in result or "failed" in result.lower():
                 agent.session_state["error_count"] = agent.session_state.get("error_count", 0) + 1
             else:
-                agent.session_state["error_count"] = 0 # Reset on success
-            
+                agent.session_state["error_count"] = 0
+
             agent.session_state["last_action"] = f"{tool_name}: {params}"
-            
-            # Update metrics
-            try:
-                from cli.config import DOT_YIPS_DIR
-                import json
-                metrics_path = DOT_YIPS_DIR / "metrics.json"
-                if metrics_path.exists():
-                    metrics = json.loads(metrics_path.read_text())
-                    metrics["total_actions"] = metrics.get("total_actions", 0) + 1
-                    if not (isinstance(result, str) and ("[Error" in result or "failed" in result.lower())):
-                        metrics["successes"] = metrics.get("successes", 0) + 1
-                    metrics_path.write_text(json.dumps(metrics, indent=2))
-            except Exception:
-                pass
-            
-            # Handle special command results
+
             if result == "::YIPS_EXIT::":
                 sys.exit(0)
-                
-            # Store structured tool call in history
+
             import json
             metadata = {
                 "tool": tool_name,
@@ -165,19 +117,97 @@ def process_response_and_tools(agent: YipsAgent, response: str, depth: int = 0) 
                 "content": json.dumps(metadata)
             })
 
-            # Check for REPROMPT (special case)
-            if isinstance(result, str) and result.startswith("::YIPS_REPROMPT::"):
+            if result.startswith("::YIPS_REPROMPT::"):
                 has_reprompt = True
                 reprompt_msg = result[17:]
+    else:
+        # Terminal Mode: Use Live for batch tool rendering
+        renderable = cast(RenderableType, render_tool_batch(tool_history, summary_text, compact=True))
+        with Live(renderable, console=console, refresh_per_second=10, transient=False) as live:
+            for i, request in enumerate(tool_requests, 1):
+                if request["type"] == "thought":
+                    agent.session_state["thought_signature"] = request["signature"]
+                    continue
 
-        # Final update to show all tools in the batch once completed
-        live.update(render_tool_batch(tool_history, summary_text, compact=False))
+                tool_name = "unknown"
+                params: Any = ""
+                if request["type"] == "action":
+                    tool_name = request["tool"]
+                    params = request["params"]
+                elif request["type"] == "identity":
+                    tool_name = "update_identity"
+                    params = request["reflection"]
+                elif request["type"] == "skill":
+                    tool_name = request["skill"]
+                    params = request["args"]
+
+                prefix = f"({i}/{total_requests})" if total_requests > 1 else "▶"
+                display_name = f"{prefix} {tool_name}"
+
+                current_tool_info = {
+                    "name": display_name,
+                    "params": params,
+                    "is_running": True,
+                    "result": None
+                }
+                tool_history.append(current_tool_info)
+                live.update(cast(RenderableType, render_tool_batch(tool_history, summary_text, compact=True)))
+
+                if i > 1:
+                    time.sleep(0.3)
+
+                result = execute_tool(request, agent)
+
+                current_tool_info["is_running"] = False
+                current_tool_info["result"] = result
+                live.update(cast(RenderableType, render_tool_batch(tool_history, summary_text, compact=True)))
+
+                if "[Error" in result or "failed" in result.lower():
+                    agent.session_state["error_count"] = agent.session_state.get("error_count", 0) + 1
+                else:
+                    agent.session_state["error_count"] = 0
+
+                agent.session_state["last_action"] = f"{tool_name}: {params}"
+
+                try:
+                    from cli.config import DOT_YIPS_DIR
+                    import json
+                    metrics_path = DOT_YIPS_DIR / "metrics.json"
+                    if metrics_path.exists():
+                        metrics: dict[str, Any] = json.loads(metrics_path.read_text())
+                        metrics["total_actions"] = metrics.get("total_actions", 0) + 1
+                        if not ("[Error" in result or "failed" in result.lower()):
+                            metrics["successes"] = metrics.get("successes", 0) + 1
+                        metrics_path.write_text(json.dumps(metrics, indent=2))
+                except Exception:
+                    pass
+
+                if result == "::YIPS_EXIT::":
+                    sys.exit(0)
+
+                import json
+                metadata = {
+                    "tool": tool_name,
+                    "params": params,
+                    "result": str(result)
+                }
+                agent.conversation_history.append({
+                    "role": "system",
+                    "content": json.dumps(metadata)
+                })
+
+                if result.startswith("::YIPS_REPROMPT::"):
+                    has_reprompt = True
+                    reprompt_msg = result[17:]
+
+            # Final update
+            live.update(cast(RenderableType, render_tool_batch(tool_history, summary_text, compact=False)))
 
     # Standardized ReAct loop: Always trigger next turn if tools were called
     if not has_reprompt:
         from cli.config import INTERNAL_REPROMPT
         reprompt_msg = INTERNAL_REPROMPT
-        
+
         # If we have consecutive errors, inject a pivot prompt
         error_count = agent.session_state.get("error_count", 0)
         if error_count > 0:
@@ -188,16 +218,16 @@ def process_response_and_tools(agent: YipsAgent, response: str, depth: int = 0) 
         "role": "user",
         "content": reprompt_msg
     })
-    
+
     # Recursive call for the next turn
     next_response = agent.get_response(reprompt_msg)
-    
+
     # Store assistant response
     agent.conversation_history.append({
         "role": "assistant",
         "content": next_response
     })
-    
+
     process_response_and_tools(agent, next_response, depth + 1)
 
 
@@ -229,28 +259,27 @@ def main() -> None:
     @bindings.add('enter', eager=True)
     @bindings.add('c-m', eager=True)
     @bindings.add('c-j', eager=True)
-    def _(event):
+    def _(event: KeyPressEvent):
         """Handle Enter key. Do not submit if empty."""
         buffer = event.current_buffer
         if not buffer.text.strip():
             return
-        
         buffer.validate_and_handle()
 
     @bindings.add('s-tab')
-    def _(event):
+    def _(event: KeyPressEvent):
         """Toggle Virtual Terminal with Shift+Tab"""
         vt_path = COMMANDS_DIR / "VT" / "VT.py"
         if vt_path.exists():
             try:
                 # Suspend the current application to run the subprocess
-                with event.app.suspend_to_background():
+                with cast(Any, event.app.suspend_to_background()):
                     subprocess.run([sys.executable, str(vt_path)])
             except Exception as e:
                 console.print(f"[Error launching VT: {e}]")
 
     # Initialize PromptSession
-    session = PromptSession(
+    session: PromptSession[str] = PromptSession(
         style=style,
         completer=completer,
         complete_while_typing=True,
@@ -262,7 +291,7 @@ def main() -> None:
     agent = YipsAgent(prompt_session=session)
 
     is_gui = os.environ.get("YIPS_GUI_MODE") == "1"
-    
+
     # Save original terminal settings
     fd = sys.stdin.fileno()
     old_settings = termios.tcgetattr(fd)
@@ -285,7 +314,7 @@ def main() -> None:
         # Initialize backend after displaying UI
         with show_booting("Booting Yips..."):
             agent.initialize_backend()
-            
+
             # Precache HF model data in background for snappy /download command
             try:
                 from cli.download_ui import HFModelManager
@@ -302,7 +331,7 @@ def main() -> None:
         if settings_changed:
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
         raise
-    
+
     # Restore terminal settings (re-enables echo)
     if settings_changed:
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
@@ -310,7 +339,7 @@ def main() -> None:
     if args.command:
         # Handle single command mode
         user_input = args.command.strip()
-        
+
         # Store user message
         agent.conversation_history.append({
             "role": "user",
@@ -334,7 +363,7 @@ def main() -> None:
 
         # Update session memory file
         agent.update_session_file()
-        
+
         agent.graceful_exit()
         sys.exit(0)
 
@@ -368,7 +397,7 @@ def main() -> None:
             import json
             metrics_path = DOT_YIPS_DIR / "metrics.json"
             if metrics_path.exists():
-                metrics = json.loads(metrics_path.read_text())
+                metrics: dict[str, Any] = json.loads(metrics_path.read_text())
                 metrics["user_interventions"] = metrics.get("user_interventions", 0) + 1
                 metrics_path.write_text(json.dumps(metrics, indent=2))
         except Exception:
@@ -409,8 +438,12 @@ def main() -> None:
         # Add a blank line to separate this turn from the next prompt
         console.print()
 
+        # Refresh title box to show updated context usage
+        agent.refresh_title_box_only()
+
         # Update session memory file
         agent.update_session_file()
+
 
 if __name__ == "__main__":
     main()

@@ -2,18 +2,24 @@
 Session and memory management for YipsAgent.
 """
 
+from __future__ import annotations
+
 import json
 import re
 from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 from cli.config import MEMORIES_DIR, DOT_YIPS_DIR
 from cli.hw_utils import get_system_specs
+
+if TYPE_CHECKING:
+    from cli.type_defs import YipsAgentProtocol, Message
 
 
 class AgentSessionMixin:
     """Mixin providing session and memory management to YipsAgent."""
 
-    def calculate_context_limits(self) -> None:
+    def calculate_context_limits(self: YipsAgentProtocol) -> None:
         """Calculate dynamic context limits based on available RAM."""
         # Defaults
         self.token_limits = {
@@ -32,8 +38,6 @@ class AgentSessionMixin:
                     self.token_limits["max_tokens"] = max_tokens
                     self.token_limits["pruning_threshold"] = max_tokens - 2000
                     self.token_limits["prune_amount"] = int(max_tokens * 0.25)
-                    if hasattr(self, 'console'):
-                        self.console.print(f"[dim]Using user-defined context limit: {max_tokens} tokens[/dim]")
                     return
             except Exception:
                 pass
@@ -54,15 +58,11 @@ class AgentSessionMixin:
             self.token_limits["max_tokens"] = max_tokens
             self.token_limits["pruning_threshold"] = max(2048, max_tokens - 2000)
             self.token_limits["prune_amount"] = int(max_tokens * 0.25)
-            
-            if hasattr(self, 'console') and getattr(self, 'verbose_mode', False):
-                self.console.print(f"[dim]Dynamic context limit: {max_tokens} tokens (RAM: {ram_gb}GB)[/dim]")
-                
-        except Exception as e:
-            if hasattr(self, 'console'):
-                self.console.print(f"[dim]Error calculating context limits: {e}. Using defaults.[/dim]")
 
-    def generate_session_summary(self) -> str:
+        except Exception:
+            pass
+
+    def generate_session_summary(self: YipsAgentProtocol) -> str:
         """Generate a short summary of the conversation for the session filename."""
         if not hasattr(self, 'conversation_history') or not self.conversation_history:
             return f"session_{datetime.now().strftime('%Y%m%d_%H%M')}"
@@ -94,7 +94,7 @@ class AgentSessionMixin:
         # Fallback to timestamp-based name
         return f"session_{datetime.now().strftime('%Y%m%d_%H%M')}"
 
-    def _generate_session_name_from_message(self) -> str:
+    def generate_session_name_from_message(self: YipsAgentProtocol) -> str:
         """Generate session name from first user message."""
         if not hasattr(self, 'conversation_history'):
             return "session"
@@ -116,19 +116,19 @@ class AgentSessionMixin:
                 return slug if slug else "session"
         return "session"
 
-    def update_session_file(self) -> None:
+    def update_session_file(self: YipsAgentProtocol) -> None:
         """Create or update the session memory file with current conversation."""
         if not hasattr(self, 'conversation_history') or not self.conversation_history:
             return
 
         # Create session file on first message if it doesn't exist
         first_creation = False
-        if not getattr(self, '_session_created', False):
-            self._session_created = True
+        if not getattr(self, 'session_created', False):
+            self.session_created = True
             first_creation = True
             timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
             # Generate meaningful name from first user message
-            safe_name = self._generate_session_name_from_message()
+            safe_name = self.generate_session_name_from_message()
             self.current_session_name = safe_name
             filename = f"{timestamp}_{safe_name}.md"
             self.session_file_path = MEMORIES_DIR / filename
@@ -140,7 +140,7 @@ class AgentSessionMixin:
         MEMORIES_DIR.mkdir(parents=True, exist_ok=True)
 
         # Format conversation for file
-        conversation_lines = []
+        conversation_lines: list[str] = []
         
         # Add Running Summary if it exists
         if hasattr(self, 'running_summary') and self.running_summary:
@@ -189,14 +189,14 @@ class AgentSessionMixin:
 *Last updated: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}*"""
 
         try:
-            self.session_file_path.write_text(memory_content)
+            if self.session_file_path:
+                self.session_file_path.write_text(memory_content)
             if first_creation:
                 self.refresh_title_box_only()
-        except Exception as e:
-            if hasattr(self, 'console'):
-                self.console.print(f"[dim]Note: Could not update session file: {e}[/dim]")
+        except Exception:
+            pass
 
-    def rename_session(self, new_name: str) -> None:
+    def rename_session(self: YipsAgentProtocol, new_name: str) -> None:
         """Rename the current session and update title box."""
         # Sanitize new name
         slug = new_name.lower().strip()
@@ -212,7 +212,7 @@ class AgentSessionMixin:
         self.current_session_name = slug
 
         # Rename file if it exists
-        if getattr(self, 'session_file_path', None) and self.session_file_path.exists():
+        if getattr(self, 'session_file_path', None) and self.session_file_path and self.session_file_path.exists():
             try:
                 # Expected format: YYYY-MM-DD_HH-MM-SS_slug.md
                 # Split by underscore to preserve timestamp parts
@@ -241,7 +241,7 @@ class AgentSessionMixin:
 
         self.refresh_title_box_only()
 
-    def load_session(self, file_path: Path) -> bool:
+    def load_session(self: YipsAgentProtocol, file_path: Path) -> bool:
         """Load a conversation from a session memory file."""
         if not file_path.exists():
             return False
@@ -265,60 +265,6 @@ class AgentSessionMixin:
             # Simple parsing state machine
             lines = conv_section.split('\n')
             
-            # Pre-scan for structure
-            has_summary = "### Running Summary" in conv_section
-            has_archived = "### Archived Conversation" in conv_section
-            
-            temp_history = []
-            
-            for line in lines:
-                line = line.strip()
-                if not line:
-                    continue
-                
-                if line == "### Running Summary":
-                    current_section = "summary"
-                    continue
-                elif line == "### Archived Conversation":
-                    current_section = "archived"
-                    continue
-                elif line == "### Active Conversation":
-                    current_section = "active"
-                    continue
-                
-                if current_section == "summary":
-                    if self.running_summary:
-                        self.running_summary += "\n" + line
-                    else:
-                        self.running_summary = line
-                else:
-                    # Parsing chat lines
-                    msg = None
-                    if line.startswith("**Katherine**:"):
-                        msg = {"role": "user", "content": line[len("**Katherine**:") :].strip()}
-                    elif line.startswith("**Yips**:"):
-                        msg = {"role": "assistant", "content": line[len("**Yips**:") :].strip()}
-                    elif line.startswith("*[System:"):
-                        sys_content = line[9:-2].strip()
-                        msg = {"role": "system", "content": sys_content}
-                    elif temp_history:
-                        # Append to previous message
-                        temp_history[-1]["content"] += "\n" + line
-                    
-                    if msg:
-                        temp_history.append(msg)
-                        # Determine where to put it based on section
-                        if current_section == "archived":
-                            self.archived_history.append(msg)
-                            # Remove from temp_history to keep it clean for next iteration
-                            # (Actually we just need to track where the last msg went)
-                            pass
-                        elif current_section == "active":
-                            self.conversation_history.append(msg)
-                            pass
-                        # Note: The logic above is slightly flawed because 'temp_history' 
-                        # accumulates everything. Let's fix it by appending to specific lists.
-                        
             # Re-process cleanly
             # Reset
             self.running_summary = ""
@@ -326,7 +272,7 @@ class AgentSessionMixin:
             self.conversation_history = []
             
             current_section = "active" # Default if no headers found
-            last_list = self.conversation_history
+            last_list: list[Message] = self.conversation_history
             
             for line in lines:
                 line = line.strip()
@@ -362,7 +308,7 @@ class AgentSessionMixin:
 
             if self.conversation_history or self.archived_history:
                 self.session_file_path = file_path
-                self._session_created = True
+                self.session_created = True
                 self.calculate_context_limits() # Recalculate limits on load
                 
                 # Extract session name
@@ -382,13 +328,13 @@ class AgentSessionMixin:
             
         return False
 
-    def new_session(self) -> None:
+    def new_session(self: YipsAgentProtocol) -> None:
         """Clear current conversation and start a new session."""
         self.conversation_history = []
         self.archived_history = []
         self.running_summary = ""
         self.session_file_path = None
-        self._session_created = False
+        self.session_created = False
         self.current_session_name = None
         
         # Recalculate limits for the new session

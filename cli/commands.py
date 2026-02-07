@@ -9,41 +9,18 @@ import re
 import subprocess
 import sys
 import time
-from typing import Protocol, Any
-
-from rich.console import Console
-from rich.table import Table
+from typing import Any
 
 from cli.color_utils import console, print_gradient
-from cli.config import load_config, save_config, COMMANDS_DIR, SKILLS_DIR, TOOLS_DIR
+from cli.config import load_config, save_config, SKILLS_DIR, TOOLS_DIR
 from cli.root import PROJECT_ROOT
+from cli.type_defs import YipsAgentProtocol
 from cli.info_utils import (
     get_friendly_backend_name,
     get_friendly_model_name,
     get_session_list,
 )
 from cli.llamacpp import get_available_models as get_llama_models, stop_llamacpp, start_llamacpp
-
-
-class YipsAgentProtocol(Protocol):
-    """Interface that commands.py needs from YipsAgent."""
-    use_claude_cli: bool
-    backend: str
-    current_model: str
-    verbose_mode: bool
-    streaming_enabled: bool
-    console: Console
-    session_selection_active: bool
-    session_selection_idx: int
-    session_list: list[dict]
-
-    def refresh_display(self) -> None: ...
-    def refresh_title_box_only(self) -> None: ...
-    def graceful_exit(self) -> None: ...
-    def load_session(self, file_path: any) -> bool: ...
-    def new_session(self) -> None: ...
-    def initialize_backend(self) -> None: ...
-    def get_title_box_group(self, scroll_step: int = 0) -> Any: ...
 
 
 def handle_backend_command(agent: YipsAgentProtocol, args: str) -> None:
@@ -67,7 +44,6 @@ def handle_backend_command(agent: YipsAgentProtocol, args: str) -> None:
         return
         
     # Switch backend
-    console.print(f"[dim]Switching backend to {get_friendly_backend_name(args)}...[/dim]")
     
     # Cleanup current backend
     if agent.backend == "llamacpp":
@@ -86,7 +62,10 @@ def handle_backend_command(agent: YipsAgentProtocol, args: str) -> None:
         
     # Save config
     config = load_config()
-    config.update({"backend": args, "model": agent.current_model})
+    if args in ("claude", "llamacpp"):
+        config["backend"] = args
+    if agent.current_model:
+        config["model"] = agent.current_model
     save_config(config)
     
     # Re-initialize
@@ -100,7 +79,7 @@ def handle_backend_command(agent: YipsAgentProtocol, args: str) -> None:
 
 def handle_sessions_command(agent: YipsAgentProtocol) -> None:
     """Handle /sessions command to interactively select and load a session."""
-    sessions = get_session_list()
+    sessions: list[dict[str, Any]] = get_session_list()
     if not sessions:
         console.print("[yellow]No session history found.[/yellow]")
         return
@@ -130,13 +109,17 @@ def handle_sessions_command(agent: YipsAgentProtocol) -> None:
     # Use Live for smooth animation
     # screen=False allows us to render "in place" but since we cleared, it's at top
     # auto_refresh=False gives us manual control loop
-    selected_session_path = None
-    last_render_time = 0
+    selected_session_path: Any | None = None
+    last_render_time = 0.0
     render_interval = 0.1
 
-    def _read_key(fd):
+    def _read_key(fd: int) -> str | None:
         """Read a single keypress from raw fd, resolving escape sequences with a short timeout."""
-        data = os.read(fd, 1)
+        try:
+            data = os.read(fd, 1)
+        except OSError:
+            return None
+            
         if not data:
             return None
         ch = data[0]
@@ -237,15 +220,14 @@ def handle_model_command(agent: YipsAgentProtocol, args: str) -> str | bool:
 
     if not args:
         from cli.model_manager import run_model_manager_ui
-        result = run_model_manager_ui(agent.current_model, agent.backend)
-        return result
+        result: str | bool | None = run_model_manager_ui(agent.current_model or "Default", agent.backend)
+        return result or True
 
     # Switch model
     model_name_lower = args.lower()
 
     if model_name_lower in claude_models:
         # User requested switch - clean up first
-        console.print("[dim]Cleaning up (unloading models and clearing session)...[/dim]")
         stop_llamacpp()
         agent.new_session()
         
@@ -264,7 +246,6 @@ def handle_model_command(agent: YipsAgentProtocol, args: str) -> str | bool:
             (m for m in llama_models if args.lower() in m.lower()), None
         )
         if matched:
-            console.print("[dim]Cleaning up (unloading models and clearing session)...[/dim]")
             stop_llamacpp()
             agent.new_session()
             
@@ -275,16 +256,18 @@ def handle_model_command(agent: YipsAgentProtocol, args: str) -> str | bool:
             config.update({"backend": "llamacpp", "model": matched, "verbose": agent.verbose_mode})
             save_config(config)
 
-            console.print(f"[dim]Starting {get_friendly_model_name(matched)}...[/dim]")
             if start_llamacpp(matched):
                 console.print(f"[green]Switched to {get_friendly_backend_name('llamacpp')} with model: {get_friendly_model_name(matched)}[/green]")
             else:
                 console.print(f"[red]Error: Failed to start server for {get_friendly_model_name(matched)}[/red]")
 
             agent.refresh_display()
+            return True
     else:
         console.print(f"[red]Model not found: {args}[/red]")
         console.print("[dim]Use /model to see available models[/dim]")
+    
+    return True
 
 
 
@@ -461,7 +444,7 @@ def handle_slash_command(agent: YipsAgentProtocol, user_input: str) -> str | boo
 
     # Unknown command
     console.print(f"[red]Unknown command: /{command}[/red]")
-    available = []
+    available: list[str] = []
     if TOOLS_DIR.exists():
         available.extend([d.name.lower() for d in TOOLS_DIR.iterdir() if d.is_dir()])
     if SKILLS_DIR.exists():

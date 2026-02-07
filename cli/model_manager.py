@@ -3,26 +3,25 @@ Interactive TUI for managing local and remote models in Yips.
 """
 
 import os
-import shutil
 import asyncio
-from typing import List, Dict, Optional, Tuple
+from typing import List, Dict, Optional, Tuple, Any, Callable, TypedDict
 from pathlib import Path
-from datetime import datetime
 
 from prompt_toolkit import Application
 from prompt_toolkit.output.color_depth import ColorDepth
-from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
 from prompt_toolkit.styles import Style
-from prompt_toolkit.formatted_text import HTML, Template
 from prompt_toolkit.layout.containers import (
     HSplit,
     VSplit,
     Window,
     FloatContainer,
-    Float,
     DynamicContainer,
+    WindowAlign,
+    AnyContainer,
 )
 from prompt_toolkit.layout.controls import FormattedTextControl
+from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.data_structures import Point
 from prompt_toolkit.layout.layout import Layout
 from prompt_toolkit.widgets import (
@@ -31,6 +30,7 @@ from prompt_toolkit.widgets import (
 )
 from prompt_toolkit.widgets.base import Border
 from prompt_toolkit.formatted_text.utils import fragment_list_to_text
+from prompt_toolkit.formatted_text import AnyFormattedText, StyleAndTextTuples, to_formatted_text
 from functools import partial
 
 from cli.color_utils import (
@@ -42,44 +42,54 @@ from cli.color_utils import (
 )
 from cli.llamacpp import LLAMA_MODELS_DIR, get_available_models
 from cli.hw_utils import get_system_specs, is_model_suitable
-from cli.info_utils import get_friendly_model_name, get_friendly_backend_name, set_model_nickname
+from cli.info_utils import get_friendly_model_name, set_model_nickname
 from cli.completer import SlashCommandCompleter
 import shlex
+
+class ModelData(TypedDict):
+    id: str
+    name: str
+    friendly_name: str
+    host: str
+    backend: str
+    friendly_backend: str
+    size_gb: float
+    suitability: Optional[str]
+    path: Optional[Path]
 
 class CustomFrame:
     def __init__(
         self,
-        body,
-        title="",
-        style="",
-        width=None,
-        height=None,
+        body: AnyContainer,
+        title: AnyFormattedText = "",
+        style: str = "",
+        width: Optional[int] = None,
+        height: Optional[int] = None,
     ) -> None:
         self.title = title
         self.body = body
         self.is_dimmed = False
+        self.parent_is_dimmed: Optional[Callable[[], bool]] = None
         self.container = DynamicContainer(self._get_container)
 
-    def _get_diag_style(self, row_idx, col_idx, total_rows, total_cols):
+    def _get_diag_style(self, row_idx: int, col_idx: int, total_rows: int, total_cols: int) -> str:
         progress = col_idx / max(total_cols - 1, 1)
         r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, progress)
         return f"#{r:02x}{g:02x}{b:02x}"
 
-    def _get_container(self):
+    def _get_container(self) -> HSplit:
         total_rows = 15 
         total_cols = console.width or 80
 
-        # We'll check the parent's dimmed state for the secondary title part
-        # CustomFrame is used inside ModelManagerUI
-        is_ui_dimmed = getattr(self, 'parent_is_dimmed', lambda: False)()
-
-        title_text = []
+        title_text: StyleAndTextTuples = []
         prefix = "╭─── "
         for i, char in enumerate(prefix):
             style = self._get_diag_style(0, i, total_rows, total_cols)
             title_text.append((style, char))
         
-        full_title = fragment_list_to_text(self.title) if not isinstance(self.title, str) else self.title
+        # Normalize title to string for checking "Yips"
+        formatted_title = to_formatted_text(self.title)
+        full_title = fragment_list_to_text(formatted_title)
         
         if "Yips" in full_title:
             parts = full_title.split("Yips", 1)
@@ -107,7 +117,7 @@ class CustomFrame:
         title_text.append((self._get_diag_style(0, title_len, total_rows, total_cols), " "))
         title_len += 1
 
-        top_elements = []
+        top_elements: List[AnyContainer] = []
         top_elements.append(Window(content=FormattedTextControl(title_text), height=1, dont_extend_width=True))
         
         remaining = total_cols - title_len - 1 
@@ -118,7 +128,7 @@ class CustomFrame:
         top_elements.append(Window(width=1, height=1, char="╮", 
                                  style=partial(self._get_diag_style, 0, total_cols - 1, total_rows, total_cols)))
 
-        bottom_elements = []
+        bottom_elements: List[AnyContainer] = []
         bottom_elements.append(Window(width=1, height=1, char="╰", 
                                     style=partial(self._get_diag_style, total_rows-1, 0, total_rows, total_cols)))
         for i in range(1, total_cols - 1):
@@ -141,7 +151,7 @@ class ModelManagerUI:
     def __init__(self, current_model: str, current_backend: str):
         self.current_model = current_model
         self.current_backend = current_backend
-        self.models_data = []
+        self.models_data: List[ModelData] = []
         self.is_dimmed = False
         self.specs = get_system_specs()
         self.current_tab = "Local" # Local or Cloud
@@ -182,21 +192,19 @@ class ModelManagerUI:
         self.scroll_offset = 0
         
         # Scroll states for columns
-        self.host_scroll_offset = 0
+        self.host_scroll_offset: float = 0
         self.host_scroll_direction = 1
         
-        self.friendly_scroll_offset = 0
+        self.friendly_scroll_offset: float = 0
         self.friendly_scroll_direction = 1
         
-        self.name_scroll_offset = 0
+        self.name_scroll_offset: float = 0
         self.name_scroll_direction = 1
         
         self._scroll_delay_active = True
-        self._refresh_task = None
-        self._style_cache = {} # Cache for gradient styles: (length, is_focused) -> [styles]
+        self._style_cache: Dict[Tuple[int, bool], List[str]] = {} # Cache for gradient styles: (length, is_focused) -> [styles]
         
         self.is_loading = True
-        self.models_data = []
         
         main_content = HSplit([
             VSplit([
@@ -205,7 +213,7 @@ class ModelManagerUI:
                 Window(
                     FormattedTextControl(f"RAM: {self.specs['ram_gb']}GB | VRAM: {self.specs['vram_gb']}GB "), 
                     style="class:status", 
-                    align="right", 
+                    align=WindowAlign.RIGHT, 
                     dont_extend_width=True
                 ),
             ], height=1),
@@ -233,7 +241,7 @@ class ModelManagerUI:
         
         self.kb = KeyBindings()
         @self.kb.add("escape")
-        def _(event):
+        def _(event: KeyPressEvent) -> None:
             # Apply dimmed style for "greyed out" look on exit
             self.is_dimmed = True
             
@@ -253,13 +261,13 @@ class ModelManagerUI:
             event.app.exit()
             
         @self.kb.add("tab")
-        def _(event):
+        def _(event: KeyPressEvent) -> None:
             if self.layout.has_focus(self.search_area):
                 self.layout.focus(self.model_list_control)
             else:
                 self.layout.focus(self.search_area)
 
-        self.app = Application(
+        self.app: Application[Any] = Application(
             layout=self.layout,
             key_bindings=self.kb,
             style=self.style,
@@ -269,14 +277,14 @@ class ModelManagerUI:
             before_render=self._on_render
         )
 
-    def _on_render(self, _app):
+    def _on_render(self, _app: Application[Any]) -> None:
         """Start background tasks on the first render when the loop is running."""
         if not hasattr(self, '_task_started'):
             self._task_started = True
             self.app.create_background_task(self._scroll_animation_task())
             self.app.create_background_task(self._fetch_models_task())
 
-    async def _scroll_animation_task(self):
+    async def _scroll_animation_task(self) -> None:
         """Task to animate scrolling for long text in columns when selected and focused."""
         while True:
             await asyncio.sleep(0.15)
@@ -316,7 +324,7 @@ class ModelManagerUI:
             if len(host) > 18:
                 limit = len(host) - 18
                 if self.host_scroll_direction == 1 and self.host_scroll_offset >= limit:
-                    self.host_scroll_offset = limit
+                    self.host_scroll_offset = float(limit)
                     self.host_scroll_direction = -1
                     needs_invalidate = True
                     # We don't sleep here to keep columns somewhat in sync or moving
@@ -337,7 +345,7 @@ class ModelManagerUI:
             if len(f_name) > 15:
                 limit = len(f_name) - 15
                 if self.friendly_scroll_direction == 1 and self.friendly_scroll_offset >= limit:
-                    self.friendly_scroll_offset = limit
+                    self.friendly_scroll_offset = float(limit)
                     self.friendly_scroll_direction = -1
                     needs_invalidate = True
                 elif self.friendly_scroll_direction == -1 and self.friendly_scroll_offset <= 0:
@@ -358,7 +366,7 @@ class ModelManagerUI:
             if len(name) > avail_width:
                 limit = len(name) - avail_width
                 if self.name_scroll_direction == 1 and self.name_scroll_offset >= limit:
-                    self.name_scroll_offset = limit
+                    self.name_scroll_offset = float(limit)
                     self.name_scroll_direction = -1
                     needs_invalidate = True
                 elif self.name_scroll_direction == -1 and self.name_scroll_offset <= 0:
@@ -376,9 +384,9 @@ class ModelManagerUI:
             if needs_invalidate:
                 self.app.invalidate()
 
-    def _get_models_data(self):
+    def _get_models_data(self) -> List[ModelData]:
         """Synchronous helper to gather model data."""
-        models = []
+        models: List[ModelData] = []
         
         if self.current_tab == "Cloud":
             # Claude Models
@@ -390,7 +398,7 @@ class ModelManagerUI:
                     "host": "Anthropic",
                     "backend": "claude",
                     "friendly_backend": "Claude",
-                    "size_gb": 0,
+                    "size_gb": 0.0,
                     "suitability": "vram", # Claude always works (cloud)
                     "path": None
                 })
@@ -399,7 +407,7 @@ class ModelManagerUI:
             local_models = get_available_models()
             for m_path in local_models:
                 full_path = LLAMA_MODELS_DIR / m_path
-                size_gb = 0
+                size_gb = 0.0
                 if full_path.exists():
                     size_gb = full_path.stat().st_size / (1024**3)
                 
@@ -429,7 +437,7 @@ class ModelManagerUI:
                 })
         return models
 
-    async def _fetch_models_task(self):
+    async def _fetch_models_task(self) -> None:
         """Async task to refresh models."""
         self.is_loading = True
         self.app.invalidate()
@@ -460,20 +468,20 @@ class ModelManagerUI:
             self.is_loading = False
             self.app.invalidate()
 
-    def refresh_models(self):
+    def refresh_models(self) -> None:
         if hasattr(self, 'app') and self.app.is_running:
             self.app.create_background_task(self._fetch_models_task())
         else:
             # Fallback (mostly for testing or non-running state)
             self.models_data = self._get_models_data()
 
-    def _get_model_list_cursor_position(self):
+    def _get_model_list_cursor_position(self) -> Point:
         row = self.selected_index - self.scroll_offset
         return Point(x=0, y=row)
 
-    def _get_header_text(self):
+    def _get_header_text(self) -> StyleAndTextTuples:
         tabs = ["Local", "Cloud"]
-        result = []
+        result: StyleAndTextTuples = []
         
         for t in tabs:
             display_t = f" {t} "
@@ -496,17 +504,17 @@ class ModelManagerUI:
             
         return result
 
-    def _get_status_text(self):
+    def _get_status_text(self) -> str:
         return " [Tab] Focus  [Enter] Select  [Del] Delete Local  [T] Downloader  [Esc] Quit"
 
-    def _get_model_list_text(self):
+    def _get_model_list_text(self) -> StyleAndTextTuples:
         if self.is_loading:
             return [("", " ⏳ Loading models...")]
             
         if not self.models_data:
-            return "No models found."
+            return [("", "No models found.")]
             
-        lines = []
+        lines: StyleAndTextTuples = []
         height = 12
         start = self.scroll_offset
         end = start + height
@@ -600,7 +608,7 @@ class ModelManagerUI:
                     line_len = len(text)
                     cache_key = (line_len, is_focused)
                     if cache_key not in self._style_cache:
-                        styles = []
+                        styles: List[str] = []
                         for col in range(line_len):
                             if col == 0 and is_focused:
                                 styles.append("bg:#ffccff #000000")
@@ -624,11 +632,11 @@ class ModelManagerUI:
             
         return lines
 
-    def _get_list_key_bindings(self):
+    def _get_list_key_bindings(self) -> KeyBindings:
         kb = KeyBindings()
         
         @kb.add("left")
-        def _(event):
+        def _(event: KeyPressEvent) -> None:
             # Toggle tabs
             self.current_tab = "Local" if self.current_tab == "Cloud" else "Cloud"
             self.selected_index = 0
@@ -638,7 +646,7 @@ class ModelManagerUI:
             event.app.invalidate()
 
         @kb.add("right")
-        def _(event):
+        def _(event: KeyPressEvent) -> None:
             # Toggle tabs
             self.current_tab = "Cloud" if self.current_tab == "Local" else "Local"
             self.selected_index = 0
@@ -648,7 +656,7 @@ class ModelManagerUI:
             event.app.invalidate()
 
         @kb.add("up")
-        def _(event):
+        def _(event: KeyPressEvent) -> None:
             if self.selected_index > 0:
                 self.selected_index -= 1
                 self.host_scroll_offset = 0
@@ -663,7 +671,7 @@ class ModelManagerUI:
                 event.app.invalidate()
                 
         @kb.add("down")
-        def _(event):
+        def _(event: KeyPressEvent) -> None:
             if self.selected_index < len(self.models_data) - 1:
                 self.selected_index += 1
                 self.host_scroll_offset = 0
@@ -678,13 +686,15 @@ class ModelManagerUI:
                 event.app.invalidate()
 
         @kb.add("enter")
-        def _(event):
+        def _(event: KeyPressEvent) -> None:
             if self.models_data:
                 model = self.models_data[self.selected_index]
                 event.app.exit(result=f"/model {model['id']}")
 
         @kb.add("delete")
-        def _(event):
+        def _(event: KeyPressEvent) -> None:
+            if not self.models_data:
+                return
             model = self.models_data[self.selected_index]
             if model['backend'] == 'llamacpp' and model['path']:
                 # For simplicity in this TUI, we'll just delete it if 'd' is pressed.
@@ -694,21 +704,21 @@ class ModelManagerUI:
                         model['path'].unlink()
                         # Also try to remove parent dir if empty (for HF style downloads)
                         parent = model['path'].parent
-                        if parent != LLAMA_MODELS_DIR and not any(parent.iterdir()):
+                        if parent != LLAMA_MODELS_DIR and parent.exists() and not any(parent.iterdir()):
                             parent.rmdir()
                         
                         self.refresh_models()
                         self.selected_index = min(self.selected_index, len(self.models_data) - 1)
-                except Exception as e:
+                except Exception:
                     pass
 
         @kb.add("t")
-        def _(event):
+        def _(event: KeyPressEvent) -> None:
             event.app.exit(result="/download")
         
         return kb
 
-    def _on_search(self, buff):
+    def _on_search(self, buff: Buffer) -> bool:
         # Handle /nick command internally to refresh UI without closing
         text = self.search_area.text.strip()
         if text.startswith("/nick"):
@@ -728,7 +738,7 @@ class ModelManagerUI:
             return False
         return True
 
-    def run(self):
+    def run(self) -> str | bool | None:
         return self.app.run()
 
     @property
@@ -745,6 +755,6 @@ class ModelManagerUI:
         # Total overhead: 2 (frame) + 2 (marker) + 21 + 13 + 18 + 15 + 2 = 71
         return max(1, total_width - 71)
 
-def run_model_manager_ui(current_model: str, current_backend: str):
+def run_model_manager_ui(current_model: str, current_backend: str) -> str | bool | None:
     ui = ModelManagerUI(current_model, current_backend)
     return ui.run()

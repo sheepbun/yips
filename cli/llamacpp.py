@@ -40,9 +40,9 @@ LLAMA_MODELS_DIR = Path.home() / ".lmstudio" / "models"
 LLAMA_DEFAULT_MODEL = "lmstudio-community/Qwen3-4B-Thinking-2507-GGUF/Qwen3-4B-Thinking-2507-Q4_K_M.gguf"
 LLAMA_SERVER_URL = os.environ.get("LLAMA_SERVER_URL", "http://localhost:8080")
 
-_server_process = None
-_current_model_path = None
-_current_strategy = None
+_server_process: subprocess.Popen[bytes] | None = None
+_current_model_path: str | None = None
+_current_strategy: str | None = None
 
 def is_llamacpp_running() -> bool:
     """Check if llama-server is responding."""
@@ -83,7 +83,7 @@ def start_llamacpp(model_path: str | None = None) -> bool:
         # Fallback to searching for the model
         found = False
         for gguf in LLAMA_MODELS_DIR.rglob("*.gguf"):
-            if model_path in str(gguf):
+            if model_path and model_path in str(gguf):
                 resolved_path = str(gguf)
                 found = True
                 break
@@ -119,7 +119,7 @@ def start_llamacpp(model_path: str | None = None) -> bool:
     # Define strategies: (name, list_of_flags)
     # We request 999 layers to force max GPU offload. 
     # llama.cpp will automatically fallback to CPU/RAM for layers that don't fit.
-    strategies = [
+    strategies: list[tuple[str, list[str]]] = [
         ("GPU (Auto-Offload)", ["-ngl", "999"]),
         ("Hybrid (Default)", []),
         ("CPU Only", ["-ngl", "0"]),

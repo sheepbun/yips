@@ -12,10 +12,11 @@ import sys
 import threading
 import time
 from pathlib import Path
-from typing import Any, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from types import FrameType
+    from prompt_toolkit import PromptSession
 
 from cli.color_utils import console
 from cli.config import (
@@ -42,8 +43,10 @@ class YipsAgent(
 ):
     """Main agent class managing conversation and autonomous tool execution."""
 
-    def __init__(self, prompt_session=None) -> None:
+    def __init__(self, prompt_session: "PromptSession[str] | None" = None) -> None:
         self.conversation_history: list[Message] = []
+        self.archived_history: list[Message] = []
+        self.running_summary = ""
         self.console = console
         self.backend_initialized = False
         
@@ -62,19 +65,19 @@ class YipsAgent(
         self.streaming_enabled = config.get("streaming", True)
 
         # Terminal resize handling
-        self.last_width: int | None = None
+        self.last_width: int = 0
         self.resize_pending: bool = False
         self._resize_timer: threading.Timer | None = None
 
-        # Session file tracking
         self.session_file_path: Path | None = None
-        self._session_created = False
+        self.session_created = False
         self.current_session_name: str | None = None
+        self.thinking_lines_shown = 0
 
         # Interactive session selection state
         self.session_selection_active = False
         self.session_selection_idx = 0
-        self.session_list: list[dict] = []
+        self.session_list: list[dict[str, Any]] = []
 
         # Prompt toolkit session for triggering redraws
         self.prompt_session = prompt_session
@@ -84,8 +87,8 @@ class YipsAgent(
             signal.signal(signal.SIGWINCH, self._handle_resize)
 
         # Determine backend and model
-        self.backend = saved_backend or "llamacpp"
-        self.current_model = saved_model
+        self.backend: str = saved_backend or "llamacpp"
+        self.current_model: str | None = saved_model
 
         if self.backend == "claude":
             self.use_claude_cli = True
@@ -95,7 +98,7 @@ class YipsAgent(
         else: # llamacpp (default and fallback for deprecated lmstudio)
             self.backend = "llamacpp"
             self.use_claude_cli = False
-            if not self.current_model or self.backend == "lmstudio":
+            if not self.current_model or cast(Any, saved_backend) == "lmstudio":
                 # If was using deprecated lmstudio, switch to llamacpp default
                 self.current_model = LLAMA_DEFAULT_MODEL
             
@@ -105,6 +108,9 @@ class YipsAgent(
                 self.context_size = get_optimal_context_size()
             except ImportError:
                 self.context_size = None
+
+        # Eagerly calculate token limits so the title box shows the correct max from the start
+        self.calculate_context_limits()
 
     @property
     def is_gui(self) -> bool:

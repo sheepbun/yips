@@ -2,20 +2,21 @@
 Backend communication logic for YipsAgent.
 """
 
+from __future__ import annotations
+
 import json
 import re
 import subprocess
-import sys
 import time
+from typing import Any, TYPE_CHECKING
+
 import requests
 from rich.text import Text
 from rich.live import Live
 from rich.console import Group
 
 from cli.color_utils import (
-    console,
     gradient_text,
-    blue_gradient_text,
     apply_gradient_to_text,
     get_yips_prefix,
     TOOL_COLOR,
@@ -26,7 +27,6 @@ from cli.config import (
 )
 from cli.llamacpp import (
     LLAMA_SERVER_URL,
-    LLAMA_DEFAULT_MODEL,
     LLAMA_SERVER_PATH,
     is_llamacpp_running,
     start_llamacpp,
@@ -44,11 +44,14 @@ from cli.ui_rendering import (
 )
 from cli.tool_execution import clean_response
 
+if TYPE_CHECKING:
+    from cli.type_defs import YipsAgentProtocol
+
 
 class AgentBackendMixin:
     """Mixin providing backend communication capabilities to YipsAgent."""
 
-    def initialize_backend(self) -> None:
+    def initialize_backend(self: YipsAgentProtocol) -> None:
         """Initialize backend after UI is displayed."""
         if getattr(self, 'backend_initialized', False):
             return
@@ -108,7 +111,7 @@ class AgentBackendMixin:
 
         self.backend_initialized = True
 
-    def check_and_prune_context(self, additional_text: str = "") -> None:
+    def check_and_prune_context(self: YipsAgentProtocol, additional_text: str = "") -> None:
         """Check if context exceeds limit and prune/summarize if necessary."""
         # Ensure limits are initialized
         if not hasattr(self, 'token_limits'):
@@ -120,7 +123,7 @@ class AgentBackendMixin:
         system_prompt = self.load_context()
         
         # Estimate total tokens: System + Summary + History + New Message
-        current_est = self._estimate_tokens(system_prompt, self.conversation_history)
+        current_est = self.estimate_tokens(system_prompt, self.conversation_history)
         if hasattr(self, 'running_summary') and self.running_summary:
             current_est += len(self.running_summary) // 3  # Conservative estimate
             
@@ -139,7 +142,7 @@ class AgentBackendMixin:
         prune_amount_tokens = self.token_limits.get("prune_amount", 4000)
         self.force_prune_context(prune_amount_tokens)
 
-    def force_prune_context(self, amount_tokens: int) -> None:
+    def force_prune_context(self: YipsAgentProtocol, amount_tokens: int) -> None:
         """Force prune the conversation history by a specific token amount."""
         pruned_tokens = 0
         
@@ -206,7 +209,7 @@ class AgentBackendMixin:
                     remaining_needed -= removed_tokens
                     pruned_tokens += removed_tokens
 
-    def get_response(self, message: str) -> str:
+    def get_response(self: YipsAgentProtocol, message: str) -> str:
         """Get response using available backend (llamacpp or Claude CLI)."""
         if not getattr(self, 'backend_initialized', False):
             return "[Error: Backend not initialized]"
@@ -236,7 +239,7 @@ class AgentBackendMixin:
         self.emit_gui_event("status", "idle")
         return response
 
-    def call_llamacpp(self, message: str) -> str:
+    def call_llamacpp(self: YipsAgentProtocol, message: str) -> str:
         """Call llama-server API using OpenAI-compatible endpoint with retries."""
         system_prompt = self.load_context()
         
@@ -245,7 +248,7 @@ class AgentBackendMixin:
         overflow_retry_count = 0
 
         while True: # Outer loop for context overflow retries
-            raw_messages = [{"role": "system", "content": system_prompt}]
+            raw_messages: list[dict[str, Any]] = [{"role": "system", "content": system_prompt}]
             
             # Inject Running Summary if available
             if hasattr(self, 'running_summary') and self.running_summary:
@@ -272,7 +275,7 @@ class AgentBackendMixin:
                 raw_messages.append({"role": "user", "content": message})
 
             # Ensure strict alternation for llama.cpp (required by Gemma-3 and others)
-            messages = []
+            messages: list[dict[str, Any]] = []
             for msg in raw_messages:
                 if not messages:
                     messages.append(msg)
@@ -284,13 +287,13 @@ class AgentBackendMixin:
                 else:
                     messages.append(msg)
 
-            if self.streaming_enabled and overflow_retry_count == 0:
+            if getattr(self, "streaming_enabled", True) and overflow_retry_count == 0:
                 # We only try streaming on the first pass. If we overflowed, we fall back to blocking for stability (or we could just stream again)
                 try:
                     # Note: Streaming method doesn't currently handle overflow retries. 
                     # If it fails with 400, it returns an error string.
                     # Ideally we should refactor stream to also handle it, but for now let's use the blocking call for retries if streaming fails with context error.
-                    result = self._stream_llamacpp(messages)
+                    result = self.stream_llamacpp(messages)
                     if not result.startswith("[Error from llama.cpp (400)"):
                         return result
                     # If it WAS a 400 error, fall through to blocking retry logic
@@ -298,9 +301,10 @@ class AgentBackendMixin:
                     self.console.print(f"[yellow]Streaming failed ({e}), using non-streaming mode[/yellow]")
 
             last_error = ""
+            attempt = 0
             for attempt in range(3):
                 try:
-                    est_tokens = self._estimate_tokens(system_prompt, messages)
+                    est_tokens = self.estimate_tokens(system_prompt, messages)
                     
                     loading_msg = "Waiting for llama.cpp response..."
                     if attempt > 0:
@@ -392,7 +396,7 @@ class AgentBackendMixin:
             # If we hit the break, we continue to outer loop
             pass
 
-    def _extract_thinking_points(self, thinking_text: str, is_streaming: bool = False) -> list[str]:
+    def extract_thinking_points(self: YipsAgentProtocol, thinking_text: str, is_streaming: bool = False) -> list[str]:
         """Extract summary points from thinking text (mirrors render_thinking_block logic)."""
         text = thinking_text.strip()
         if text.startswith("<think>"):
@@ -421,7 +425,7 @@ class AgentBackendMixin:
         ]
 
         raw_parts = re.split(r'(?:(?<=[.!?])\s+)|(?:\n+)', text)
-        points = []
+        points: list[str] = []
 
         last_char = text[-1] if text else ""
         is_text_finished = last_char in ('.', '!', '?', '\n')
@@ -447,12 +451,12 @@ class AgentBackendMixin:
 
         return points
 
-    def _stream_llamacpp(self, messages: list[dict]) -> str:
+    def stream_llamacpp(self: YipsAgentProtocol, messages: list[dict[str, Any]]) -> str:
         """Stream response from llama-server API with real-time display."""
         try:
             prefix = get_yips_prefix()
             indent = " " * len(prefix)
-            all_content = "".join([m["content"] for m in messages])
+            all_content = "".join([str(m["content"]) for m in messages])
             est_tokens = len(all_content) // 4
             spinner = PulsingSpinner("Thinking...", token_count=est_tokens)
 
@@ -473,7 +477,7 @@ class AgentBackendMixin:
 
             accumulated_text = ""
             in_thinking_block = False
-            self._thinking_lines_shown = 0
+            self.thinking_lines_shown = 0
             
             with Live(spinner, console=self.console, refresh_per_second=20, transient=True) as live:
                 for line in response.iter_lines():
@@ -520,27 +524,27 @@ class AgentBackendMixin:
                                         live.refresh()
                                         self.console.print(render_thinking_block(thinking_part))
                                         time.sleep(0.3)
-                                        self._thinking_lines_shown = 0
+                                        self.thinking_lines_shown = 0
                                 accumulated_text += text
                         if accumulated_text:
-                            renderables = []
+                            renderables: list[Any] = []
                             if in_thinking_block:
                                 start_idx = accumulated_text.rfind("<think>")
                                 if start_idx != -1:
                                     thinking_part = accumulated_text[start_idx:]
 
                                     # Show only the latest single line during streaming
-                                    current_points = self._extract_thinking_points(thinking_part, is_streaming=True)
-                                    new_line_count = len(current_points) - self._thinking_lines_shown
+                                    current_points = self.extract_thinking_points(thinking_part, is_streaming=True)
+                                    new_line_count = len(current_points) - self.thinking_lines_shown
 
-                                    if new_line_count > 0 and self._thinking_lines_shown > 0:
+                                    if new_line_count > 0 and self.thinking_lines_shown > 0:
                                         # Pause on the previous line before switching
-                                        pause = calculate_reading_pause(current_points[self._thinking_lines_shown - 1])
+                                        pause = calculate_reading_pause(current_points[self.thinking_lines_shown - 1])
                                         time.sleep(pause)
-                                        self._thinking_lines_shown = len(current_points)
+                                        self.thinking_lines_shown = len(current_points)
 
                                     elif new_line_count > 0:
-                                        self._thinking_lines_shown = len(current_points)
+                                        self.thinking_lines_shown = len(current_points)
 
                                     # Display only the most recent line
                                     latest_idx = max(1, len(current_points))
@@ -578,7 +582,7 @@ class AgentBackendMixin:
                     thinking_part = accumulated_text[start_idx:end_idx]
                     self.console.print(render_thinking_block(thinking_part))
                     time.sleep(0.3)
-                    self._thinking_lines_shown = 0
+                    self.thinking_lines_shown = 0
             cleaned_text = clean_response(accumulated_text)
             if cleaned_text:
                 final_text = Text()
@@ -592,11 +596,11 @@ class AgentBackendMixin:
         except Exception as e:
             return f"[Error streaming from llama.cpp: {e}]"
 
-    def call_claude_cli(self, message: str) -> str:
+    def call_claude_cli(self: YipsAgentProtocol, message: str) -> str:
         """Fallback: Call Claude Code CLI."""
         system_prompt = self.load_context()
         
-        history_parts = []
+        history_parts: list[str] = []
         
         # Inject Running Summary
         if hasattr(self, 'running_summary') and self.running_summary:
@@ -618,26 +622,26 @@ class AgentBackendMixin:
             history_parts.append(f"User: {message}")
         history_text = "\n\n".join(history_parts)
         full_prompt = f"{system_prompt}\n\n# CONVERSATION HISTORY\n\n{history_text}"
-        if self.streaming_enabled:
-            try: return self._stream_claude_cli(full_prompt)
+        if getattr(self, "streaming_enabled", True):
+            try: return self.stream_claude_cli(full_prompt)
             except Exception as e:
                 self.console.print(f"[yellow]Streaming failed ({e}), using non-streaming mode[/yellow]")
         try:
-            cmd = [CLAUDE_CLI_PATH, "-p", "--model", self.current_model]
+            cmd = [CLAUDE_CLI_PATH, "-p", "--model", str(self.current_model)]
             if self.verbose_mode: cmd.append("--verbose")
-            est_tokens = self._estimate_tokens("", full_prompt)
+            est_tokens = self.estimate_tokens("", full_prompt)
             with show_loading("Waiting for Claude response...", token_count=est_tokens):
                 result = subprocess.run(cmd, input=full_prompt, capture_output=True, text=True, timeout=120)
-            if self.verbose_mode and result.stderr: self._display_claude_tool_calls(result.stderr)
+            if self.verbose_mode and result.stderr: self.display_claude_tool_calls(result.stderr)
             if result.returncode == 0: return result.stdout.strip()
             return f"[Error from Claude CLI: {result.stderr}]"
         except subprocess.TimeoutExpired: return "[Error: Claude CLI timed out after 120 seconds]"
         except Exception as e: return f"[Error calling Claude CLI: {e}]"
 
-    def _stream_claude_cli(self, full_prompt: str) -> str:
+    def stream_claude_cli(self: YipsAgentProtocol, full_prompt: str) -> str:
         """Stream response from Claude CLI with real-time display."""
         try:
-            cmd = [CLAUDE_CLI_PATH, "-p", "--model", self.current_model]
+            cmd = [CLAUDE_CLI_PATH, "-p", "--model", str(self.current_model)]
             if self.verbose_mode: cmd.append("--verbose")
             process = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
             assert process.stdin is not None
@@ -682,12 +686,12 @@ class AgentBackendMixin:
                 self.console.print(final_text)
             stderr_output = process.stderr.read()
             process.wait()
-            if self.verbose_mode and stderr_output: self._display_claude_tool_calls(stderr_output)
+            if self.verbose_mode and stderr_output: self.display_claude_tool_calls(stderr_output)
             if process.returncode == 0: return accumulated_text.strip()
             return f"[Error from Claude CLI: {stderr_output}]"
         except Exception as e: return f"[Error streaming from Claude CLI: {e}]"
 
-    def _display_claude_tool_calls(self, stderr_output: str) -> None:
+    def display_claude_tool_calls(self: YipsAgentProtocol, stderr_output: str) -> None:
         """Parse and display Claude Code tool calls from stderr."""
         lines = stderr_output.split('\n')
         for raw_line in lines:

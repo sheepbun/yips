@@ -5,39 +5,38 @@ Interactive TUI for downloading models from Hugging Face Hub.
 import os
 import shutil
 import asyncio
-from typing import List, Dict, Optional, Tuple
+import typing
+from typing import Optional, Any, Union
 from datetime import datetime
 from pathlib import Path
 
-from huggingface_hub import HfApi
-from huggingface_hub.utils import RepositoryNotFoundError
+from huggingface_hub import HfApi, hf_hub_download  # type: ignore[reportUnknownVariableType]
 
 from prompt_toolkit import Application
 from prompt_toolkit.output.color_depth import ColorDepth
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.styles import Style
-from prompt_toolkit.formatted_text import HTML, Template
-from prompt_toolkit.filters import Condition
+from prompt_toolkit.formatted_text import AnyFormattedText, to_formatted_text, StyleAndTextTuples
+from prompt_toolkit.key_binding.key_processor import KeyPressEvent
 from prompt_toolkit.layout.containers import (
     HSplit,
     VSplit,
     Window,
     FloatContainer,
     Float,
-    ConditionalContainer,
     DynamicContainer,
+    AnyContainer,
+    WindowAlign,
 )
-from prompt_toolkit.layout.controls import FormattedTextControl, BufferControl
+from prompt_toolkit.layout.controls import FormattedTextControl
+from prompt_toolkit.layout.dimension import AnyDimension
 from prompt_toolkit.data_structures import Point
 from prompt_toolkit.layout.layout import Layout
 from prompt_toolkit.layout.menus import MultiColumnCompletionsMenu
 from prompt_toolkit.widgets import (
     Frame,
     TextArea,
-    Label,
-    Button,
     Box,
-    RadioList,
 )
 from prompt_toolkit.widgets.base import Border
 from prompt_toolkit.formatted_text.utils import fragment_list_to_text
@@ -49,25 +48,21 @@ from cli.color_utils import (
     GRADIENT_PINK,
     GRADIENT_YELLOW,
     GRADIENT_BLUE,
-    GRADIENT_BLUE_DARK,
-    TOOL_COLOR,
-    PROMPT_COLOR,
 )
 
-from cli.ui_rendering import show_loading
 from cli.llamacpp import LLAMA_MODELS_DIR
 from cli.completer import SlashCommandCompleter
 
 class CustomFrame(Frame):
     def __init__(
         self,
-        body,
-        title="",
-        style="",
-        width=None,
-        height=None,
-        key_bindings=None,
-        modal=False,
+        body: AnyContainer,
+        title: AnyFormattedText = "",
+        style: str = "",
+        width: AnyDimension = None,
+        height: AnyDimension = None,
+        key_bindings: Optional[KeyBindings] = None,
+        modal: bool = False,
     ) -> None:
         self.title = title
         self.body = body
@@ -77,7 +72,7 @@ class CustomFrame(Frame):
         # and re-render the top row with correct gradients if needed.
         self.container = DynamicContainer(self._get_container)
 
-    def _get_diag_style(self, row_idx, col_idx, total_rows, total_cols):
+    def _get_diag_style(self, row_idx: int, col_idx: int, total_rows: int, total_cols: int) -> str:
         """Calculate gradient style. Use horizontal gradient for all border characters to match Yips style."""
         if self.is_dimmed:
             return "#444444"
@@ -88,20 +83,20 @@ class CustomFrame(Frame):
         r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, progress)
         return f"#{r:02x}{g:02x}{b:02x}"
 
-    def _get_container(self):
+    def _get_container(self) -> AnyContainer:
         # Determine total rows for gradient calculation
         total_rows = 15 
         total_cols = console.width or 80
 
         # Title formatting: "Yips" (gradient) + " Model Downloader" (blue)
-        title_text = []
+        title_text: StyleAndTextTuples = []
         prefix = "╭─── "
         for i, char in enumerate(prefix):
             style = self._get_diag_style(0, i, total_rows, total_cols)
             title_text.append((style, char))
         
         # Split title for specific styling
-        full_title = fragment_list_to_text(self.title) if not isinstance(self.title, str) else self.title
+        full_title = fragment_list_to_text(to_formatted_text(self.title))
         
         if "Yips" in full_title:
             parts = full_title.split("Yips", 1)
@@ -142,8 +137,8 @@ class CustomFrame(Frame):
         title_len += 1
 
         # Fill the rest of the top line with gradient characters
-        top_elements = []
-        top_elements.append(Window(content=FormattedTextControl(title_text), height=1, dont_extend_width=True))
+        top_elements: list[AnyContainer] = []
+        top_elements.append(Window(content=FormattedTextControl(typing.cast(Any, title_text)), height=1, dont_extend_width=True))
         
         remaining = total_cols - title_len - 1 # -1 for the corner
         for i in range(remaining):
@@ -154,7 +149,7 @@ class CustomFrame(Frame):
                                  style=partial(self._get_diag_style, 0, total_cols - 1, total_rows, total_cols)))
 
         # Bottom row
-        bottom_elements = []
+        bottom_elements: list[AnyContainer] = []
         bottom_elements.append(Window(width=1, height=1, char="╰", 
                                     style=partial(self._get_diag_style, total_rows-1, 0, total_rows, total_cols)))
         for i in range(1, total_cols - 1):
@@ -186,7 +181,8 @@ def get_system_ram_gb() -> float:
                     kb = int(parts[1])
                     return kb / (1024 * 1024)
     except Exception:
-        return 8.0 # Fallback assumption
+        pass
+    return 8.0 # Fallback assumption
 
 def get_vram_gb() -> float:
     """Get total VRAM in GB (best effort for NVIDIA/AMD)."""
@@ -209,14 +205,14 @@ def get_vram_gb() -> float:
     # Check for AMD (amdgpu)
     try:
         import glob
-        total_vram = 0
+        total_vram_bytes = 0
         found = False
         for path in glob.glob("/sys/class/drm/card*/device/mem_info_vram_total"):
             with open(path, 'r') as f:
-                total_vram += int(f.read())
+                total_vram_bytes += int(f.read())
             found = True
         if found:
-            return total_vram / (1024 * 1024 * 1024)
+            return total_vram_bytes / (1024 * 1024 * 1024)
     except Exception:
         pass
 
@@ -227,19 +223,20 @@ def get_disk_free_gb(path: str) -> float:
     try:
         if not os.path.exists(path):
             os.makedirs(path, exist_ok=True)
-        total, used, free = shutil.disk_usage(path)
+        _, _, free = shutil.disk_usage(path)
         return free / (1024 * 1024 * 1024)
     except Exception:
-        return 10.0 # Fallback
+        pass
+    return 10.0 # Fallback
 
 SYSTEM_RAM_GB = get_system_ram_gb()
 SYSTEM_VRAM_GB = get_vram_gb()
 TOTAL_MEM_GB = SYSTEM_RAM_GB + SYSTEM_VRAM_GB
 DISK_FREE_GB = get_disk_free_gb(str(LLAMA_MODELS_DIR))
 
-def can_run_model(size_bytes: int) -> Tuple[bool, str]:
+def can_run_model(size_bytes: Optional[int]) -> tuple[bool, str]:
     """Check if model can run based on size vs RAM/Disk."""
-    if not size_bytes:
+    if size_bytes is None:
         return True, "Unknown Size"
         
     size_gb = size_bytes / (1024 * 1024 * 1024)
@@ -258,17 +255,17 @@ def can_run_model(size_bytes: int) -> Tuple[bool, str]:
 # --- HF API Wrapper ---
 
 class HFModelManager:
-    _cache = {} # Global cache for precaching: {sort_mode: [models]}
-    _is_precaching = False
+    _cache: dict[str, list[dict[str, Any]]] = {} # Global cache for precaching: {sort_mode: [models]}
+    _is_precaching: bool = False
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.api = HfApi()
         
     def list_gguf_models(self, 
                         sort: str = "downloads", 
                         limit: int = 50, 
-                        search: str = None,
-                        author: str = None) -> List[Dict]:
+                        search: Optional[str] = None,
+                        author: Optional[str] = None) -> list[dict[str, Any]]:
         """List GGUF models from HF, using cache if available and no search query."""
         
         # Mapping UI sort to HF API sort
@@ -284,7 +281,7 @@ class HFModelManager:
         if not search and not author and sort in self._cache:
             return self._cache[sort]
 
-        params = {
+        params: dict[str, Any] = {
             "filter": "gguf",
             "sort": sort_key,
             "limit": limit,
@@ -297,7 +294,7 @@ class HFModelManager:
 
         try:
             models = self.api.list_models(**params)
-            results = []
+            results: list[dict[str, Any]] = []
             for m in models:
                 # Filter for text-generation related models if it's a general list
                 # but be lenient to include models with no pipeline_tag (like many GGUF quants)
@@ -315,7 +312,7 @@ class HFModelManager:
                         continue
 
                 results.append({
-                    "id": m.id,
+                    "id": getattr(m, 'id', "Unknown"),
                     "downloads": getattr(m, 'downloads', 0) or 0,
                     "likes": getattr(m, 'likes', 0) or 0,
                     "last_modified": getattr(m, 'lastModified', None),
@@ -327,18 +324,18 @@ class HFModelManager:
                 self._cache[sort] = results
                 
             return results
-        except Exception as e:
+        except Exception:
             return []
 
     @classmethod
-    def precache_background(cls):
+    def precache_background(cls) -> None:
         """Start a background thread to fetch all tab data."""
         if cls._is_precaching:
             return
         cls._is_precaching = True
         
         import threading
-        def _task():
+        def _task() -> None:
             manager = HFModelManager()
             # Precache all tabs
             for sort in ["Downloads", "Trending", "Updated"]:
@@ -347,14 +344,14 @@ class HFModelManager:
             
         threading.Thread(target=_task, daemon=True).start()
 
-    def get_model_files(self, model_id: str) -> List[Dict]:
+    def get_model_files(self, model_id: str) -> list[dict[str, Any]]:
         """Get GGUF files for a specific model."""
         try:
             # Use list_repo_tree with recursive=True to find all .gguf files
             files_info = [f for f in self.api.list_repo_tree(model_id, recursive=True) 
                          if f.path.endswith(".gguf")]
             
-            results = []
+            results: list[dict[str, Any]] = []
             for f in files_info:
                 # Calculate quantization from name (e.g. Q4_K_M)
                 quant = "Unknown"
@@ -385,18 +382,18 @@ class HFModelManager:
             results.sort(key=lambda x: x['size'] if x['size'] else 0)
             return results
             
-        except Exception as e:
+        except Exception:
             return []
 
 
 # --- TUI Implementation ---
 
 class DownloadUI:
-    def __init__(self):
+    def __init__(self) -> None:
         self.manager = HFModelManager()
-        self.models_data = []
-        self.selected_model_id = None
-        self.files_data = []
+        self.models_data: list[dict[str, Any]] = []
+        self.selected_model_id: Optional[str] = None
+        self.files_data: list[dict[str, Any]] = []
         self.is_dimmed = False
         self.is_loading = False
         
@@ -438,7 +435,7 @@ class DownloadUI:
             accept_handler=self._on_search
         )
         self.search_area.buffer.on_text_changed += self._on_text_changed
-        self._search_task = None
+        self._search_task: Optional[asyncio.Task[None]] = None
         
         # Tabs
         self.tab_container = Window(
@@ -470,8 +467,8 @@ class DownloadUI:
             get_cursor_position=self._get_file_list_cursor_position
         )
         self.selected_file_index = 0
-        self._refresh_task = None
-        self._style_cache = {} # Cache for gradient styles
+        self._refresh_task: Optional[asyncio.Task[None]] = None
+        self._style_cache: dict[tuple[int, bool], list[str]] = {} # Cache for gradient styles
         
         # Layout construction
         
@@ -485,7 +482,7 @@ class DownloadUI:
                 Window(
                     FormattedTextControl(f"RAM+VRAM: {TOTAL_MEM_GB:.1f}GB | Disk: {DISK_FREE_GB:.1f}GB "), 
                     style="class:status", 
-                    align="right", 
+                    align=WindowAlign.RIGHT, 
                     dont_extend_width=True
                 ),
             ], height=1),
@@ -512,7 +509,7 @@ class DownloadUI:
         ])
         
         # We need a FloatContainer to show the completion menu (and other popups)
-        self.floats = [
+        self.floats: list[Float] = [
             Float(xcursor=True,
                   ycursor=True,
                   content=MultiColumnCompletionsMenu(suggested_max_column_width=20))
@@ -527,7 +524,7 @@ class DownloadUI:
         self.kb = KeyBindings()
         self._setup_global_bindings()
         
-        self.app = Application(
+        self.app: Application[Any] = Application(
             layout=self.layout,
             key_bindings=self.kb,
             style=self.style,
@@ -537,26 +534,24 @@ class DownloadUI:
             before_render=self._on_render
         )
 
-    def _on_render(self, _app):
+    def _on_render(self, _app: Application[Any]) -> None:
         """Start background tasks on first render."""
         if not hasattr(self, '_task_started'):
-            self._task_started = True
+            setattr(self, '_task_started', True)
             self.app.create_background_task(self._initial_load())
 
-    def _get_model_list_cursor_position(self):
+    def _get_model_list_cursor_position(self) -> Optional[Point]:
         row = self.selected_model_index - self.list_scroll_offset
         return Point(x=0, y=row)
 
-    def _get_file_list_cursor_position(self):
+    def _get_file_list_cursor_position(self) -> Optional[Point]:
         # The file list has a header of 2 lines
         return Point(x=0, y=self.selected_file_index + 2)
 
-    def _get_tabs_text(self):
+    def _get_tabs_text(self) -> list[tuple[str, str]]:
         tabs = ["Most Downloaded", "Top Rated", "Newest"]
-        result = []
-        total_cols = console.width or 80
+        result: list[tuple[str, str]] = []
         
-        current_pos = 0
         for t in tabs:
             display_t = f" {t} "
             if t == self.current_tab:
@@ -573,29 +568,26 @@ class DownloadUI:
                 result.append(("class:tab.inactive", display_t))
             
             result.append(("", " "))
-            current_pos += len(display_t) + 1
         return result
 
-    def _get_status_text(self):
+    def _get_status_text(self) -> str:
         if self.active_view == "model_list":
             return " [Tab] Focus  [Enter] Select  [←/→] Sort By  [Esc] Quit"
         elif self.active_view == "file_list":
             return " [Enter] Download  [Esc] Back"
         return ""
 
-    def _get_model_list_text(self):
+    def _get_model_list_text(self) -> Union[StyleAndTextTuples, str]:
         if self.is_loading:
             return [("", " ⏳ Loading models from Hugging Face...")]
 
         if not self.models_data:
             return "No models found."
             
-        lines = []
+        lines: list[Any] = []
         height = 12
         start = self.list_scroll_offset
         end = start + height
-        total_cols = console.width or 80
-        total_rows = 15 # Approximate total rows for gradient
         
         visible_items = self.models_data[start:end]
         is_focused = self.layout.has_focus(self.model_list_control)
@@ -604,17 +596,19 @@ class DownloadUI:
             real_idx = start + i
             is_selected = (real_idx == self.selected_model_index)
             
-            name = model['id']
+            name = str(model.get('id', 'Unknown'))
             if len(name) > 50: name = name[:47] + "..."
             
-            downloads = f"{model['downloads']/1000:.1f}k" if model['downloads'] > 1000 else str(model['downloads'])
+            downloads_val = model.get('downloads', 0)
+            downloads = f"{downloads_val/1000:.1f}k" if downloads_val > 1000 else str(downloads_val)
             
             last_mod = "Unknown"
-            if model['last_modified']:
-                if isinstance(model['last_modified'], datetime):
-                    last_mod = model['last_modified'].strftime('%Y-%m-%d')
+            if model.get('last_modified'):
+                m_date = model['last_modified']
+                if isinstance(m_date, datetime):
+                    last_mod = m_date.strftime('%Y-%m-%d')
                 else:
-                    last_mod = str(model['last_modified'])[:10]
+                    last_mod = str(m_date)[:10]
 
             cursor = ">" if is_selected else " "
             text = f"{cursor} {name:<50} | ↓ {downloads:<6} | {last_mod}"
@@ -626,7 +620,7 @@ class DownloadUI:
                     line_len = len(text)
                     cache_key = (line_len, is_focused)
                     if cache_key not in self._style_cache:
-                        styles = []
+                        styles: list[str] = []
                         for col in range(line_len):
                             if col == 0 and is_focused:
                                 styles.append("bg:#ffccff #000000")
@@ -643,31 +637,29 @@ class DownloadUI:
             else:
                 lines.append(("", text + "\n"))
             
-        return lines
+        return to_formatted_text(lines)
 
-    def _get_file_list_text(self):
+    def _get_file_list_text(self) -> Union[StyleAndTextTuples, str]:
         if not self.files_data:
             return "No compatible files found."
             
-        lines = []
+        lines: list[Any] = []
         lines.append(("", f"Select quantization for {self.selected_model_id}:\n\n"))
-        total_cols = console.width or 80
-        total_rows = 15
         is_focused = self.layout.has_focus(self.file_list_control)
         
         for i, f in enumerate(self.files_data):
             is_selected = (i == self.selected_file_index)
             
-            size_val = f['size'] or 0
+            size_val = f.get('size') or 0
             size_gb = size_val / (1024*1024*1024)
-            fname = f['filename']
+            fname = str(f.get('filename', 'Unknown'))
             if "/" in fname: fname = fname.split("/")[-1]
             
-            status = "OK" if f['can_run'] else "⚠️ TOO LARGE"
-            status_style = "fg:ansired" if not f['can_run'] else "fg:ansigreen"
+            status = "OK" if f.get('can_run') else "⚠️ TOO LARGE"
+            status_style = "fg:ansired" if not f.get('can_run') else "fg:ansigreen"
             
             cursor = ">" if is_selected else " "
-            text = f"{cursor} {fname:<40} | {f['quant']:<15} | {size_gb:.1f} GB | "
+            text = f"{cursor} {fname:<40} | {f.get('quant', 'Unknown'):<15} | {size_gb:.1f} GB | "
             
             if is_selected:
                 full_selected_text = text + status
@@ -677,7 +669,7 @@ class DownloadUI:
                     line_len = len(full_selected_text)
                     cache_key = (line_len, is_focused)
                     if cache_key not in self._style_cache:
-                        styles = []
+                        styles: list[str] = []
                         for col in range(line_len):
                             if col == 0 and is_focused:
                                 styles.append("bg:#ffccff #000000")
@@ -695,29 +687,31 @@ class DownloadUI:
                 lines.append(("", text))
                 lines.append((status_style, f"{status}\n"))
             
-        return lines
-            
-        return lines
+        return to_formatted_text(lines)
 
-    def _setup_global_bindings(self):
+    def _setup_global_bindings(self) -> None:
         @self.kb.add("escape")
-        def _(event):
+        def _(event: KeyPressEvent) -> None:
             # Apply dimmed style for "greyed out" look on exit
             self.is_dimmed = True
+            
+            # Type safe access to containers
+            root_container = typing.cast(Any, self.layout.container)
+            
             # Find the CustomFrame(s) and dim them
-            for container in self.layout.container.get_children():
-                if isinstance(container, CustomFrame):
-                    container.is_dimmed = True
-                # Recursive search if needed, but here they are top-level
+            if hasattr(root_container, 'get_children'):
+                for container in root_container.get_children():
+                    if isinstance(container, CustomFrame):
+                        container.is_dimmed = True
             
             # If the layout is currently showing a popup, it's a FloatContainer
-            if isinstance(self.layout.container, FloatContainer):
-                for f in self.layout.container.floats:
+            if isinstance(root_container, FloatContainer):
+                for f in root_container.floats:
                     if isinstance(f.content, CustomFrame):
                         f.content.is_dimmed = True
                 # Also dim the base content
-                if isinstance(self.layout.container.content, CustomFrame):
-                    self.layout.container.content.is_dimmed = True
+                if isinstance(root_container.content, CustomFrame):
+                    root_container.content.is_dimmed = True
 
             dim_style = Style.from_dict({
                 "frame.border": "#444444", 
@@ -735,17 +729,17 @@ class DownloadUI:
             event.app.exit()
             
         @self.kb.add("tab")
-        def _(event):
+        def _(event: KeyPressEvent) -> None:
             if self.app.layout.has_focus(self.search_area):
                 self.app.layout.focus(self.model_list_control)
             else:
                 self.app.layout.focus(self.search_area)
 
-    def _get_list_key_bindings(self):
+    def _get_list_key_bindings(self) -> KeyBindings:
         kb = KeyBindings()
         
         @kb.add("left")
-        def _(event):
+        def _(event: KeyPressEvent) -> None:
             # Cycle tabs left
             tabs = ["Most Downloaded", "Top Rated", "Newest"]
             curr_idx = tabs.index(self.current_tab)
@@ -754,7 +748,7 @@ class DownloadUI:
             event.app.invalidate()
 
         @kb.add("right")
-        def _(event):
+        def _(event: KeyPressEvent) -> None:
             # Cycle tabs right
             tabs = ["Most Downloaded", "Top Rated", "Newest"]
             curr_idx = tabs.index(self.current_tab)
@@ -763,7 +757,7 @@ class DownloadUI:
             event.app.invalidate()
         
         @kb.add("up")
-        def _(event):
+        def _(event: KeyPressEvent) -> None:
             if self.selected_model_index > 0:
                 self.selected_model_index -= 1
                 # Scroll up if needed
@@ -772,7 +766,7 @@ class DownloadUI:
                 event.app.invalidate()
                 
         @kb.add("down")
-        def _(event):
+        def _(event: KeyPressEvent) -> None:
             if self.selected_model_index < len(self.models_data) - 1:
                 self.selected_model_index += 1
                 # Scroll down if needed
@@ -783,29 +777,31 @@ class DownloadUI:
                 event.app.invalidate()
 
         @kb.add("enter")
-        def _(event):
+        def _(event: KeyPressEvent) -> None:
             if self.models_data:
-                self.open_file_selection(self.models_data[self.selected_model_index]['id'])
+                mid = str(self.models_data[self.selected_model_index].get('id', ''))
+                if mid:
+                    self.open_file_selection(mid)
         
         return kb
 
-    def _get_file_list_key_bindings(self):
+    def _get_file_list_key_bindings(self) -> KeyBindings:
         kb = KeyBindings()
         
         @kb.add("up")
-        def _(event):
+        def _(event: KeyPressEvent) -> None:
             if self.selected_file_index > 0:
                 self.selected_file_index -= 1
                 event.app.invalidate()
             
         @kb.add("down")
-        def _(event):
+        def _(event: KeyPressEvent) -> None:
             if self.selected_file_index < len(self.files_data) - 1:
                 self.selected_file_index += 1
                 event.app.invalidate()
             
         @kb.add("escape")
-        def _(event):
+        def _(event: KeyPressEvent) -> None:
             # Close popup
             self.active_view = "model_list"
             # Remove the popup float (last one added)
@@ -814,10 +810,10 @@ class DownloadUI:
             self.app.layout.focus(self.model_list_control)
 
         @kb.add("enter")
-        def _(event):
+        def _(event: KeyPressEvent) -> None:
             if self.files_data:
                 selected = self.files_data[self.selected_file_index]
-                if not selected['can_run']:
+                if not selected.get('can_run'):
                     # User asked to "not populate" bad ones,
                     # but we are showing them with a warning status.
                     # We will block selection to be safe.
@@ -828,7 +824,7 @@ class DownloadUI:
         
         return kb
 
-    def _on_text_changed(self, _):
+    def _on_text_changed(self, _: Any) -> None:
         """Triggered on every keystroke in the search bar."""
         self.search_query = self.search_area.text
         
@@ -847,7 +843,7 @@ class DownloadUI:
             # Fallback if no loop is available (unlikely in prompt_toolkit 3)
             pass
 
-    async def _fetch_models(self, sort_mode, query):
+    async def _fetch_models(self, sort_mode: str, query: str) -> None:
         """Execute the API call in background."""
         self.is_loading = True
         try:
@@ -865,7 +861,7 @@ class DownloadUI:
             self.is_loading = False
             self.app.invalidate()
 
-    async def _do_live_search(self):
+    async def _do_live_search(self) -> None:
         """Async task to debounce and fetch results."""
         try:
             await asyncio.sleep(0.3) # Debounce delay
@@ -886,7 +882,7 @@ class DownloadUI:
         except asyncio.CancelledError:
             pass # Task was cancelled by a newer keystroke
 
-    def _on_search(self, buff):
+    def _on_search(self, buff: Any) -> bool:
         text = self.search_area.text.strip()
         if text.startswith("/"):
             self.app.exit(result=text)
@@ -902,7 +898,7 @@ class DownloadUI:
             
         return True
 
-    def refresh_data(self):
+    def refresh_data(self) -> None:
         """Trigger a refresh of the data."""
         if self.search_query.lstrip().startswith("/"):
             return
@@ -935,7 +931,7 @@ class DownloadUI:
         except Exception:
             self.models_data = []
 
-    def open_file_selection(self, model_id):
+    def open_file_selection(self, model_id: str) -> None:
         self.selected_model_id = model_id
         self.active_view = "file_list"
         
@@ -961,16 +957,16 @@ class DownloadUI:
         )
         self.app.layout.focus(self.file_list_control)
 
-    async def _initial_load(self):
+    async def _initial_load(self) -> None:
         """Initial load task."""
         self.refresh_data()
 
-    def run(self):
+    def run(self) -> Any:
         # Initial fetch handled via on_startup to be async
         return self.app.run()
 
 
-def run_download_ui():
+def run_download_ui() -> Optional[Union[str, dict[str, Any]]]:
     """Entry point."""
     ui = DownloadUI()
     result = ui.run()
@@ -980,33 +976,39 @@ def run_download_ui():
         
     if result:
         # Download the file
-        file_info = result
+        file_info: dict[str, Any] = result
         model_id = ui.selected_model_id
-        filename = file_info['filename']
+        if not model_id:
+            return None
+            
+        filename = str(file_info.get('filename', ''))
+        if not filename:
+            return None
         
         console.print(f"[cyan]Downloading {filename} from {model_id}...[/cyan]")
         
-        from huggingface_hub import hf_hub_download
         try:
             local_dir = LLAMA_MODELS_DIR / model_id
             
-            path = hf_hub_download(
+            # hf_hub_download returns a str by default
+            # Note: local_dir_use_symlinks is removed in newer HF Hub versions
+            downloaded_path = hf_hub_download(
                 repo_id=model_id,
                 filename=filename,
-                local_dir=local_dir,
-                local_dir_use_symlinks=False
+                local_dir=local_dir
             )
             
-            console.print(f"[green]Successfully downloaded to:[/green] {path}")
+            console.print(f"[green]Successfully downloaded to:[/green] {downloaded_path}")
             # Show friendly path relative to home if possible
-            display_path = str(path)
+            display_path = str(downloaded_path)
             if str(Path.home()) in display_path:
                 display_path = display_path.replace(str(Path.home()), "~")
                 
-            console.print(f"[dim]To use this model:[/dim] [bold]/model {model_id}/{os.path.basename(path)}[/bold]")
+            console.print(f"[dim]To use this model:[/dim] [bold]/model {model_id}/{os.path.basename(downloaded_path)}[/bold]")
             
         except Exception as e:
             console.print(f"[red]Download failed: {e}[/red]")
+    return None
 
 if __name__ == "__main__":
     from pathlib import Path # Ensure Path is available in __main__

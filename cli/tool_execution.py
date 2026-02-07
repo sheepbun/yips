@@ -8,14 +8,18 @@ import os
 import re
 import subprocess
 import sys
+import json
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, cast, Any
 
-from cli.color_utils import console, PROMPT_COLOR, print_gradient, blue_gradient_text
-from cli.config import BASE_DIR, SKILLS_DIR, WORKING_ZONE
+if TYPE_CHECKING:
+    from cli.type_defs import YipsAgentProtocol
+
+from cli.color_utils import console, PROMPT_COLOR
+from cli.config import BASE_DIR, WORKING_ZONE, SKILLS_DIR, TOOLS_DIR
 from cli.root import PROJECT_ROOT
-from cli.type_defs import ToolRequest, ActionToolRequest, IdentityToolRequest, SkillToolRequest, ThoughtToolRequest
+from cli.type_defs import ToolRequest
 
 # Destructive commands that require confirmation
 DESTRUCTIVE_PATTERNS = [
@@ -68,51 +72,52 @@ def parse_tool_requests(response: str) -> list[ToolRequest]:
         message_json = match.group(2) # e.g. '{"command":"mkdir -p temp"}'
         
         try:
-            import json
             data = json.loads(message_json)
             
-            # Map Claude tools to Yips tools
-            if "search" in channel or "google" in channel or (isinstance(data, dict) and ("query" in data or "q" in data)):
-                # Map to SEARCH skill
-                query = data.get("query", data.get("q", ""))
-                requests_list.append({
-                    "type": "skill",
-                    "skill": "SEARCH",
-                    "args": str(query)
-                })
-                continue
+            if isinstance(data, dict):
+                data_dict = cast(dict[str, Any], data)
+                
+                # Map Claude tools to Yips tools
+                if "search" in channel or "google" in channel or "query" in data_dict or "q" in data_dict:
+                    # Map to SEARCH skill
+                    query = data_dict.get("query", data_dict.get("q", ""))
+                    requests_list.append({
+                        "type": "skill",
+                        "skill": "SEARCH",
+                        "args": str(query)
+                    })
+                    continue
 
-            if "run_command" in channel or "execute" in channel:
-                tool = "run_command"
-                params = data.get("command", "")
-            elif "write" in channel:
-                tool = "write_file"
-                params = f"{data.get('path', '')}:{data.get('content', '')}"
-            elif "read" in channel:
-                tool = "read_file"
-                params = data.get("path", "")
-            elif "ls" in channel or "list" in channel:
-                tool = "ls"
-                params = data.get("path", ".")
-            elif "grep" in channel:
-                tool = "grep"
-                params = f"{data.get('pattern', '')}:{data.get('path', '.')}"
-            elif "git" in channel:
-                tool = "git"
-                params = data.get("subcommand", data.get("command", ""))
-            else:
-                # Fallback: try to guess or use as a generic command
-                # ONLY if it looks like a command string or has a command key
-                if isinstance(data, dict):
-                    if "command" in data:
+                if "run_command" in channel or "execute" in channel:
+                    tool = "run_command"
+                    params = data_dict.get("command", "")
+                elif "write" in channel:
+                    tool = "write_file"
+                    params = f"{data_dict.get('path', '')}:{data_dict.get('content', '')}"
+                elif "read" in channel:
+                    tool = "read_file"
+                    params = data_dict.get("path", "")
+                elif "ls" in channel or "list" in channel:
+                    tool = "ls"
+                    params = data_dict.get("path", ".")
+                elif "grep" in channel:
+                    tool = "grep"
+                    params = f"{data_dict.get('pattern', '')}:{data_dict.get('path', '.')}"
+                elif "git" in channel:
+                    tool = "git"
+                    params = data_dict.get("subcommand", data_dict.get("command", ""))
+                else:
+                    # Fallback: try to guess or use as a generic command
+                    if "command" in data_dict:
                         tool = "run_command"
-                        params = data["command"]
+                        params = data_dict["command"]
                     else:
                         # Skip if it's just some other dict we don't understand
                         continue
-                else:
-                    tool = "run_command"
-                    params = str(data)
+            else:
+                # Fallback for non-dict data
+                tool = "run_command"
+                params = str(data)
 
             requests_list.append({
                 "type": "action",
@@ -193,7 +198,7 @@ def confirm_action(description: str, is_destructive: bool = False) -> bool:
     return response in ("y", "yes")
 
 
-def execute_tool(request: ToolRequest, agent: Any = None) -> str:
+def execute_tool(request: ToolRequest, agent: "YipsAgentProtocol | None" = None) -> str:
     """Execute a tool request (autonomously unless destructive or out of bounds)."""
 
     if request["type"] == "action":
@@ -344,7 +349,6 @@ def execute_tool(request: ToolRequest, agent: Any = None) -> str:
             return "[Error: You searched for the literal placeholder 'query'. Please search for a specific topic (e.g. 'current LLM context limits', 'weather in Tokyo').]"
 
         # Search for skill in commands/skills/<NAME>/<NAME>.py OR commands/tools/<NAME>/<NAME>.py
-        from cli.config import SKILLS_DIR, TOOLS_DIR
         skill_path = SKILLS_DIR / skill_name / f"{skill_name}.py"
         if not skill_path.exists():
             skill_path = TOOLS_DIR / skill_name / f"{skill_name}.py"
@@ -407,8 +411,6 @@ def execute_tool(request: ToolRequest, agent: Any = None) -> str:
 
 def clean_response(response: str) -> str:
     """Remove tool request tags from response for display, but keep those in code blocks."""
-    import json
-    
     tags_to_remove = [
         r"\{ACTION:\s*\w+\s*:[^}]*\}",
         r"\{UPDATE_IDENTITY:[^}]*\}",
@@ -423,7 +425,7 @@ def clean_response(response: str) -> str:
     # Match code blocks first to protect them, then tags to remove
     pattern = r"(```.*?```|`[^`]*`|" + "|".join(tags_to_remove) + ")"
     
-    def replace_fn(match):
+    def replace_fn(match: re.Match[str]) -> str:
         text = match.group(0)
         # If it's a code block (starts with backtick), keep it
         if text.startswith('`'):
@@ -438,7 +440,6 @@ def clean_response(response: str) -> str:
     stripped = cleaned.strip()
     if stripped.startswith('{') and stripped.endswith('}'):
         try:
-            import json
             json.loads(stripped)
             return ""
         except:

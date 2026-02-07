@@ -460,26 +460,25 @@ class AgentBackendMixin:
             est_tokens = len(all_content) // 4
             spinner = PulsingSpinner("Thinking...", token_count=est_tokens)
 
-            response = requests.post(
-                f"{LLAMA_SERVER_URL}/v1/chat/completions",
-                json={
-                    "model": self.current_model,
-                    "messages": messages,
-                    "max_tokens": 2048,
-                    "stream": True,
-                },
-                timeout=120,
-                stream=True
-            )
-            
-            if response.status_code != 200:
-                return f"[Error from llama.cpp ({response.status_code}): {response.text}]"
-
             accumulated_text = ""
             in_thinking_block = False
             self.thinking_lines_shown = 0
-            
             with Live(spinner, console=self.console, refresh_per_second=20, transient=True) as live:
+                response = requests.post(
+                    f"{LLAMA_SERVER_URL}/v1/chat/completions",
+                    json={
+                        "model": self.current_model,
+                        "messages": messages,
+                        "max_tokens": 2048,
+                        "stream": True,
+                    },
+                    timeout=120,
+                    stream=True
+                )
+
+                if response.status_code != 200:
+                    return f"[Error from llama.cpp ({response.status_code}): {response.text}]"
+
                 for line in response.iter_lines():
                     if not line: continue
                     line_str = line.decode('utf-8').strip()
@@ -517,7 +516,7 @@ class AgentBackendMixin:
                                             for i, text_line in enumerate(lines):
                                                 if i > 0: display_text.append("\n" + indent)
                                                 display_text.append(apply_gradient_to_text(text_line))
-                                            live.update(display_text)
+                                            live.update(Group(display_text, spinner))
                                         else:
                                             live.update(spinner)
                                         
@@ -564,8 +563,7 @@ class AgentBackendMixin:
                                     display_text.append(apply_gradient_to_text(text_line))
                                 renderables.append(display_text)
                             if not renderables: live.update(spinner)
-                            elif len(renderables) == 1: live.update(renderables[0])
-                            else: live.update(Group(*renderables))
+                            else: live.update(Group(*renderables, spinner))
                         usage = data.get("usage")
                         if usage:
                             spinner.update_tokens(
@@ -643,17 +641,17 @@ class AgentBackendMixin:
         try:
             cmd = [CLAUDE_CLI_PATH, "-p", "--model", str(self.current_model)]
             if self.verbose_mode: cmd.append("--verbose")
-            process = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
-            assert process.stdin is not None
-            process.stdin.write(full_prompt)
-            process.stdin.close()
             accumulated_text = ""
             prefix = get_yips_prefix()
             indent = " " * len(prefix)
             spinner = PulsingSpinner("Thinking...", token_count=0, model_status="generating")
-            assert process.stdout is not None
-            assert process.stderr is not None
             if getattr(self, 'is_gui', False):
+                process = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
+                assert process.stdin is not None
+                process.stdin.write(full_prompt)
+                process.stdin.close()
+                assert process.stdout is not None
+                assert process.stderr is not None
                 while True:
                     char = process.stdout.read(1)
                     if not char and process.poll() is not None: break
@@ -662,6 +660,12 @@ class AgentBackendMixin:
                     self.emit_gui_event("text_chunk", char)
             else:
                 with Live(spinner, console=self.console, refresh_per_second=20, transient=True) as live:
+                    process = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, bufsize=1)
+                    assert process.stdin is not None
+                    process.stdin.write(full_prompt)
+                    process.stdin.close()
+                    assert process.stdout is not None
+                    assert process.stderr is not None
                     while True:
                         char = process.stdout.read(1)
                         if not char and process.poll() is not None: break
@@ -674,7 +678,7 @@ class AgentBackendMixin:
                         for i, text_line in enumerate(lines):
                             if i > 0: display_text.append("\n" + indent)
                             display_text.append(apply_gradient_to_text(text_line))
-                        live.update(display_text)
+                        live.update(Group(display_text, spinner))
             cleaned_text = clean_response(accumulated_text)
             if cleaned_text:
                 final_text = Text()

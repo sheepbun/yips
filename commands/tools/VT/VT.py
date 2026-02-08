@@ -455,8 +455,9 @@ class VTFrame:
         self.container = DynamicContainer(self._get_container)
 
     def _get_style(self, row: int, col: int, total_rows: int, total_cols: int) -> str:
-        progress = (row / max(total_rows - 1, 1) + col / max(total_cols - 1, 1)) / 2
-        r, g, b = interpolate_color(GRADIENT_YELLOW, GRADIENT_BLUE, progress)
+        from cli.color_utils import GRADIENT_PINK
+        progress = col / max(total_cols - 1, 1)
+        r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, progress)
         return f"#{r:02x}{g:02x}{b:02x}"
 
     def _get_container(self):
@@ -465,19 +466,33 @@ class VTFrame:
         from prompt_toolkit.widgets.base import Border
         from prompt_toolkit.formatted_text import StyleAndTextTuples
         from functools import partial
+        from cli.color_utils import GRADIENT_PINK
 
         total_cols = console.width or 80
         total_rows = max(len(_vt_history) + 4, 5)  # top + history + bash + bottom
 
-        # Title
-        header = f"{get_display_cwd()} VT"
+        # Title: "Yips Virtual Terminal" — match Model Manager header style
         title_text: StyleAndTextTuples = []
         prefix = "╭─── "
         for i, ch in enumerate(prefix):
             title_text.append((self._get_style(0, i, total_rows, total_cols), ch))
-        for i, ch in enumerate(header):
-            title_text.append((self._get_style(0, len(prefix) + i, total_rows, total_cols), ch))
-        title_len = len(prefix) + len(header)
+
+        # "Yips" in pink→yellow gradient
+        yips_str = "Yips"
+        for i, ch in enumerate(yips_str):
+            progress = i / max(len(yips_str) - 1, 1)
+            r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, progress)
+            title_text.append((f"#{r:02x}{g:02x}{b:02x}", ch))
+
+        title_text.append((self._get_style(0, len(title_text), total_rows, total_cols), " "))
+
+        # "Virtual Terminal" in blue
+        blue_hex = f"#{GRADIENT_BLUE[0]:02x}{GRADIENT_BLUE[1]:02x}{GRADIENT_BLUE[2]:02x}"
+        rest = "Virtual Terminal"
+        for ch in rest:
+            title_text.append((blue_hex, ch))
+
+        title_len = len(title_text)
         title_text.append((self._get_style(0, title_len, total_rows, total_cols), " "))
         title_len += 1
 
@@ -615,7 +630,7 @@ class VTApplication:
         from prompt_toolkit.formatted_text import FormattedText
         parts = []
         for line in _vt_history:
-            parts.append(("#00ff00", line + "\n"))
+            parts.append(("#ffffff", line + "\n"))
         return FormattedText(parts) if parts else FormattedText([("", "")])
 
     def _on_bash_submit(self, buff) -> None:

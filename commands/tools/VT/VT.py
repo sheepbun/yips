@@ -341,14 +341,41 @@ def run_command(command: str) -> str:
             return f"cd: {e}"
 
     try:
-        process = subprocess.run(
+        import pty as _pty
+        import struct
+        import fcntl
+        import termios as _termios
+
+        master, slave = _pty.openpty()
+        # Set terminal size on the pty so commands like ls columnize properly
+        inner_cols = max((console.width or 80) - 4, 40)
+        winsize = struct.pack('HHHH', 24, inner_cols, 0, 0)
+        fcntl.ioctl(slave, _termios.TIOCSWINSZ, winsize)
+
+        process = subprocess.Popen(
             command, shell=True, executable='/bin/bash',
-            capture_output=True, text=True, cwd=_cwd
+            stdout=slave, stderr=slave, stdin=subprocess.DEVNULL,
+            cwd=_cwd,
         )
-        output = process.stdout
-        if process.stderr:
-            output += process.stderr
-        return output.rstrip('\n')
+        os.close(slave)
+
+        output = b''
+        while True:
+            try:
+                chunk = os.read(master, 4096)
+                if not chunk:
+                    break
+                output += chunk
+            except OSError:
+                break
+        os.close(master)
+        process.wait()
+
+        text = output.decode('utf-8', errors='replace')
+        # PTY produces \r\n line endings and literal tabs — clean them up
+        text = text.replace('\r\n', '\n').replace('\r', '')
+        text = text.expandtabs(8)
+        return text.rstrip('\n')
     except Exception as e:
         return f"Error: {e}"
 

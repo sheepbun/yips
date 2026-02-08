@@ -456,9 +456,7 @@ def main() -> None:
         # /vt toggles VT mode directly
         if user_input.lower() in ('/vt', '/terminal'):
             vt_mode = not vt_mode
-            if vt_mode:
-                console.print("[dim]Entered VT mode. Tab to switch back.[/dim]")
-            else:
+            if not vt_mode:
                 console.print("[dim]Exited VT mode.[/dim]")
             continue
 

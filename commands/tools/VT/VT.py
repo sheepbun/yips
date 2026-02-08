@@ -32,13 +32,25 @@ console = Console()
 MAX_VISIBLE_LINES = 20
 
 
+class PatchedScreen(pyte.Screen):
+    """pyte.Screen subclass that tolerates extra kwargs in methods like SGR."""
+    def select_graphic_rendition(self, *args, **kwargs):
+        super().select_graphic_rendition(*args)
+
+    def set_mode(self, *args, **kwargs):
+        super().set_mode(*args, **kwargs)
+
+    def reset_mode(self, *args, **kwargs):
+        super().reset_mode(*args, **kwargs)
+
+
 class PersistentPTY:
     """A persistent bash shell with a pyte virtual-terminal backend."""
 
     def __init__(self, cols: int = 80, rows: int = 24) -> None:
         self.cols = cols
         self.rows = rows
-        self.screen = pyte.Screen(cols, rows)
+        self.screen = PatchedScreen(cols, rows)
         self.stream = pyte.ByteStream(self.screen)
         self.master_fd: int = -1
         self.child_pid: int = -1

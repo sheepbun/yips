@@ -45,7 +45,14 @@ class ThoughtToolRequest(TypedDict):
     signature: str
 
 
-ToolRequest = ActionToolRequest | IdentityToolRequest | SkillToolRequest | ThoughtToolRequest
+class EditFileToolRequest(TypedDict):
+    """A tool request for editing a file with diff preview."""
+    type: Literal["action"]
+    tool: Literal["edit_file"]
+    params: str
+
+
+ToolRequest = ActionToolRequest | IdentityToolRequest | SkillToolRequest | ThoughtToolRequest | EditFileToolRequest
 
 
 # Configuration

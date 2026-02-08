@@ -165,12 +165,12 @@ def get_recent_activity(limit: int = 5) -> list[str]:
                                     display_hour = hour_int - 12
                                     am_pm = "PM"
                                 
-                                # Fixed width formatting: %m-%d (zero padded), hour (space padded >2)
-                                date_str: str = dt.strftime('%Y-%m-%d')
+                                # Fixed width formatting: month-day (no leading zeros), hour (space padded >2)
+                                date_str: str = dt.strftime('%Y-%-m-%-d')
                                 time_str: str = f"{display_hour:>2}:{minute} {am_pm}"
                                 display: str = f"{date_str} @ {time_str}: {title}"
                             else:
-                                display = f"{dt.strftime('%Y-%m-%d')}: {title}"
+                                display = f"{dt.strftime('%Y-%-m-%-d')}: {title}"
                         except (ValueError, IndexError):
                             display = f"{date_part}: {title}"
                     else:
@@ -194,13 +194,13 @@ def get_recent_activity(limit: int = 5) -> list[str]:
                                 else:
                                     display_hour = hour_int - 12
                                     am_pm = "PM"
-                                
+
                                 # Fixed width formatting
-                                date_str: str = dt.strftime('%Y-%m-%d')
+                                date_str: str = dt.strftime('%Y-%-m-%-d')
                                 time_str: str = f"{display_hour:>2}:{minute} {am_pm}"
                                 display = f"{date_str} @ {time_str}: {title}"
                             else:
-                                display = f"{dt.strftime('%Y-%m-%d')}: {title}"
+                                display = f"{dt.strftime('%Y-%-m-%-d')}: {title}"
                         except (ValueError, IndexError):
                             display = f"{date_part}: {title}"
                 else:
@@ -220,7 +220,7 @@ def get_recent_activity(limit: int = 5) -> list[str]:
                         display_hour = hour_int - 12
                         am_pm = "PM"
                     
-                    date_str: str = dt.strftime('%Y-%m-%d')
+                    date_str: str = dt.strftime('%Y-%-m-%-d')
                     time_str: str = f"{display_hour:>2}:{dt.strftime('%M')} {am_pm}"
                     display = f"{date_str} @ {time_str}: {name}"
 
@@ -290,7 +290,7 @@ def get_session_list() -> list[dict[str, Any]]:
                         period: str = "AM" if hour < 12 else "PM"
                         hour = 12 if hour == 0 else (hour if hour <= 12 else hour - 12)
                         
-                        date_str: str = dt.strftime('%Y-%m-%d')
+                        date_str: str = dt.strftime('%Y-%-m-%-d')
                         time_str: str = f"{hour:>2}:{minute} {period}"
                         display: str = f"{date_str} @ {time_str}: {title}"
                     else:
@@ -299,12 +299,12 @@ def get_session_list() -> list[dict[str, Any]]:
                         minute: str = time_part[2:4]
                         period: str = "AM" if hour < 12 else "PM"
                         hour = 12 if hour == 0 else (hour if hour <= 12 else hour - 12)
-                        
-                        date_str: str = dt.strftime('%Y-%m-%d')
+
+                        date_str: str = dt.strftime('%Y-%-m-%-d')
                         time_str: str = f"{hour:>2}:{minute} {period}"
                         display: str = f"{date_str} @ {time_str}: {title}"
                 else:
-                    display: str = f"{dt.strftime('%Y-%m-%d %H:%M')}: {f.stem}"
+                    display: str = f"{dt.strftime('%Y-%-m-%-d %H:%M')}: {f.stem}"
                 
                 sessions.append({'path': f, 'display': display})
             except Exception:

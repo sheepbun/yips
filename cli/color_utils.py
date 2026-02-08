@@ -75,6 +75,11 @@ def gradient_text(text: str, colors: tuple[RGBColor, RGBColor] = (GRADIENT_PINK,
     return styled
 
 
+def blue_pink_gradient_text(text: str) -> Text:
+    """Create blue to pink gradient-colored text."""
+    return gradient_text(text, (GRADIENT_BLUE, GRADIENT_PINK))
+
+
 def blue_gradient_text(text: str) -> Text:
     """Create blue gradient-colored text."""
     return gradient_text(text, (GRADIENT_BLUE_DARK, GRADIENT_BLUE))

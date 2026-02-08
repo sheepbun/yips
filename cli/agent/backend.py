@@ -145,14 +145,30 @@ class AgentBackendMixin:
     def force_prune_context(self: YipsAgentProtocol, amount_tokens: int) -> None:
         """Force prune the conversation history by a specific token amount."""
         pruned_tokens = 0
-        
+
         if self.verbose_mode:
             self.console.print(f"[dim]Force pruning requesting removal of ~{amount_tokens} tokens...[/dim]")
 
+        # Find the index of the first user message — this is the initial prompt
+        # and should be preserved so the agent retains the user's original request.
+        first_user_idx = -1
+        for idx, m in enumerate(self.conversation_history):
+            if m.get("role") == "user":
+                first_user_idx = idx
+                break
+
         # 1. Prune whole messages from the beginning, keeping at least the last 1
+        # Skip the first user message (initial prompt) during pruning.
         # (We use a loop to pop one by one until satisfied)
-        while len(self.conversation_history) > 1 and pruned_tokens < amount_tokens:
-            msg = self.conversation_history.pop(0)
+        while len(self.conversation_history) > 2 and pruned_tokens < amount_tokens:
+            # If index 0 is the protected initial user message, pop index 1 instead
+            if first_user_idx == 0 and len(self.conversation_history) > 2:
+                msg = self.conversation_history.pop(1)
+            else:
+                msg = self.conversation_history.pop(0)
+                # Adjust first_user_idx since we removed an element before it
+                if first_user_idx > 0:
+                    first_user_idx -= 1
             
             # Add to archive
             if not hasattr(self, 'archived_history'):
@@ -181,7 +197,11 @@ class AgentBackendMixin:
         for i in range(len(self.conversation_history)):
             if remaining_needed <= 0:
                 break
-                
+
+            # Never truncate the initial user message
+            if i == first_user_idx:
+                continue
+
             msg = self.conversation_history[i]
             content = msg.get("content", "")
             content_len = len(content)

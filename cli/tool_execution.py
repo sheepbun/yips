@@ -16,8 +16,10 @@ from typing import TYPE_CHECKING, cast, Any
 if TYPE_CHECKING:
     from cli.type_defs import YipsAgentProtocol
 
+import difflib
 from cli.color_utils import console, PROMPT_COLOR
-from cli.config import BASE_DIR, WORKING_ZONE, SKILLS_DIR, TOOLS_DIR
+from cli.ui_rendering import render_text_preview
+from cli.config import BASE_DIR, WORKING_ZONE, SKILLS_DIR, TOOLS_DIR, PLANS_DIR
 from cli.root import PROJECT_ROOT
 from cli.type_defs import ToolRequest
 
@@ -164,7 +166,16 @@ def parse_tool_requests(response: str) -> list[ToolRequest]:
                 "signature": m.group(1)
             })
 
-    return requests_list
+    # Deduplicate identical consecutive requests (LLMs sometimes repeat tool tags)
+    seen: set[str] = set()
+    deduped: list[ToolRequest] = []
+    for req in requests_list:
+        # Build a hashable key from the request
+        key = str(sorted(req.items()))
+        if key not in seen:
+            seen.add(key)
+            deduped.append(req)
+    return deduped
 
 
 def is_destructive_command(command: str) -> bool:
@@ -227,6 +238,23 @@ def execute_tool(request: ToolRequest, agent: "YipsAgentProtocol | None" = None)
             try:
                 p = Path(path).expanduser()
                 p.parent.mkdir(parents=True, exist_ok=True)
+                if p.exists():
+                    # Show diff preview for existing files
+                    old_content = p.read_text()
+                    diff_lines = list(difflib.unified_diff(
+                        old_content.splitlines(), content.splitlines(),
+                        fromfile=f"a/{path}", tofile=f"b/{path}", lineterm=""
+                    ))
+                    if diff_lines:
+                        diff_text = "\n".join(diff_lines)
+                        console.print(render_text_preview(path, diff_text, mode="diff", title="📝 Write Preview"))
+                        console.print("Apply this write? (y/n): ", style=PROMPT_COLOR, end="")
+                        response = input().strip().lower()
+                        if response not in ("y", "yes"):
+                            return "[Write cancelled by user]"
+                else:
+                    # New file: show preview of what will be created
+                    console.print(render_text_preview(path, content, mode="preview", title="📝 New File"))
                 p.write_text(content)
                 return f"[File written: {path}]"
             except Exception as e:
@@ -324,6 +352,58 @@ def execute_tool(request: ToolRequest, agent: "YipsAgentProtocol | None" = None)
                 return f"[Error running sed on {path}]: {result.stderr}"
             except Exception as e:
                 return f"[Error running sed: {e}]"
+
+        elif tool == "edit_file":
+            # Parse path:::old_string:::new_string (triple-colon separator)
+            sep = ":::"
+            parts = params.split(sep, 2)
+            if len(parts) < 3:
+                return "[Error: edit_file requires path:::old_string:::new_string]"
+            path, old_string, new_string = parts[0].strip(), parts[1], parts[2]
+            if not is_in_working_zone(path):
+                if not confirm_action(f"Edit file outside working zone: {path}"):
+                    return "[Edit cancelled by user]"
+            try:
+                p = Path(path).expanduser()
+                if not p.exists():
+                    return f"[Error: File not found: {path}]"
+                file_content = p.read_text()
+                count = file_content.count(old_string)
+                if count == 0:
+                    return f"[Error: old_string not found in {path}]"
+                if count > 1:
+                    return f"[Error: old_string found {count} times in {path} — must be unique]"
+                # Generate diff
+                new_content = file_content.replace(old_string, new_string, 1)
+                diff_lines = list(difflib.unified_diff(
+                    file_content.splitlines(), new_content.splitlines(),
+                    fromfile=f"a/{path}", tofile=f"b/{path}", lineterm=""
+                ))
+                diff_text = "\n".join(diff_lines)
+                console.print(render_text_preview(path, diff_text, mode="diff", title="✏️ Edit Preview"))
+                console.print("Apply this change? (y/n): ", style=PROMPT_COLOR, end="")
+                response = input().strip().lower()
+                if response not in ("y", "yes"):
+                    return "[Edit cancelled by user]"
+                p.write_text(new_content)
+                return f"[File edited: {path}]"
+            except Exception as e:
+                return f"[Error editing file: {e}]"
+
+        elif tool == "create_plan":
+            # Parse name:content (first colon splits)
+            parts = params.split(":", 1)
+            if len(parts) < 2:
+                return "[Error: create_plan requires name:content]"
+            name, content = parts[0].strip(), parts[1]
+            try:
+                PLANS_DIR.mkdir(parents=True, exist_ok=True)
+                plan_path = PLANS_DIR / f"{name}.md"
+                console.print(render_text_preview(str(plan_path), content, mode="preview", title="📋 Plan"))
+                plan_path.write_text(content)
+                return f"[Plan created: {plan_path}]"
+            except Exception as e:
+                return f"[Error creating plan: {e}]"
 
         else:
             return f"[Unknown tool: {tool}]"

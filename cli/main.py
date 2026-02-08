@@ -237,6 +237,10 @@ def process_response_and_tools(agent: YipsAgentProtocol, response: str, depth: i
 def main() -> None:
     """Main entry point for Yips CLI."""
     import argparse
+    import atexit
+    from commands.tools.VT.VT import kill_pty_session
+    atexit.register(kill_pty_session)
+
     parser = argparse.ArgumentParser(description="Yips - Personal Desktop Agent")
     parser.add_argument("-c", "--command", type=str, help="Run a single command and exit")
     args = parser.parse_args()
@@ -271,6 +275,7 @@ def main() -> None:
         buffer.validate_and_handle()
 
     vt_mode = False
+    just_exited_vt = False
 
     VT_TOGGLE_SENTINEL = "::VT_TOGGLE::"
 
@@ -310,11 +315,12 @@ def main() -> None:
 
     # Save original terminal settings
     fd = sys.stdin.fileno()
-    old_settings = termios.tcgetattr(fd)
+    is_tty = os.isatty(fd)
+    old_settings = termios.tcgetattr(fd) if is_tty else None
     settings_changed = False
 
     try:
-        if not is_gui:
+        if not is_gui and is_tty:
             # Disable echo during startup (keep other flags normal)
             new_settings = termios.tcgetattr(fd)
             new_settings[3] = new_settings[3] & ~termios.ECHO
@@ -396,40 +402,38 @@ def main() -> None:
                 user_input = input().strip()
             elif vt_mode:
                 # VT mode: use prompt_toolkit Application with integrated layout
-                from commands.tools.VT.VT import VTApplication, run_interactive
+                from commands.tools.VT.VT import VTApplication
 
                 vt_app = VTApplication(agent=agent)
                 result = vt_app.run()
 
+                just_exited_vt = True  # Flag to suppress immediate summary re-render
+
                 if result.type == "agent":
                     user_input = result.text
                     vt_mode = False
-                elif result.type == "interactive":
-                    run_interactive(result.text)
-                    agent.refresh_display()
-                    continue
                 else:  # "exit"
                     vt_mode = False
                     continue
             else:
                 from commands.tools.VT.VT import (
                     render_vt_top, render_vt_content_rows, render_vt_bottom,
-                    render_vt_bash_prompt_row, vt_history_len,
-                    get_vt_box_width, get_display_cwd, has_vt_history,
+                    vt_history_len, get_vt_box_width, has_vt_history,
                 )
 
                 _vt_box_lines = 0
                 width = get_vt_box_width()
-                cwd = get_display_cwd()
 
-                # Agent mode: fully closed box with static bash prompt inside
-                if has_vt_history():
-                    console.print(render_vt_top(f"{cwd} VT", width=width))
+                # Agent mode: fully closed box showing PTY history
+                # Suppress rendering if we just exited the interactive VT (it's already on screen)
+                if has_vt_history() and not just_exited_vt:
+                    console.print(render_vt_top("VT", width=width))
                     for row in render_vt_content_rows(width=width):
                         console.print(row)
-                    console.print(render_vt_bash_prompt_row(width=width))
                     console.print(render_vt_bottom(width=width))
-                    _vt_box_lines = vt_history_len() + 3  # top + content + bash + bottom
+                    _vt_box_lines = vt_history_len() + 2  # top + content + bottom
+                
+                just_exited_vt = False  # Reset flag after one suppression
 
                 # Agent prompt below the closed box
                 session.style = style
@@ -498,15 +502,10 @@ def main() -> None:
         first_word = user_input.split()[0] if user_input.split() else ''
         import shutil
         if first_word in SIMPLE_BASH_COMMANDS or (first_word and shutil.which(first_word)):
-            from commands.tools.VT.VT import run_command, is_interactive, run_interactive, append_vt_output as _append
+            from commands.tools.VT.VT import get_pty_session
             vt_mode = True
-            if is_interactive(user_input):
-                run_interactive(user_input)
-                agent.refresh_display()
-            else:
-                output = run_command(user_input)
-                _append(user_input, output)
-                # Output shown in next VT box render
+            pty = get_pty_session()
+            pty.write((user_input + '\n').encode())
             continue
 
         # Store user message

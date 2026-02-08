@@ -19,6 +19,7 @@ WORKING_ZONE = BASE_DIR # The default "Working Zone" for autonomous actions
 COMMANDS_DIR = BASE_DIR / "commands"
 SKILLS_DIR = COMMANDS_DIR / "skills"
 TOOLS_DIR = COMMANDS_DIR / "tools"
+PLANS_DIR = DOT_YIPS_DIR / "plans"
 CONFIG_FILE = BASE_DIR / ".yips_config.json"
 
 # Application info

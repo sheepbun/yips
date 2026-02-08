@@ -28,6 +28,7 @@ from cli.color_utils import (
     TOOL_COLOR,
     PROMPT_COLOR,
     blue_gradient_text,
+    blue_pink_gradient_text,
     yellow_blue_gradient_text,
 )
 from cli.config import APP_VERSION
@@ -271,6 +272,8 @@ def _add_tool_node_to_tree(tree: Tree, tool_name: str, parameters: dict[str, Any
     
     icon = "⚙️"
     if "read" in clean_name.lower(): icon = "📖"
+    elif "edit" in clean_name.lower(): icon = "✏️"
+    elif "plan" in clean_name.lower(): icon = "📋"
     elif "write" in clean_name.lower(): icon = "📝"
     elif "command" in clean_name.lower(): icon = "💻"
     elif "skill" in clean_name.lower() or (clean_name.isupper() and len(clean_name) > 1): icon = "⚡"
@@ -656,6 +659,113 @@ def render_thinking_block(thinking_text: str, is_streaming: bool = False, max_di
     return Group(*renderables)
 
 
+def render_text_preview(
+    file_path: str,
+    content: str,
+    mode: str = "preview",
+    title: str | None = None,
+) -> Group:
+    """Render a text preview box with blue→pink diagonal gradient.
 
+    Args:
+        file_path: Path to display in the header.
+        content: The text content to display. In diff mode, lines starting with
+                 '+ ' or '- ' get green/red styling.
+        mode: "preview" for plain content, "diff" for unified diff display.
+        title: Optional custom title (defaults to "📝 Text Preview").
+    """
+    header_plain = title or "📝 Text Preview"
+    lines = content.split("\n")
 
+    # Build styled content lines
+    content_lines: list[tuple[str, str | None]] = []
+    # File path sub-header
+    content_lines.append((f"  {file_path}", None))
+    content_lines.append(("", None))
+
+    for i, line in enumerate(lines):
+        if mode == "diff":
+            if line.startswith("+ "):
+                content_lines.append((line, "green"))
+            elif line.startswith("- "):
+                content_lines.append((line, "red"))
+            elif line.startswith("@@ "):
+                content_lines.append((line, "cyan"))
+            else:
+                content_lines.append((line, None))
+        else:
+            # Preview mode: show line numbers
+            content_lines.append((f" {i + 1:>4} │ {line}", None))
+
+    term_width = console.width or 80
+
+    # Calculate box width
+    max_content_w = max((cell_len(l[0]) for l in content_lines), default=0)
+    width = max(max_content_w + 4, cell_len(header_plain) + 10)
+    width = min(width, term_width - 2)
+    inner_width = width - 4
+
+    # Wrap long lines
+    wrapped: list[tuple[str, str | None]] = []
+    for text_str, style in content_lines:
+        if cell_len(text_str) <= inner_width:
+            wrapped.append((text_str, style))
+        else:
+            wrapped.append((text_str[:inner_width - 3] + "...", style))
+    content_lines = wrapped
+
+    total_rows = 2 + len(content_lines)
+    renderables: list[Text] = []
+
+    def get_border_text(text_str: str, row_idx: int) -> Text:
+        styled = Text()
+        for ci, char in enumerate(text_str):
+            v_p = row_idx / max(total_rows - 1, 1)
+            h_p = ci / max(width - 1, 1)
+            progress = (v_p + h_p) / 2
+            r, g, b = interpolate_color(GRADIENT_BLUE, GRADIENT_PINK, progress)
+            styled.append(char, style=f"rgb({r},{g},{b})")
+        return styled
+
+    # Top border
+    top = f"╭─── {header_plain} "
+    remainder = width - cell_len(top) - 1
+    if remainder > 0:
+        top += "─" * remainder
+    top += "╮"
+    renderables.append(get_border_text(top, 0))
+
+    # Content rows
+    for line_idx, (line_text, line_style) in enumerate(content_lines):
+        row_idx = 1 + line_idx
+        row = Text()
+
+        # Left border
+        v_p = row_idx / max(total_rows - 1, 1)
+        r, g, b = interpolate_color(GRADIENT_BLUE, GRADIENT_PINK, (v_p + 0) / 2)
+        row.append("│ ", style=f"rgb({r},{g},{b})")
+
+        # Content
+        l_len = cell_len(line_text)
+        if line_style:
+            row.append(line_text, style=line_style)
+        else:
+            for ci, char in enumerate(line_text):
+                h_p = (2 + ci) / max(width - 1, 1)
+                progress = (v_p + h_p) / 2
+                r, g, b = interpolate_color(GRADIENT_BLUE, GRADIENT_PINK, progress)
+                row.append(char, style=f"rgb({r},{g},{b})")
+
+        # Padding + right border
+        padding = max(0, inner_width - l_len)
+        row.append(" " * padding)
+        h_p_pipe = (width - 1) / max(width - 1, 1)
+        r, g, b = interpolate_color(GRADIENT_BLUE, GRADIENT_PINK, (v_p + h_p_pipe) / 2)
+        row.append(" │", style=f"rgb({r},{g},{b})")
+        renderables.append(row)
+
+    # Bottom border
+    renderables.append(get_border_text("╰" + "─" * (width - 2) + "╯", total_rows - 1))
+
+    return Group(*renderables)
 

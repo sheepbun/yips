@@ -32,7 +32,6 @@ from cli.color_utils import (
     PROMPT_COLOR,
 )
 from cli.commands import handle_command
-from cli.config import COMMANDS_DIR
 from cli.tool_execution import parse_tool_requests, execute_tool, clean_response
 from cli.completer import SlashCommandCompleter
 
@@ -156,7 +155,11 @@ def process_response_and_tools(agent: YipsAgentProtocol, response: str, depth: i
                 if i > 1:
                     time.sleep(0.3)
 
+                # Stop Live display before executing tools — any tool may
+                # prompt for user input (confirmation dialogs, diff previews)
+                live.stop()
                 result = execute_tool(request, agent)
+                live.start()
 
                 current_tool_info["is_running"] = False
                 current_tool_info["result"] = result
@@ -253,6 +256,7 @@ def main() -> None:
         'scrollbar.button': 'noinherit',
     })
 
+
     # Define key bindings
     bindings = KeyBindings()
 
@@ -262,21 +266,33 @@ def main() -> None:
     def _(event: KeyPressEvent):
         """Handle Enter key. Do not submit if empty."""
         buffer = event.current_buffer
-        if not buffer.text.strip():
+        if not buffer.text.strip() and not buffer.text.startswith("::"):
             return
         buffer.validate_and_handle()
 
+    vt_mode = False
+
+    VT_TOGGLE_SENTINEL = "::VT_TOGGLE::"
+
+    def _do_vt_toggle(event: KeyPressEvent) -> None:
+        """Toggle VT mode and submit sentinel."""
+        nonlocal vt_mode
+        vt_mode = not vt_mode
+        buf = event.current_buffer
+        buf.text = VT_TOGGLE_SENTINEL
+        buf.validate_and_handle()
+
     @bindings.add('s-tab')
     def _(event: KeyPressEvent):
-        """Toggle Virtual Terminal with Shift+Tab"""
-        vt_path = COMMANDS_DIR / "VT" / "VT.py"
-        if vt_path.exists():
-            try:
-                # Suspend the current application to run the subprocess
-                with cast(Any, event.app.suspend_to_background()):
-                    subprocess.run([sys.executable, str(vt_path)])
-            except Exception as e:
-                console.print(f"[Error launching VT: {e}]")
+        """Toggle Virtual Terminal mode with Shift+Tab"""
+        _do_vt_toggle(event)
+
+    @bindings.add('tab')
+    def _(event: KeyPressEvent):
+        """Tab toggles VT mode when buffer is empty, otherwise do nothing (no completion)."""
+        if not event.current_buffer.text.strip():
+            _do_vt_toggle(event)
+        # If buffer has text, swallow Tab (no tab-completion in this app)
 
     # Initialize PromptSession
     session: PromptSession[str] = PromptSession(
@@ -378,17 +394,72 @@ def main() -> None:
             if is_gui:
                 # In GUI mode, use a simple input() to read from stdin
                 user_input = input().strip()
+            elif vt_mode:
+                # VT mode: use prompt_toolkit Application with integrated layout
+                from commands.tools.VT.VT import VTApplication, run_interactive
+
+                vt_app = VTApplication(agent=agent)
+                result = vt_app.run()
+
+                if result.type == "agent":
+                    user_input = result.text
+                    vt_mode = False
+                elif result.type == "interactive":
+                    run_interactive(result.text)
+                    agent.refresh_display()
+                    continue
+                else:  # "exit"
+                    vt_mode = False
+                    continue
             else:
-                # Use PromptSession for input
+                from commands.tools.VT.VT import (
+                    render_vt_top, render_vt_content_rows, render_vt_bottom,
+                    render_vt_bash_prompt_row, vt_history_len,
+                    get_vt_box_width, get_display_cwd, has_vt_history,
+                )
+
+                _vt_box_lines = 0
+                width = get_vt_box_width()
+                cwd = get_display_cwd()
+
+                # Agent mode: fully closed box with static bash prompt inside
+                if has_vt_history():
+                    console.print(render_vt_top(f"{cwd} VT", width=width))
+                    for row in render_vt_content_rows(width=width):
+                        console.print(row)
+                    console.print(render_vt_bash_prompt_row(width=width))
+                    console.print(render_vt_bottom(width=width))
+                    _vt_box_lines = vt_history_len() + 3  # top + content + bash + bottom
+
+                # Agent prompt below the closed box
+                session.style = style
                 user_input = session.prompt(
                     HTMLText(f'<style fg="{PROMPT_COLOR}">>>> </style>'),
-                    complete_while_typing=True
+                    complete_while_typing=True,
                 ).strip()
+
+                if user_input == VT_TOGGLE_SENTINEL:
+                    if _vt_box_lines > 0:
+                        sys.stdout.write(f"\033[{_vt_box_lines + 1}A\033[J")
+                        sys.stdout.flush()
+                    else:
+                        agent.refresh_display()
+                    vt_mode = True
+                    continue
         except (EOFError, KeyboardInterrupt):
             agent.graceful_exit()
             sys.exit(0)
 
         if not user_input:
+            continue
+
+        # /vt toggles VT mode directly
+        if user_input.lower() in ('/vt', '/terminal'):
+            vt_mode = not vt_mode
+            if vt_mode:
+                console.print("[dim]Entered VT mode. Tab to switch back.[/dim]")
+            else:
+                console.print("[dim]Exited VT mode.[/dim]")
             continue
 
         # Update user intervention metrics
@@ -415,6 +486,29 @@ def main() -> None:
             else:
                 continue
         elif command_result:
+            continue
+
+        # Check if input is a simple bash command — auto-launch VT
+        SIMPLE_BASH_COMMANDS = {
+            'ls', 'pwd', 'cat', 'grep', 'find', 'mkdir', 'rmdir', 'rm', 'cp', 'mv',
+            'touch', 'chmod', 'chown', 'echo', 'ps', 'top', 'htop', 'df', 'du',
+            'tar', 'zip', 'unzip', 'curl', 'wget', 'ping', 'ssh', 'scp', 'man',
+            'apt', 'pacman', 'pip', 'npm', 'docker', 'tree', 'wc', 'nano', 'vim',
+            'clear', 'whoami', 'uname', 'uptime', 'free', 'lsblk', 'ip', 'ifconfig',
+            'systemctl', 'journalctl', 'env', 'export', 'source', 'bat', 'cd',
+        }
+        first_word = user_input.split()[0] if user_input.split() else ''
+        import shutil
+        if first_word in SIMPLE_BASH_COMMANDS or (first_word and shutil.which(first_word)):
+            from commands.tools.VT.VT import run_command, is_interactive, run_interactive, append_vt_output as _append
+            vt_mode = True
+            if is_interactive(user_input):
+                run_interactive(user_input)
+                agent.refresh_display()
+            else:
+                output = run_command(user_input)
+                _append(user_input, output)
+                # Output shown in next VT box render
             continue
 
         # Store user message

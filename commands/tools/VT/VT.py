@@ -410,6 +410,29 @@ class VTFrame:
         ])
 
 
+class NoCprOutputWrapper:
+    """Wrapper for Output that suppresses CPR (Cursor Position Requests)."""
+    def __init__(self, original_output):
+        self._original = original_output
+
+    def __getattr__(self, name):
+        return getattr(self._original, name)
+
+    def get_cursor_position(self, timeout: float | None = None):
+        """Return a dummy cursor position."""
+        from prompt_toolkit.data_structures import Point
+        return Point(0, 0)
+
+    def ask_for_cpr(self) -> None:
+        """Suppress sending CPR request."""
+        pass
+
+    @property
+    def responds_to_cpr(self) -> bool:
+        """Tell prompt_toolkit we do not support CPR."""
+        return False
+
+
 # ---------------------------------------------------------------------------
 # VTApplication — terminal emulator using prompt_toolkit + pyte
 # ---------------------------------------------------------------------------
@@ -428,6 +451,9 @@ class VTApplication:
         from prompt_toolkit.layout.layout import Layout
         from prompt_toolkit.widgets import TextArea
         from prompt_toolkit.filters import Condition
+        from prompt_toolkit.input import create_input
+        from prompt_toolkit.output import create_output
+        from prompt_toolkit.data_structures import Point
 
         self.agent = agent
         self._result: VTResult | None = None
@@ -436,7 +462,7 @@ class VTApplication:
         # Terminal display window (reads from pyte screen)
         self.terminal_window = Window(
             content=FormattedTextControl(self._get_terminal_text),
-            dont_extend_height=False,
+            dont_extend_height=True,
             wrap_lines=False,
         )
 
@@ -584,14 +610,10 @@ class VTApplication:
             'bottom-toolbar': 'noinherit noreverse',
         })
 
-        # Reuse input/output from the main agent session to avoid CPR warnings
-        app_input = None
-        app_output = None
-        if self.agent and hasattr(self.agent, 'prompt_session'):
-            ps = getattr(self.agent, 'prompt_session')
-            if ps:
-                app_input = getattr(ps, 'input', None)
-                app_output = getattr(ps, 'output', None)
+        # Create fresh input/output to avoid conflicts with main session
+        # and to strictly control CPR behavior.
+        self.input = create_input()
+        self.output = NoCprOutputWrapper(create_output())
 
         self.app: Application = Application(
             layout=self.layout,
@@ -599,8 +621,8 @@ class VTApplication:
             style=vt_style,
             full_screen=False,
             color_depth=ColorDepth.TRUE_COLOR,
-            input=app_input,
-            output=app_output,
+            input=self.input,
+            output=self.output,
         )
 
     def _terminal_focused(self) -> bool:
@@ -619,7 +641,25 @@ class VTApplication:
         screen = self.pty.screen
         cursor_y, cursor_x = self.pty.get_cursor()
 
-        for y in range(screen.lines):
+        # Calculate effective height: max(cursor_y, last_non_empty_line)
+        max_y = 0
+        for y in range(screen.lines - 1, -1, -1):
+            line = screen.buffer[y]
+            has_content = False
+            for char_obj in line.values():
+                if char_obj.data and char_obj.data.strip():
+                    has_content = True
+                    break
+            if has_content:
+                max_y = y
+                break
+        
+        # Enforce minimum height (e.g. 1) and max height (screen.lines)
+        visible_rows = max(max_y, cursor_y) + 1
+        visible_rows = max(visible_rows, 1)
+        visible_rows = min(visible_rows, screen.lines)
+
+        for y in range(visible_rows):
             if y > 0:
                 result.append(('#ffffff', '\n'))
 
@@ -685,6 +725,11 @@ class VTApplication:
 
         def start_bg_task() -> None:
             self.app.create_background_task(self._reader_task())
+            # Ensure focus is on terminal window at start
+            try:
+                self.layout.focus(self.terminal_window)
+            except Exception:
+                pass
 
         # Start background reader via pre_run hook to ensure loop exists
         self.app.run(pre_run=start_bg_task)

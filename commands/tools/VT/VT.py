@@ -15,7 +15,7 @@ import struct
 import fcntl
 
 import pyte
-from rich.console import Console, Group
+from rich.console import Console
 from rich.text import Text
 from rich.cells import cell_len
 
@@ -90,6 +90,10 @@ class PersistentPTY:
             if self.master_fd in rlist:
                 data = os.read(self.master_fd, 65536)
                 if data:
+                    # Filter out Kitty keyboard protocol sequences (CSI < ... u)
+                    # which pyte incorrectly parses, leading to leaked 'u' characters.
+                    import re
+                    data = re.sub(b'\x1b\\[<[\\d;]*u', b'', data)
                     self.stream.feed(data)
                     return True
         except OSError:
@@ -287,41 +291,6 @@ def render_vt_bottom(hint: str = "", width: int | None = None) -> Text:
     return bot
 
 
-def render_vt_bottom_pt(hint: str = "", width: int | None = None) -> list[tuple[str, str]]:
-    """Return the bottom border as prompt_toolkit formatted text (style, text) tuples."""
-    if width is None:
-        width = get_vt_box_width()
-    lines = get_visible_lines()
-    total_rows = max(len(lines) + 2, 3)
-    bot_str = "╰"
-    fill = width - 2 - cell_len(hint)
-    left_fill = fill // 2
-    right_fill = fill - left_fill
-    bot_str += "─" * left_fill + hint + "─" * right_fill + "╯"
-    result: list[tuple[str, str]] = []
-    for i, ch in enumerate(bot_str):
-        _, s = styled_char_static(ch, total_rows - 1, i, width, total_rows)
-        if s.startswith("rgb("):
-            parts = s[4:-1].split(",")
-            r, g, b = int(parts[0]), int(parts[1]), int(parts[2])
-            s = f"#{r:02x}{g:02x}{b:02x}"
-        result.append((s, ch))
-    return result
-
-
-def get_vt_border_colors(width: int | None = None) -> tuple[str, str]:
-    """Return (left_hex, right_hex) colors for the prompt row border position."""
-    if width is None:
-        width = get_vt_box_width()
-    lines = get_visible_lines()
-    total_rows = max(len(lines) + 2, 3)
-    row_idx = len(lines) + 1
-    lc = interpolate_color(GRADIENT_YELLOW, GRADIENT_BLUE,
-                           (row_idx / max(total_rows - 1, 1)) / 2)
-    rc = interpolate_color(GRADIENT_YELLOW, GRADIENT_BLUE,
-                           (row_idx / max(total_rows - 1, 1) + 1.0) / 2)
-    return f"#{lc[0]:02x}{lc[1]:02x}{lc[2]:02x}", f"#{rc[0]:02x}{rc[1]:02x}{rc[2]:02x}"
-
 
 # ---------------------------------------------------------------------------
 # VTResult
@@ -458,22 +427,24 @@ class VTApplication:
         from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
         from prompt_toolkit.keys import Keys
         from prompt_toolkit.styles import Style
-        from prompt_toolkit.layout.containers import HSplit, Window
+        from prompt_toolkit.layout.containers import HSplit, Window, ConditionalContainer
         from prompt_toolkit.layout.controls import FormattedTextControl
         from prompt_toolkit.layout.layout import Layout
         from prompt_toolkit.widgets import TextArea
         from prompt_toolkit.filters import Condition
         from prompt_toolkit.input import create_input
         from prompt_toolkit.output import create_output
-        from prompt_toolkit.data_structures import Point
-
         self.agent = agent
         self._result: VTResult | None = None
         self.pty = get_pty_session()
 
         # Terminal display window (reads from pyte screen)
         self.terminal_window = Window(
-            content=FormattedTextControl(self._get_terminal_text),
+            content=FormattedTextControl(
+                self._get_terminal_text,
+                focusable=True,
+                show_cursor=True,
+            ),
             dont_extend_height=True,
             wrap_lines=False,
         )
@@ -489,10 +460,11 @@ class VTApplication:
         # Frame wraps terminal window
         self.frame = VTFrame(self.terminal_window)
 
-        # Root layout
+        # Root layout — only show agent input when it has focus (shift-tab to switch)
+        self._show_agent_input = Condition(lambda: self._agent_focused())
         root = HSplit([
             self.frame.container,
-            self.agent_input,
+            ConditionalContainer(self.agent_input, filter=self._show_agent_input),
         ])
 
         self.layout = Layout(root, focused_element=self.terminal_window)
@@ -645,15 +617,21 @@ class VTApplication:
         """Filter: True when agent input has focus."""
         return self.layout.has_focus(self.agent_input)
 
+    def _get_pt_cursor_position(self):
+        """Return prompt_toolkit Point for the pyte cursor so the hardware cursor overlaps our reverse-video cursor."""
+        from prompt_toolkit.data_structures import Point
+        screen = self.pty.screen
+        return Point(x=screen.cursor.x, y=screen.cursor.y)
+
     def _get_terminal_text(self):
         """Build prompt_toolkit formatted text from pyte screen buffer."""
         from prompt_toolkit.formatted_text import FormattedText
 
         result = []
         screen = self.pty.screen
-        cursor_y, cursor_x = self.pty.get_cursor()
 
         # Calculate effective height: max(cursor_y, last_non_empty_line)
+        cursor_y = screen.cursor.y
         max_y = 0
         for y in range(screen.lines - 1, -1, -1):
             line = screen.buffer[y]
@@ -680,10 +658,6 @@ class VTApplication:
                 char_obj = line[x]
                 char = char_obj.data if char_obj.data else ' '
 
-                # Insert cursor position marker
-                if y == cursor_y and x == cursor_x:
-                    result.append(('[SetCursorPosition]', ''))
-
                 # Build style from pyte char attributes
                 style_parts = []
                 fg = char_obj.fg
@@ -707,6 +681,12 @@ class VTApplication:
                     style_parts.append('underline')
                 if char_obj.reverse:
                     style_parts.append('reverse')
+
+                # Render cursor as reverse video only when terminal is focused
+                if y == screen.cursor.y and x == screen.cursor.x:
+                    if self._terminal_focused():
+                        style_parts.append('reverse')
+                    style_parts.append('[SetCursorPosition]')
 
                 style = ' '.join(style_parts) if style_parts else '#ffffff'
                 result.append((style, char))

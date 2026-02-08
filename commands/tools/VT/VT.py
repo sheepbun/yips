@@ -679,13 +679,19 @@ class VTApplication:
                     style_parts.append('bold')
                 if char_obj.underscore:
                     style_parts.append('underline')
-                if char_obj.reverse:
+                is_cursor = y == screen.cursor.y and x == screen.cursor.x
+
+                # For the cursor position when focused, toggle reverse video
+                # (avoids double-reverse cancellation when the app already renders
+                # its own reverse-video cursor, e.g. Claude Code's prompt_toolkit)
+                if is_cursor and self._terminal_focused():
+                    if not char_obj.reverse:
+                        style_parts.append('reverse')
+                    # else: skip reverse — the app's reverse becomes our cursor
+                elif char_obj.reverse:
                     style_parts.append('reverse')
 
-                # Render cursor as reverse video only when terminal is focused
-                if y == screen.cursor.y and x == screen.cursor.x:
-                    if self._terminal_focused():
-                        style_parts.append('reverse')
+                if is_cursor:
                     style_parts.append('[SetCursorPosition]')
 
                 style = ' '.join(style_parts) if style_parts else '#ffffff'

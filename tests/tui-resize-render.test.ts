@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { buildPromptBoxFrame } from "../src/prompt-box";
 import { buildPromptComposerLayout } from "../src/prompt-composer";
-import { buildPromptRenderLines } from "../src/tui";
+import { buildPromptRenderLines, computeVisibleLayoutSlices } from "../src/tui";
 import { stripMarkup } from "../src/title-box";
 
 describe("buildPromptRenderLines", () => {
@@ -48,5 +48,58 @@ describe("buildPromptRenderLines", () => {
     expect(Array.from(lines[lines.length - 1] ?? "").length).toBe(16);
     expect(lines[lines.length - 1]?.startsWith("╰")).toBe(true);
     expect(lines[lines.length - 1]?.endsWith("╯")).toBe(true);
+  });
+});
+
+describe("computeVisibleLayoutSlices", () => {
+  it("keeps prompt anchored and uses upper stack tail when height is limited", () => {
+    const title = ["title-1", "title-2"];
+    const output = ["out-1", "out-2", "out-3", "out-4"];
+    const prompt = ["prompt-1", "prompt-2", "prompt-3"];
+
+    const visible = computeVisibleLayoutSlices(8, title, output, prompt);
+
+    expect(visible.titleLines).toEqual(["title-2"]);
+    expect(visible.outputLines).toEqual(["out-1", "out-2", "out-3", "out-4"]);
+    expect(visible.promptLines).toEqual(["prompt-1", "prompt-2", "prompt-3"]);
+  });
+
+  it("allows output to push the title box off-screen", () => {
+    const title = ["title-1", "title-2", "title-3"];
+    const output = ["out-1", "out-2", "out-3", "out-4"];
+    const prompt = ["prompt-1", "prompt-2"];
+
+    const visible = computeVisibleLayoutSlices(6, title, output, prompt);
+
+    expect(visible.titleLines).toEqual([]);
+    expect(visible.outputLines).toEqual(["out-1", "out-2", "out-3", "out-4"]);
+    expect(visible.promptLines).toEqual(["prompt-1", "prompt-2"]);
+  });
+
+  it("shows only prompt rows if prompt is taller than terminal height", () => {
+    const title = ["title-1", "title-2"];
+    const output = ["out-1", "out-2"];
+    const prompt = ["prompt-1", "prompt-2", "prompt-3"];
+
+    const visible = computeVisibleLayoutSlices(2, title, output, prompt);
+
+    expect(visible.titleLines).toEqual([]);
+    expect(visible.outputLines).toEqual([]);
+    expect(visible.promptLines).toEqual(["prompt-2", "prompt-3"]);
+  });
+
+  it("pads above output so chat grows upward from prompt while title stays at top", () => {
+    const title = ["title-1", "title-2"];
+    const output = ["out-1"];
+    const prompt = ["prompt-1", "prompt-2", "prompt-3"];
+
+    const visible = computeVisibleLayoutSlices(10, title, output, prompt);
+
+    expect(visible.titleLines).toEqual(["title-1", "title-2"]);
+    expect(visible.outputLines).toEqual(["", "", "", "", "out-1"]);
+    expect(visible.promptLines).toEqual(["prompt-1", "prompt-2", "prompt-3"]);
+    expect(
+      visible.titleLines.length + visible.outputLines.length + visible.promptLines.length
+    ).toBe(10);
   });
 });

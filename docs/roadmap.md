@@ -1,0 +1,92 @@
+# Roadmap
+
+## Milestone 0: Foundation
+
+Project scaffolding and core decisions.
+
+- [x] Initialize TypeScript project with strict mode
+- [x] Decide on config format (see [Decision Log](#decision-log))
+- [x] Decide on TUI framework (see [Decision Log](#decision-log))
+- [x] Basic REPL loop (read input → echo → exit)
+- [x] Project directory structure (`src/`, `tests/`, `docs/`)
+- [x] CI setup (lint, type-check, test)
+
+## Milestone 1: Core TUI
+
+Terminal interface with LLM integration.
+
+- [x] TUI layout: input area, response pane, status bar
+- [ ] llama.cpp integration: start server, send requests, parse responses
+- [ ] Streaming display: token-by-token rendering
+- [ ] Conversation history: in-memory message list, context assembly
+- [x] Slash command system: parse `/command args`, dispatch to handlers
+- [x] Built-in commands: `/exit`, `/clear`, `/model`, `/stream`, `/verbose`
+- [x] Loading indicators and error display
+
+## Milestone 2: Agent System
+
+Autonomous tool use and multi-agent architecture.
+
+- [ ] Tool protocol: structured tool calls (replacing text-tag parsing)
+- [ ] File operations: read, write, edit with diff preview
+- [ ] Shell command execution with safety guardrails
+- [ ] Destructive command detection and confirmation flow
+- [ ] Working zone enforcement
+- [ ] CODE.md loading and context injection
+- [ ] Conductor agent: context assembly, tool dispatch, response chaining
+- [ ] Subagent system: delegation, scoped context, lifecycle management
+- [ ] Error recovery and automatic pivoting
+
+## Milestone 3: Developer Experience
+
+Features that make daily use productive.
+
+- [ ] Model Manager: list, switch, download models
+- [ ] Hardware detection: GPU/VRAM-aware model selection
+- [ ] Session management: save, list, load, rename sessions
+- [ ] Memory system: save/read/list conversation memories
+- [ ] Hooks: user-defined scripts at lifecycle points
+- [ ] MCP client: server registration, tool discovery, context injection
+- [ ] Skills: search, fetch, build, todos, virtual terminal
+- [ ] Tab autocompletion for slash commands
+- [ ] Configuration file support (format TBD)
+
+## Milestone 4: Gateway _(planned)_
+
+Self-hosted messaging platform bridge.
+
+- [ ] Gateway core: message routing, session management, rate limiting
+- [ ] WhatsApp adapter (WhatsApp Business API)
+- [ ] Telegram adapter (Bot API)
+- [ ] Discord adapter (Bot SDK)
+- [ ] Authentication and access control
+- [ ] Platform-specific message formatting
+- [ ] Headless Conductor mode (no TUI, API-driven)
+
+## Milestone 5: Distribution _(planned)_
+
+Packaging and installation.
+
+- [ ] Distribution format decision (npm, standalone binary, Homebrew, or combination)
+- [ ] Install script (single-command setup)
+- [ ] Auto-update mechanism
+- [ ] llama.cpp bundling or first-run download
+- [ ] Platform support: Linux, macOS, Windows (WSL)
+
+## Decision Log
+
+| Decision | Status | Choice | Alternatives Considered | Notes |
+|----------|--------|--------|------------------------|-------|
+| Language | Decided | TypeScript (strict mode) | Rust, Go, Python | Type safety + ecosystem; Rust considered too slow for iteration |
+| Runtime | Decided | Node.js | Deno, Bun | Broadest ecosystem support; Bun may be revisited |
+| LLM backend | Decided | llama.cpp (primary) | Ollama, LM Studio | Direct control over model lifecycle; OpenAI-compatible API |
+| TUI framework | Decided | terminal-kit | Ink, blessed | Fine-grained terminal control, truecolor support, built-in input handling |
+| Config format | Decided | JSON (`.yips_config.json`) | TOML, YAML | Chosen for zero dependencies during bootstrap; comments may be revisited later |
+| Distribution | Open | — | npm, binary, Homebrew | See [Tech Stack](./stack.md) for evaluation criteria |
+| Package manager | Decided | npm | pnpm, bun | Pragmatic default for bootstrapping |
+| Formatter | Decided | Prettier | Biome | Widest editor/tooling compatibility |
+| Test framework | Decided | Vitest | Jest, node:test | Fast TypeScript test loop and simple setup |
+
+---
+
+> Last updated: 2026-02-22

@@ -9,6 +9,7 @@ import {
   horizontalGradient,
   interpolateColor,
   parseHex,
+  rowMajorGradient,
   toHex
 } from "../src/colors";
 
@@ -121,3 +122,63 @@ describe("diagonalGradient", () => {
     expect(result[1]).toBe("");
   });
 });
+
+describe("rowMajorGradient", () => {
+  it("returns empty array for empty input", () => {
+    expect(rowMajorGradient([], GRADIENT_PINK, GRADIENT_YELLOW)).toEqual([]);
+  });
+
+  it("handles lines of different lengths", () => {
+    const result = rowMajorGradient(["AB", "ABCD"], GRADIENT_PINK, GRADIENT_YELLOW);
+    expect(result).toHaveLength(2);
+    expect(result[0]).toContain("A");
+    expect(result[1]).toContain("D");
+  });
+
+  it("anchors first and last cells to gradient endpoints", () => {
+    const result = rowMajorGradient(["AB", "CD"], GRADIENT_PINK, GRADIENT_YELLOW);
+    expect(colorCodeBeforeColumn(result[0] ?? "", 0)).toBe(toAnsiForeground(GRADIENT_PINK));
+    expect(colorCodeBeforeColumn(result[1] ?? "", 1)).toBe(toAnsiForeground(GRADIENT_YELLOW));
+  });
+
+  it("continues progression from one row to the next", () => {
+    const result = rowMajorGradient(["AB", "CD"], GRADIENT_PINK, GRADIENT_YELLOW);
+    const bColor = colorCodeBeforeColumn(result[0] ?? "", 1);
+    const cColor = colorCodeBeforeColumn(result[1] ?? "", 0);
+
+    expect(bColor).not.toBe("");
+    expect(cColor).not.toBe("");
+    expect(cColor).not.toBe(toAnsiForeground(GRADIENT_PINK));
+    expect(cColor).not.toBe(bColor);
+  });
+});
+
+function colorCodeBeforeColumn(markupLine: string, plainColumn: number): string {
+  let plainCount = 0;
+  let activeColor = "";
+
+  for (let i = 0; i < markupLine.length; i++) {
+    const char = markupLine[i] ?? "";
+    if (char === "\u001b") {
+      const endIndex = markupLine.indexOf("m", i);
+      if (endIndex >= 0) {
+        if (markupLine.startsWith("\u001b[38;2;", i)) {
+          activeColor = markupLine.slice(i, endIndex + 1);
+        }
+        i = endIndex;
+      }
+      continue;
+    }
+
+    if (plainCount === plainColumn) {
+      return activeColor;
+    }
+    plainCount += 1;
+  }
+
+  return activeColor;
+}
+
+function toAnsiForeground(color: { r: number; g: number; b: number }): string {
+  return `\u001b[38;2;${Math.round(color.r)};${Math.round(color.g)};${Math.round(color.b)}m`;
+}

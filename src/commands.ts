@@ -1,0 +1,128 @@
+/** Slash command registry and dispatch system. */
+
+import type { AppConfig } from "./types";
+
+export interface CommandResult {
+  output?: string;
+  action: "continue" | "exit" | "clear";
+}
+
+export interface SessionContext {
+  config: AppConfig;
+  messageCount: number;
+}
+
+export type CommandHandler = (args: string, context: SessionContext) => CommandResult;
+
+interface RegisteredCommand {
+  name: string;
+  description: string;
+  handler: CommandHandler;
+}
+
+export class CommandRegistry {
+  private commands: Map<string, RegisteredCommand> = new Map();
+
+  register(name: string, handler: CommandHandler, description: string): void {
+    this.commands.set(name.toLowerCase(), { name, description, handler });
+  }
+
+  dispatch(name: string, args: string, context: SessionContext): CommandResult {
+    const command = this.commands.get(name.toLowerCase());
+    if (!command) {
+      return {
+        output: `Unknown command: /${name}. Type /help for help.`,
+        action: "continue"
+      };
+    }
+    return command.handler(args, context);
+  }
+
+  getHelp(): string {
+    const lines = ["Available commands:"];
+    for (const cmd of this.commands.values()) {
+      lines.push(`  /${cmd.name}  - ${cmd.description}`);
+    }
+    return lines.join("\n");
+  }
+
+  has(name: string): boolean {
+    return this.commands.has(name.toLowerCase());
+  }
+
+  getNames(): string[] {
+    return [...this.commands.keys()];
+  }
+}
+
+export interface ParsedCommand {
+  command: string;
+  args: string;
+}
+
+export function parseCommand(input: string): ParsedCommand | null {
+  const trimmed = input.trim();
+  if (!trimmed.startsWith("/")) return null;
+
+  const spaceIndex = trimmed.indexOf(" ");
+  if (spaceIndex === -1) {
+    return { command: trimmed.slice(1).toLowerCase(), args: "" };
+  }
+
+  return {
+    command: trimmed.slice(1, spaceIndex).toLowerCase(),
+    args: trimmed.slice(spaceIndex + 1).trim()
+  };
+}
+
+export function createDefaultRegistry(): CommandRegistry {
+  const registry = new CommandRegistry();
+
+  registry.register(
+    "help",
+    () => ({
+      output: registry.getHelp(),
+      action: "continue"
+    }),
+    "Show this help"
+  );
+
+  registry.register("exit", () => ({ output: "Goodbye.", action: "exit" }), "Exit Yips");
+
+  registry.register("quit", () => ({ output: "Goodbye.", action: "exit" }), "Exit Yips");
+
+  registry.register("clear", () => ({ action: "clear" }), "Clear the screen");
+
+  registry.register(
+    "model",
+    (args) => {
+      if (args) {
+        return { output: `Model set to: ${args}`, action: "continue" };
+      }
+      return { output: "Usage: /model <model_name>", action: "continue" };
+    },
+    "View or set the current model"
+  );
+
+  registry.register(
+    "stream",
+    (_args, context) => {
+      context.config.streaming = !context.config.streaming;
+      const state = context.config.streaming ? "enabled" : "disabled";
+      return { output: `Streaming ${state}.`, action: "continue" };
+    },
+    "Toggle streaming mode"
+  );
+
+  registry.register(
+    "verbose",
+    (_args, context) => {
+      context.config.verbose = !context.config.verbose;
+      const state = context.config.verbose ? "enabled" : "disabled";
+      return { output: `Verbose mode ${state}.`, action: "continue" };
+    },
+    "Toggle verbose mode"
+  );
+
+  return registry;
+}

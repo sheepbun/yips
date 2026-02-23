@@ -719,3 +719,14 @@ Validation:
 - `npm test -- tests/title-box.test.ts tests/tui-resize-render.test.ts` — clean
 Next:
 - Run `npm run dev` for an interactive visual pass to confirm provider-only status appears before model load and model/token appear once a model is set.
+
+## 2026-02-23 23:01 UTC — Exchange 37
+Summary: Ignored local workspace config directories to prevent accidental commits.
+Changed:
+- Updated `.gitignore`:
+  - added `.claude/`
+  - added `.obsidian/`
+Validation:
+- Manual check: `git status --short` now no longer lists files under `.claude/` or `.obsidian/`.
+Next:
+- Optionally commit `.gitignore` if you want this guardrail persisted for the team.

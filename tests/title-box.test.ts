@@ -172,6 +172,23 @@ describe("renderTitleBox", () => {
     expect(colorCodeBeforeColumn(lines[cwdIndex] ?? "", cwdEnd)).toBe(expectedEndAnsi);
   });
 
+  it("renders welcome and tips headings in bold", () => {
+    const lines = renderTitleBox(makeOptions({ width: 80 }));
+    const plain = lines.map(stripMarkup);
+    const welcomeText = "Welcome back katherine!";
+    const tipsText = "Tips for getting started:";
+    const welcomeIndex = plain.findIndex((line) => line.includes(welcomeText));
+    const tipsIndex = plain.findIndex((line) => line.includes(tipsText));
+
+    expect(welcomeIndex).toBeGreaterThan(-1);
+    expect(tipsIndex).toBeGreaterThan(-1);
+
+    const welcomeStart = (plain[welcomeIndex] ?? "").indexOf(welcomeText);
+    const tipsStart = (plain[tipsIndex] ?? "").indexOf(tipsText);
+    expect(isBoldBeforeColumn(lines[welcomeIndex] ?? "", welcomeStart)).toBe(true);
+    expect(isBoldBeforeColumn(lines[tipsIndex] ?? "", tipsStart)).toBe(true);
+  });
+
   it('renders "Recent activity" in white in full layout', () => {
     const lines = renderTitleBox(makeOptions({ width: 80 }));
     const plain = lines.map(stripMarkup);
@@ -220,6 +237,39 @@ function colorCodeBeforeColumn(markupLine: string, plainColumn: number): string 
 
 function toAnsiForeground(color: { r: number; g: number; b: number }): string {
   return `\u001b[38;2;${Math.round(color.r)};${Math.round(color.g)};${Math.round(color.b)}m`;
+}
+
+function isBoldBeforeColumn(markupLine: string, plainColumn: number): boolean {
+  let plainCount = 0;
+  let bold = false;
+
+  for (let i = 0; i < markupLine.length; i++) {
+    const char = markupLine[i] ?? "";
+    if (char === "\u001b" && markupLine[i + 1] === "[") {
+      const endIndex = markupLine.indexOf("m", i);
+      if (endIndex < 0) break;
+
+      const sequence = markupLine.slice(i + 2, endIndex);
+      const codes = sequence.split(";").map((code) => Number.parseInt(code, 10));
+      for (const code of codes) {
+        if (code === 0 || code === 22) {
+          bold = false;
+        } else if (code === 1) {
+          bold = true;
+        }
+      }
+
+      i = endIndex;
+      continue;
+    }
+
+    if (plainCount === plainColumn) {
+      return bold;
+    }
+    plainCount += 1;
+  }
+
+  return bold;
 }
 
 describe("stripMarkup", () => {

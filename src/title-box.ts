@@ -220,6 +220,11 @@ function styleCenteredTextWithGradientSpan(text: string, width: number): { marku
   };
 }
 
+function withBold(row: { markup: string; plain: string }): { markup: string; plain: string } {
+  if (row.markup.length === 0) return row;
+  return { markup: `\u001b[1m${row.markup}\u001b[22m`, plain: row.plain };
+}
+
 function styleLeftText(
   text: string,
   width: number,
@@ -345,10 +350,9 @@ function renderSingleColumn(
   const rows: Array<{ markup: string; plain: string }> = [];
   rows.push(styleCenteredText("", innerWidth, "plain"));
   rows.push(
-    styleCenteredTextWithGradientSpan(
-      mode === "single" ? `Welcome back ${username}!` : `Hi ${username}!`,
-      innerWidth
-    )
+    mode === "single"
+      ? withBold(styleCenteredTextWithGradientSpan(`Welcome back ${username}!`, innerWidth))
+      : styleCenteredTextWithGradientSpan(`Hi ${username}!`, innerWidth)
   );
   rows.push(styleCenteredText("", innerWidth, "plain"));
 
@@ -394,7 +398,7 @@ function renderFull(options: TitleBoxOptions): string[] {
 
   const leftRows: Array<{ markup: string; plain: string }> = [
     styleCenteredText("", leftWidth, "plain"),
-    styleCenteredTextWithGradientSpan(`Welcome back ${username}!`, leftWidth),
+    withBold(styleCenteredTextWithGradientSpan(`Welcome back ${username}!`, leftWidth)),
     styleCenteredText("", leftWidth, "plain")
   ];
   for (let i = 0; i < YIPS_LOGO.length; i++) {
@@ -405,7 +409,7 @@ function renderFull(options: TitleBoxOptions): string[] {
   leftRows.push(styleCenteredText("", leftWidth, "plain"));
 
   const rightRows: Array<{ markup: string; plain: string }> = [
-    styleLeftTextGlobalGradient("Tips for getting started:", rightWidth, width, rightStartColumn),
+    withBold(styleLeftTextGlobalGradient("Tips for getting started:", rightWidth, width, rightStartColumn)),
     styleLeftTextGlobalGradient(
       "- Ask questions, edit files, or run commands.",
       rightWidth,

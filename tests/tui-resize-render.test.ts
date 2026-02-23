@@ -5,6 +5,8 @@ import { buildPromptComposerLayout } from "../src/prompt-composer";
 import { buildPromptRenderLines, computeVisibleLayoutSlices } from "../src/tui";
 import { stripMarkup } from "../src/title-box";
 
+const INPUT_PINK_ANSI = "\u001b[38;2;255;204;255m";
+
 describe("buildPromptRenderLines", () => {
   it("renders rounded prompt frame with prefix, content, and cursor", () => {
     const layout = buildPromptComposerLayout("hello", 5, 20, ">>> ");
@@ -15,6 +17,7 @@ describe("buildPromptRenderLines", () => {
 
     expect(lines).toHaveLength(layout.rowCount + 2);
     expect(lines[0]).toContain("\u001b[");
+    expect(lines[1]).toContain(INPUT_PINK_ANSI);
     expect(plain[0]).toBe(frame.top);
     expect(plain[lines.length - 1]).toBe(frame.bottom);
     expect(plain[1]).toContain(">>> hello");
@@ -24,15 +27,21 @@ describe("buildPromptRenderLines", () => {
   it("keeps vertical borders intact across wrapped prompt rows", () => {
     const text = "this text wraps across multiple prompt rows";
     const layout = buildPromptComposerLayout(text, Array.from(text).length, 10, ">>> ");
-    const lines = buildPromptRenderLines(12, "llama.cpp · qwen3", layout, false).map(stripMarkup);
+    const lines = buildPromptRenderLines(12, "llama.cpp · qwen3", layout, false);
+    const plain = lines.map(stripMarkup);
 
-    expect(lines.length).toBe(layout.rowCount + 2);
+    expect(plain.length).toBe(layout.rowCount + 2);
 
-    const middleRows = lines.slice(1, -1);
+    const middleRows = plain.slice(1, -1);
     for (const row of middleRows) {
       expect(row.startsWith("│")).toBe(true);
       expect(row.endsWith("│")).toBe(true);
       expect(Array.from(row).length).toBe(12);
+    }
+
+    const coloredMiddleRows = lines.slice(1, -1);
+    for (const row of coloredMiddleRows) {
+      expect(row).toContain(INPUT_PINK_ANSI);
     }
   });
 

@@ -600,3 +600,38 @@ Validation:
 - `npm test` — clean (120 passing)
 Next:
 - Run an interactive `npm run dev` check to confirm visual growth direction matches expectation during active conversation.
+
+## 2026-02-23 22:28 UTC — Exchange 29
+Summary: Made all prompt-authored user text render in `#ffccff` pink, including wrapped prompt rows and the `>>>` prefix.
+Changed:
+- Updated `src/tui.ts`:
+  - changed `buildPromptRenderLines(...)` so every prompt interior row is rendered with `colorText(..., INPUT_PINK)`
+  - this applies `#ffccff` to row 1 (`>>>` + typed text) and multiline continuation rows while keeping prompt borders unchanged
+- Updated `tests/tui-resize-render.test.ts`:
+  - added explicit ANSI assertion for prompt row color (`38;2;255;204;255`)
+  - added wrapped-row assertion that each prompt content row contains the pink ANSI sequence
+Validation:
+- `npm run typecheck` — clean
+- `npm test` — clean (120 passing)
+- `npm run lint` — clean
+- `npm run format:check` — clean
+Next:
+- Run `npm run dev` to visually confirm prompt typing and wrapped lines are consistently `#ffccff` across your terminal profile.
+
+## 2026-02-23 22:32 UTC — Exchange 30
+Summary: Fixed multiline user output coloring so continuation lines in chat history remain `#ffccff` pink.
+Changed:
+- Updated `src/messages.ts`:
+  - changed `formatUserMessage(...)` to color each output line individually
+  - first line remains prefixed as `>>> ...`, continuation lines are also wrapped with `INPUT_PINK` ANSI color
+  - resolves split-line rendering case where only the first line had an ANSI color prefix
+- Updated `tests/messages.test.ts`:
+  - added multiline regression test asserting continuation line starts with pink ANSI sequence
+  - verifies stripped plain text remains `>>> first line\\nsecond line`
+Validation:
+- `npm run typecheck` — clean
+- `npm test` — clean (121 passing)
+- `npm run lint` — clean
+- `npm run format:check` — clean
+Next:
+- Run `npm run dev` and submit a multiline prompt to confirm history rendering stays pink on every user-output line.

@@ -16,6 +16,14 @@ describe("formatUserMessage", () => {
     expect(result).toContain("\u001b[");
     expect(stripMarkup(result)).toBe(">>> hello world");
   });
+
+  it("keeps multiline user output pink on continuation lines", () => {
+    const result = formatUserMessage("first line\nsecond line");
+    const plain = stripMarkup(result);
+
+    expect(plain).toBe(">>> first line\nsecond line");
+    expect(result).toContain("\n\u001b[38;2;255;204;255msecond line");
+  });
 });
 
 describe("formatAssistantMessage", () => {

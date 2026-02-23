@@ -22,7 +22,15 @@ function formatTimestamp(date: Date): string {
 }
 
 export function formatUserMessage(text: string): string {
-  return colorText(`>>> ${text}`, INPUT_PINK);
+  const lines = text.split("\n");
+  const first = colorText(`>>> ${lines[0] ?? ""}`, INPUT_PINK);
+
+  if (lines.length <= 1) {
+    return first;
+  }
+
+  const rest = lines.slice(1).map((line) => colorText(line, INPUT_PINK));
+  return [first, ...rest].join("\n");
 }
 
 export function formatAssistantMessage(text: string, timestamp?: Date): string {

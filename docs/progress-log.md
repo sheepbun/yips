@@ -474,3 +474,49 @@ Next:
 - Re-test interactive behavior in the user terminal (`npm run dev`) and verify:
   - `Enter` submits
   - `Ctrl+Enter` inserts newline (including terminal variants that encode modified-enter as `LF`, `ESC+CR/LF`, or CSI/SS3 forms).
+
+## 2026-02-23 20:33 UTC — Exchange 22
+Summary: Added in-app key diagnostics guidance and explicit Alacritty Ctrl+Enter troubleshooting while preserving Enter submit / Ctrl+Enter newline behavior.
+Changed:
+- Updated `src/commands.ts`:
+  - added `/keys` command with built-in key diagnostics instructions
+  - `/help` now includes `/keys` via default registry listing
+- Updated `src/tui.ts`:
+  - added `isAmbiguousPlainEnterChunk(...)` helper for debug-time detection of plain CR submit chunks
+  - when `YIPS_DEBUG_KEYS=1`, now emits a warning if input indicates ambiguous plain-CR Enter encoding that can make Ctrl+Enter indistinguishable from Enter
+- Updated docs:
+  - `docs/guides/getting-started.md` now includes a Multiline Key Troubleshooting section
+  - added Alacritty mapping example for Ctrl+Enter (`\u001b[13;5u`) and verification flow using debug mode
+  - `docs/changelog.md` updated with `/keys` and debug/docs improvements
+- Updated tests:
+  - `tests/commands.test.ts` now validates `/keys` registration and diagnostics output content
+Validation:
+- `npm run typecheck` — clean
+- `npm test -- tests/commands.test.ts tests/input-engine.test.ts` — clean
+- `npm test` — clean (116 passing)
+- `npm run lint` — clean
+- `npm run build` — clean
+- `npm run format:check` — clean
+Next:
+- Verify on the target Arch+i3+Alacritty environment:
+  - run `YIPS_DEBUG_KEYS=1 npm run dev`
+  - compare debug output for Enter vs Ctrl+Enter
+  - if needed, apply the documented Alacritty mapping and re-test newline insertion behavior.
+
+## 2026-02-23 20:40 UTC — Exchange 23
+Summary: Implemented follow-up Ctrl+Enter terminal-mapping plan by adding fallback escape guidance for Alacritty when plain-CR ambiguity persists.
+Changed:
+- Updated `src/commands.ts`:
+  - expanded `/keys` diagnostics text to include an alternate supported mapping (`\u001b[13;5~`) in addition to CSI-u (`\u001b[13;5u`)
+- Updated `docs/guides/getting-started.md`:
+  - added alternate Alacritty `Ctrl+Enter` mapping snippet using `\u001b[13;5~` for environments where CSI-u mapping does not resolve CR ambiguity
+- Updated `tests/commands.test.ts`:
+  - `/keys` output assertion now validates both supported mapping strings
+- Updated `docs/changelog.md`:
+  - added note for the alternate Alacritty fallback mapping guidance
+Validation:
+- `npm test -- tests/commands.test.ts` — clean
+- `npm run typecheck` — clean
+Next:
+- Re-test in native Alacritty/i3 with `YIPS_DEBUG_KEYS=1 npm run dev`.
+- If `Ctrl+Enter` still appears as plain CR submit, share the emitted `[debug stdin]` line(s) for direct parser extension.

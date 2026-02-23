@@ -271,6 +271,28 @@ function formatInputAction(action: InputAction): string {
   }
 }
 
+function isAmbiguousPlainEnterChunk(sequence: string, actions: InputAction[]): boolean {
+  if (!actions.some((action) => action.type === "submit")) {
+    return false;
+  }
+  if (actions.some((action) => action.type === "newline")) {
+    return false;
+  }
+  if (sequence.includes("\x1b")) {
+    return false;
+  }
+
+  const bytes = Array.from(Buffer.from(sequence, "latin1"));
+  if (bytes.length === 1 && bytes[0] === 0x0d) {
+    return true;
+  }
+  if (bytes.length === 2 && bytes[0] === 0x0d && bytes[1] === 0x0a) {
+    return true;
+  }
+
+  return false;
+}
+
 function applyInputAction(
   composer: PromptComposer,
   action: InputAction
@@ -640,6 +662,14 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
               `[debug stdin] bytes=${toDebugBytes(sequence)} text=${toDebugText(sequence)} actions=[${actionSummary}]`
             )
           );
+          if (isAmbiguousPlainEnterChunk(sequence, actions)) {
+            appendOutput(
+              currentState,
+              formatWarningMessage(
+                "Terminal emitted plain CR for submit; Ctrl+Enter may be indistinguishable from Enter in this terminal config."
+              )
+            );
+          }
           forceRender();
         }
 

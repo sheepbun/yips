@@ -23,6 +23,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - TTY detection: TUI launches for interactive terminals, REPL fallback for pipes and `--no-tui`
 - `src/llama-client.ts`: OpenAI-compatible llama.cpp client for non-streaming and SSE streaming chat completions
 - New backend tests in `tests/llama-client.test.ts` covering request payloads, streaming deltas, and failure paths
+- `/keys` slash command for in-app Enter/Ctrl+Enter diagnostics instructions
 
 ### Changed
 
@@ -31,6 +32,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - `docs/roadmap.md` and `docs/stack.md` updated with Milestone 0 decisions and completed items
 - `src/index.ts` updated to launch TUI by default, with REPL fallback
 - TUI framework migrated from terminal-kit to Ink (see `docs/stack.md`)
+- `YIPS_DEBUG_KEYS=1` output now warns when terminal input is plain CR submit (likely no distinguishable Ctrl+Enter encoding)
+- `docs/guides/getting-started.md` now includes multiline key troubleshooting and Alacritty Ctrl+Enter mapping guidance
+- Alacritty troubleshooting now includes an alternate Ctrl+Enter fallback mapping (`\u001b[13;5~`) when CSI-u mapping is not effective
 - Truecolor markup pipeline fixed to terminal-kit syntax (`^[#rrggbb]...^:`), resolving broken literal color output
 - `src/tui.ts` now sends messages to llama.cpp, streams token output in-place, tracks in-memory conversation history, and retries failed streams once in non-stream mode
 - Config schema now includes `llamaBaseUrl` and `model`, with optional `YIPS_LLAMA_BASE_URL` and `YIPS_MODEL` overrides

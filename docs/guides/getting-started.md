@@ -51,6 +51,51 @@ Type a message and press Enter. With backend `llamacpp`, Yips sends your in-memo
 Yips: Hi there! How can I help?
 ```
 
+## Multiline Key Troubleshooting
+
+Yips uses this contract in the TUI prompt:
+
+- `Enter` submits
+- `Ctrl+Enter` inserts a newline
+
+If `Ctrl+Enter` submits instead of inserting a newline on your terminal, first capture key parsing output:
+
+```sh
+YIPS_DEBUG_KEYS=1 npm run dev
+```
+
+Then press `Enter` and `Ctrl+Enter` in the prompt and compare the emitted `[debug stdin]` lines. If both look like plain carriage return (`<CR>` / `0d`) submit events, your terminal is not sending a distinct modified-enter sequence.
+
+You can also run:
+
+```text
+/keys
+```
+
+inside Yips for built-in diagnostics guidance.
+
+### Alacritty Example Mapping
+
+If you use Alacritty, map `Ctrl+Enter` to CSI-u so Yips can detect newline input distinctly:
+
+```toml
+[keyboard]
+bindings = [
+  { key = "Enter", mods = "Control", chars = "\u001b[13;5u" }
+]
+```
+
+After updating config, restart Alacritty and re-run `YIPS_DEBUG_KEYS=1 npm run dev` to confirm `Ctrl+Enter` now parses as `newline`.
+
+If your setup still reports plain `CR` submit for `Ctrl+Enter`, try this alternate mapping (also supported by Yips):
+
+```toml
+[keyboard]
+bindings = [
+  { key = "Enter", mods = "Control", chars = "\u001b[13;5~" }
+]
+```
+
 ## Basic Commands
 
 | Command | Description |

@@ -279,17 +279,8 @@ export function buildPromptRenderLines(
     const leftBorder = colorText("│", GRADIENT_PINK);
     const rightBorder = colorText("│", GRADIENT_YELLOW);
 
-    if (rowIndex === 0) {
-      const prefixLength = Math.min(frame.innerWidth, charLength(prefix));
-      const innerChars = Array.from(plainInner);
-      const prefixText = innerChars.slice(0, prefixLength).join("");
-      const restText = innerChars.slice(prefixLength).join("");
-      const coloredPrefix = prefixLength > 0 ? colorText(prefixText, INPUT_PINK) : "";
-      lines.push(`${leftBorder}${coloredPrefix}${restText}${rightBorder}`);
-      continue;
-    }
-
-    lines.push(`${leftBorder}${plainInner}${rightBorder}`);
+    const coloredInner = colorText(plainInner, INPUT_PINK);
+    lines.push(`${leftBorder}${coloredInner}${rightBorder}`);
   }
 
   lines.push(horizontalGradient(frame.bottom, GRADIENT_PINK, GRADIENT_YELLOW));

@@ -14,21 +14,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - CI workflow for install, typecheck, test, and formatting checks
 - Initial ESLint + Prettier project configuration
 - Exchange continuity log at `docs/progress-log.md`
-- TUI with terminal-kit: alternate screen, three-zone layout (output area, status bar, input line)
+- Ink-based TUI: conversation pane, prompt composer, and command-aware multiline input
 - Color system (`src/colors.ts`): gradient palette, horizontal/diagonal gradients, truecolor markup
 - Responsive title box (`src/title-box.ts`): ASCII YIPS logo, 4 layout modes (full/single/compact/minimal), gradient borders
 - Message formatting (`src/messages.ts`): user, assistant, error, warning, success, dim message styles
 - Pulsing spinner (`src/spinner.ts`): braille frames, sine-wave color oscillation, elapsed timer
 - Command registry (`src/commands.ts`): register/dispatch pattern, built-in `/help`, `/exit`, `/quit`, `/clear`, `/model`, `/stream`, `/verbose`
 - TTY detection: TUI launches for interactive terminals, REPL fallback for pipes and `--no-tui`
+- `src/llama-client.ts`: OpenAI-compatible llama.cpp client for non-streaming and SSE streaming chat completions
+- New backend tests in `tests/llama-client.test.ts` covering request payloads, streaming deltas, and failure paths
 
 ### Changed
 
-- `docs/guides/getting-started.md` now reflects runnable Milestone 0 commands and behavior
+- `docs/guides/getting-started.md` now reflects runnable TUI commands and llama.cpp chat behavior
 - `docs/contributing.md` updated with implemented toolchain (npm, Vitest, ESLint, Prettier)
 - `docs/roadmap.md` and `docs/stack.md` updated with Milestone 0 decisions and completed items
 - `src/index.ts` updated to launch TUI by default, with REPL fallback
-- TUI framework decision: terminal-kit (see `docs/stack.md`)
+- TUI framework migrated from terminal-kit to Ink (see `docs/stack.md`)
+- Truecolor markup pipeline fixed to terminal-kit syntax (`^[#rrggbb]...^:`), resolving broken literal color output
+- `src/tui.ts` now sends messages to llama.cpp, streams token output in-place, tracks in-memory conversation history, and retries failed streams once in non-stream mode
+- Config schema now includes `llamaBaseUrl` and `model`, with optional `YIPS_LLAMA_BASE_URL` and `YIPS_MODEL` overrides
+- Slash commands: `/model` now updates the active runtime model and `/new` aliases `/clear`
 
 ## Legacy (yips-cli)
 
@@ -84,4 +90,4 @@ Changes from the Python CLI predecessor. These entries are reformatted from `yip
 
 ---
 
-> Last updated: 2026-02-22
+> Last updated: 2026-02-23

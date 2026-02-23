@@ -20,7 +20,9 @@ export function getDefaultConfig(): AppConfig {
   return {
     streaming: true,
     verbose: false,
-    backend: "llamacpp"
+    backend: "llamacpp",
+    llamaBaseUrl: "http://127.0.0.1:8080",
+    model: "default"
   };
 }
 
@@ -44,6 +46,45 @@ function normalizeBackend(value: unknown, fallback: Backend): Backend {
   return fallback;
 }
 
+function normalizeModel(value: unknown, fallback: string): string {
+  if (typeof value !== "string") {
+    return fallback;
+  }
+
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : fallback;
+}
+
+function normalizeBaseUrl(value: unknown, fallback: string): string {
+  if (typeof value !== "string") {
+    return fallback;
+  }
+
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return fallback;
+  }
+
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return fallback;
+    }
+
+    return parsed.toString().replace(/\/$/, "");
+  } catch {
+    return fallback;
+  }
+}
+
+function applyEnvOverrides(config: AppConfig): AppConfig {
+  return {
+    ...config,
+    llamaBaseUrl: normalizeBaseUrl(process.env["YIPS_LLAMA_BASE_URL"], config.llamaBaseUrl),
+    model: normalizeModel(process.env["YIPS_MODEL"], config.model)
+  };
+}
+
 export function mergeConfig(defaults: AppConfig, candidate: unknown): AppConfig {
   if (!isRecord(candidate)) {
     return defaults;
@@ -52,7 +93,9 @@ export function mergeConfig(defaults: AppConfig, candidate: unknown): AppConfig 
   return {
     streaming: normalizeBoolean(candidate.streaming, defaults.streaming),
     verbose: normalizeBoolean(candidate.verbose, defaults.verbose),
-    backend: normalizeBackend(candidate.backend, defaults.backend)
+    backend: normalizeBackend(candidate.backend, defaults.backend),
+    llamaBaseUrl: normalizeBaseUrl(candidate.llamaBaseUrl, defaults.llamaBaseUrl),
+    model: normalizeModel(candidate.model, defaults.model)
   };
 }
 
@@ -63,7 +106,7 @@ export async function loadConfig(configPath = DEFAULT_CONFIG_PATH): Promise<Load
   try {
     await access(path, fsConstants.R_OK);
   } catch {
-    return { config: defaults, path, source: "default" };
+    return { config: applyEnvOverrides(defaults), path, source: "default" };
   }
 
   try {
@@ -71,14 +114,14 @@ export async function loadConfig(configPath = DEFAULT_CONFIG_PATH): Promise<Load
     const parsedConfig: unknown = JSON.parse(rawConfig);
 
     return {
-      config: mergeConfig(defaults, parsedConfig),
+      config: applyEnvOverrides(mergeConfig(defaults, parsedConfig)),
       path,
       source: "file"
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return {
-      config: defaults,
+      config: applyEnvOverrides(defaults),
       path,
       source: "default",
       warning: `Failed to load config at ${path}: ${message}`

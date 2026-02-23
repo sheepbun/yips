@@ -16,9 +16,9 @@ Project scaffolding and core decisions.
 Terminal interface with LLM integration.
 
 - [x] TUI layout: input area, response pane, status bar
-- [ ] llama.cpp integration: start server, send requests, parse responses
-- [ ] Streaming display: token-by-token rendering
-- [ ] Conversation history: in-memory message list, context assembly
+- [x] llama.cpp integration: send requests and parse OpenAI-compatible responses
+- [x] Streaming display: token-by-token rendering
+- [x] Conversation history: in-memory message list and context assembly
 - [x] Slash command system: parse `/command args`, dispatch to handlers
 - [x] Built-in commands: `/exit`, `/clear`, `/model`, `/stream`, `/verbose`
 - [x] Loading indicators and error display
@@ -80,7 +80,7 @@ Packaging and installation.
 | Language | Decided | TypeScript (strict mode) | Rust, Go, Python | Type safety + ecosystem; Rust considered too slow for iteration |
 | Runtime | Decided | Node.js | Deno, Bun | Broadest ecosystem support; Bun may be revisited |
 | LLM backend | Decided | llama.cpp (primary) | Ollama, LM Studio | Direct control over model lifecycle; OpenAI-compatible API |
-| TUI framework | Decided | terminal-kit | Ink, blessed | Fine-grained terminal control, truecolor support, built-in input handling |
+| TUI framework | Decided | Ink | terminal-kit, blessed | React component model, portable input handling, and maintainable render lifecycle |
 | Config format | Decided | JSON (`.yips_config.json`) | TOML, YAML | Chosen for zero dependencies during bootstrap; comments may be revisited later |
 | Distribution | Open | — | npm, binary, Homebrew | See [Tech Stack](./stack.md) for evaluation criteria |
 | Package manager | Decided | npm | pnpm, bun | Pragmatic default for bootstrapping |
@@ -89,4 +89,4 @@ Packaging and installation.
 
 ---
 
-> Last updated: 2026-02-22
+> Last updated: 2026-02-23

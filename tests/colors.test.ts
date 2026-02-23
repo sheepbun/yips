@@ -63,16 +63,16 @@ describe("interpolateColor", () => {
 });
 
 describe("colorChar", () => {
-  it("wraps a character with truecolor markup", () => {
+  it("wraps a character with ANSI truecolor", () => {
     const result = colorChar("A", { r: 255, g: 0, b: 128 });
-    expect(result).toBe("^#ff0080A");
+    expect(result).toBe("\u001b[38;2;255;0;128mA");
   });
 });
 
 describe("colorText", () => {
-  it("wraps text with truecolor markup and reset", () => {
+  it("wraps text with ANSI truecolor and foreground reset", () => {
     const result = colorText("hello", { r: 255, g: 0, b: 0 });
-    expect(result).toBe("^#ff0000hello^:");
+    expect(result).toBe("\u001b[38;2;255;0;0mhello\u001b[39m");
   });
 
   it("returns empty string for empty input", () => {
@@ -88,15 +88,15 @@ describe("horizontalGradient", () => {
   it("handles single character", () => {
     const result = horizontalGradient("A", GRADIENT_PINK, GRADIENT_YELLOW);
     expect(result).toContain("A");
-    expect(result).toContain("^#");
-    expect(result.endsWith("^:")).toBe(true);
+    expect(result).toContain("\u001b[38;2;");
+    expect(result.endsWith("\u001b[39m")).toBe(true);
   });
 
   it("applies gradient across multiple characters", () => {
     const result = horizontalGradient("ABC", GRADIENT_PINK, GRADIENT_YELLOW);
     // Should contain 3 color markers
-    const colorMarkers = result.match(/\^#[0-9a-f]{6}/g);
-    expect(colorMarkers).toHaveLength(3);
+    const markerCount = result.split("\u001b[38;2;").length - 1;
+    expect(markerCount).toBe(3);
     expect(result).toContain("A");
     expect(result).toContain("B");
     expect(result).toContain("C");

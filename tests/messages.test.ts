@@ -13,7 +13,7 @@ import { stripMarkup } from "../src/title-box";
 describe("formatUserMessage", () => {
   it("prefixes with >>> and applies color", () => {
     const result = formatUserMessage("hello world");
-    expect(result).toContain("^[#");
+    expect(result).toContain("\u001b[");
     expect(stripMarkup(result)).toBe(">>> hello world");
   });
 });
@@ -41,33 +41,33 @@ describe("formatAssistantMessage", () => {
 });
 
 describe("formatErrorMessage", () => {
-  it("applies red color markup", () => {
+  it("applies red ANSI color", () => {
     const result = formatErrorMessage("something went wrong");
-    expect(result).toContain("^[#");
+    expect(result).toContain("\u001b[");
     expect(stripMarkup(result)).toBe("something went wrong");
   });
 });
 
 describe("formatWarningMessage", () => {
-  it("applies yellow color markup", () => {
+  it("applies yellow ANSI color", () => {
     const result = formatWarningMessage("caution");
-    expect(result).toContain("^[#");
+    expect(result).toContain("\u001b[");
     expect(stripMarkup(result)).toBe("caution");
   });
 });
 
 describe("formatSuccessMessage", () => {
-  it("applies green color markup", () => {
+  it("applies green ANSI color", () => {
     const result = formatSuccessMessage("done");
-    expect(result).toContain("^[#");
+    expect(result).toContain("\u001b[");
     expect(stripMarkup(result)).toBe("done");
   });
 });
 
 describe("formatDimMessage", () => {
-  it("applies dim color markup", () => {
+  it("applies dim ANSI color", () => {
     const result = formatDimMessage("subtle");
-    expect(result).toContain("^[#");
+    expect(result).toContain("\u001b[");
     expect(stripMarkup(result)).toBe("subtle");
   });
 });

@@ -87,6 +87,7 @@ describe("createDefaultRegistry", () => {
     expect(registry.has("exit")).toBe(true);
     expect(registry.has("quit")).toBe(true);
     expect(registry.has("clear")).toBe(true);
+    expect(registry.has("new")).toBe(true);
     expect(registry.has("model")).toBe(true);
     expect(registry.has("stream")).toBe(true);
     expect(registry.has("verbose")).toBe(true);
@@ -109,6 +110,12 @@ describe("createDefaultRegistry", () => {
   it("/clear returns clear action", () => {
     const registry = createDefaultRegistry();
     const result = registry.dispatch("clear", "", createContext());
+    expect(result.action).toBe("clear");
+  });
+
+  it("/new returns clear action", () => {
+    const registry = createDefaultRegistry();
+    const result = registry.dispatch("new", "", createContext());
     expect(result.action).toBe("clear");
   });
 
@@ -135,9 +142,10 @@ describe("createDefaultRegistry", () => {
     expect(result.output).toContain("enabled");
   });
 
-  it("/model shows usage without args", () => {
+  it("/model shows current model and usage without args", () => {
     const registry = createDefaultRegistry();
     const result = registry.dispatch("model", "", createContext());
+    expect(result.output).toContain("Current model");
     expect(result.output).toContain("Usage");
   });
 

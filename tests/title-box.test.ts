@@ -201,26 +201,41 @@ describe("renderTitleBox", () => {
       "\u001b[38;2;255;255;255m"
     );
   });
+
+  it("applies row-major gradient endpoints to the full logo", () => {
+    const lines = renderTitleBox(makeOptions({ width: 80 }));
+    const plain = lines.map(stripMarkup);
+    const logoTop = "██╗   ██╗██╗██████╗ ███████╗";
+    const logoBottom = "   ╚═╝   ╚═╝╚═╝     ╚══════╝";
+    const topIndex = plain.findIndex((line) => line.includes(logoTop));
+    const bottomIndex = plain.findIndex((line) => line.includes(logoBottom));
+
+    expect(topIndex).toBeGreaterThan(-1);
+    expect(bottomIndex).toBeGreaterThan(-1);
+
+    const topStart = (plain[topIndex] ?? "").indexOf(logoTop);
+    const bottomStart = (plain[bottomIndex] ?? "").indexOf(logoBottom);
+    const bottomEnd = bottomStart + logoBottom.length - 1;
+
+    expect(colorCodeBeforeColumn(lines[topIndex] ?? "", topStart)).toBe(toAnsiForeground(GRADIENT_PINK));
+    expect(colorCodeBeforeColumn(lines[bottomIndex] ?? "", bottomEnd)).toBe(
+      toAnsiForeground(GRADIENT_YELLOW)
+    );
+  });
 });
 
 function colorCodeBeforeColumn(markupLine: string, plainColumn: number): string {
-  const ansiRegex = /\u001b\[38;2;\d+;\d+;\d+m/g;
   let plainCount = 0;
   let activeColor = "";
 
   for (let i = 0; i < markupLine.length; i++) {
     const char = markupLine[i] ?? "";
     if (char === "\u001b") {
-      ansiRegex.lastIndex = i;
-      const match = ansiRegex.exec(markupLine);
-      if (match !== null && match.index === i) {
-        activeColor = match[0];
-        i = ansiRegex.lastIndex - 1;
-        continue;
-      }
-
       const endIndex = markupLine.indexOf("m", i);
       if (endIndex >= 0) {
+        if (markupLine.startsWith("\u001b[38;2;", i)) {
+          activeColor = markupLine.slice(i, endIndex + 1);
+        }
         i = endIndex;
       }
       continue;

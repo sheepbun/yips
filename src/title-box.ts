@@ -3,7 +3,6 @@
 import {
   colorChar,
   colorText,
-  diagonalGradient,
   DIM_GRAY,
   GRADIENT_BLUE,
   GRADIENT_PINK,
@@ -11,6 +10,7 @@ import {
   horizontalGradient,
   INPUT_PINK,
   interpolateColor,
+  rowMajorGradient,
   stripAnsi
 } from "./colors";
 
@@ -319,7 +319,7 @@ function renderSingleColumn(
   const innerWidth = Math.max(0, width - 2);
   const lines: string[] = [];
   const modelInfo = buildModelInfo(backend, model, tokenUsage);
-  const gradientLogo = diagonalGradient(YIPS_LOGO, GRADIENT_PINK, GRADIENT_YELLOW);
+  const gradientLogo = rowMajorGradient(YIPS_LOGO, GRADIENT_PINK, GRADIENT_YELLOW);
   const showLogo = innerWidth >= LOGO_WIDTH;
 
   lines.push(makeTopBorder(version, width));
@@ -393,7 +393,7 @@ function renderFull(options: TitleBoxOptions): string[] {
   const leftBorder = horizontalGradient("│", GRADIENT_PINK, GRADIENT_PINK);
   const middleBorder = colorText("│", middleBorderColor);
   const rightBorder = horizontalGradient("│", GRADIENT_YELLOW, GRADIENT_YELLOW);
-  const gradientLogo = diagonalGradient(YIPS_LOGO, GRADIENT_PINK, GRADIENT_YELLOW);
+  const gradientLogo = rowMajorGradient(YIPS_LOGO, GRADIENT_PINK, GRADIENT_YELLOW);
   const rightStartColumn = leftWidth + 2;
 
   const leftRows: Array<{ markup: string; plain: string }> = [

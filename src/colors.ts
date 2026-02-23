@@ -137,3 +137,36 @@ export function diagonalGradient(
     return gradientChars.join("");
   });
 }
+
+/**
+ * Apply a multiline gradient by scanning cells row-by-row.
+ * Progress advances left-to-right per row, then continues on the next row.
+ */
+export function rowMajorGradient(
+  lines: readonly string[],
+  startColor: Rgb,
+  endColor: Rgb
+): string[] {
+  if (lines.length === 0) return [];
+
+  const splitLines = lines.map((line) => Array.from(line));
+  const maxLen = Math.max(...splitLines.map((lineChars) => lineChars.length));
+  if (maxLen === 0) return lines.map(() => "");
+
+  const totalCells = lines.length * maxLen;
+
+  return splitLines.map((lineChars, row) => {
+    if (lineChars.length === 0) return "";
+
+    const gradientChars: string[] = [];
+    for (let col = 0; col < lineChars.length; col++) {
+      const cellIndex = row * maxLen + col;
+      const t = totalCells > 1 ? cellIndex / (totalCells - 1) : 0;
+      const color = interpolateColor(startColor, endColor, t);
+      gradientChars.push(colorChar(lineChars[col] ?? "", color));
+    }
+
+    gradientChars.push(ANSI_RESET_FOREGROUND);
+    return gradientChars.join("");
+  });
+}

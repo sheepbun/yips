@@ -8,6 +8,7 @@ import { createDefaultRegistry, parseCommand } from "./commands";
 import type { CommandRegistry, SessionContext } from "./commands";
 import {
   colorText,
+  GRADIENT_BLUE,
   GRADIENT_PINK,
   GRADIENT_YELLOW,
   horizontalGradient,
@@ -80,8 +81,28 @@ function formatBackendName(backend: string): string {
   return backend === "llamacpp" ? "llama.cpp" : backend;
 }
 
+function resolveLoadedModel(model: string): string | null {
+  const trimmed = model.trim();
+  if (trimmed.length === 0) {
+    return null;
+  }
+  if (trimmed.toLowerCase() === "default") {
+    return null;
+  }
+  return trimmed;
+}
+
 function charLength(text: string): number {
   return Array.from(text).length;
+}
+
+function clipPromptStatusText(statusText: string, maxWidth: number): string {
+  if (maxWidth <= 0) return "";
+  const trimmed = statusText.trim();
+  const normalized = trimmed.length > 0 ? ` ${trimmed} ` : " ";
+  const chars = Array.from(normalized);
+  if (chars.length <= maxWidth) return normalized;
+  return chars.slice(chars.length - maxWidth).join("");
 }
 
 function toDebugText(input: string): string {
@@ -113,16 +134,30 @@ function buildTitleBoxOptions(
   version: string,
   width: number
 ): TitleBoxOptions {
+  const loadedModel = resolveLoadedModel(state.config.model);
   return {
     width,
     version,
     username: state.username,
     backend: formatBackendName(state.config.backend),
-    model: state.config.model,
-    tokenUsage: "0/8192",
+    model: loadedModel ?? "",
+    tokenUsage: loadedModel ? "0/8192" : "",
     cwd: process.cwd(),
     sessionName: state.sessionName
   };
+}
+
+function buildPromptStatusText(state: RuntimeState): string {
+  const provider = formatBackendName(state.config.backend);
+  const loadedModel = resolveLoadedModel(state.config.model);
+  const parts = [provider];
+  if (loadedModel) {
+    parts.push(loadedModel);
+  }
+  if (state.busy) {
+    parts.push(state.busyLabel);
+  }
+  return parts.join(" · ");
 }
 
 function appendOutput(state: RuntimeState, text: string): void {
@@ -283,7 +318,18 @@ export function buildPromptRenderLines(
     lines.push(`${leftBorder}${coloredInner}${rightBorder}`);
   }
 
-  lines.push(horizontalGradient(frame.bottom, GRADIENT_PINK, GRADIENT_YELLOW));
+  if (width <= 1) {
+    lines.push(horizontalGradient(frame.bottom, GRADIENT_PINK, GRADIENT_YELLOW));
+    return lines;
+  }
+
+  const clippedStatus = clipPromptStatusText(statusText, frame.innerWidth);
+  const fill = "─".repeat(Math.max(0, frame.innerWidth - charLength(clippedStatus)));
+  const leftBottom = colorText("╰", GRADIENT_PINK);
+  const fillBottom = horizontalGradient(fill, GRADIENT_PINK, GRADIENT_YELLOW);
+  const statusBottom = colorText(clippedStatus, GRADIENT_BLUE);
+  const rightBottom = colorText("╯", GRADIENT_YELLOW);
+  lines.push(`${leftBottom}${fillBottom}${statusBottom}${rightBottom}`);
   return lines;
 }
 
@@ -761,9 +807,7 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
     composer.setInteriorWidth(Math.max(0, dimensions.columns - 2));
     const promptLayout = composer.getLayout();
 
-    const statusText = state.busy
-      ? `${formatBackendName(state.config.backend)} · ${state.config.model} · ${state.busyLabel}`
-      : `${formatBackendName(state.config.backend)} · ${state.config.model}`;
+    const statusText = buildPromptStatusText(state);
 
     const titleLines = renderTitleBox(buildTitleBoxOptions(state, version, dimensions.columns));
     const promptLines = buildPromptRenderLines(dimensions.columns, statusText, promptLayout, true);

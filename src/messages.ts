@@ -27,10 +27,28 @@ export function formatUserMessage(text: string): string {
 
 export function formatAssistantMessage(text: string, timestamp?: Date): string {
   const time = timestamp ?? new Date();
-  const timeStr = colorText(`[${formatTimestamp(time)}]`, DARK_BLUE);
-  const label = horizontalGradient("Yips:", GRADIENT_PINK, GRADIENT_YELLOW);
-  const body = horizontalGradient(text, GRADIENT_PINK, GRADIENT_YELLOW);
-  return `${timeStr} ${label} ${body}`;
+  const timestampPlain = `[${formatTimestamp(time)}]`;
+  const namePlain = "Yips";
+  const prefixPlain = `${timestampPlain} ${namePlain}: `;
+  const timeStr = colorText(timestampPlain, DARK_BLUE);
+  const name = horizontalGradient(namePlain, GRADIENT_PINK, GRADIENT_YELLOW);
+  const colon = colorText(":", DARK_BLUE);
+
+  const lines = text.split("\n");
+  const firstLine = lines[0] ?? "";
+  const firstBody = horizontalGradient(firstLine, GRADIENT_PINK, GRADIENT_YELLOW);
+  const first = `${timeStr} ${name}${colon} ${firstBody}`;
+
+  if (lines.length <= 1) {
+    return first;
+  }
+
+  const indent = " ".repeat(prefixPlain.length);
+  const rest = lines
+    .slice(1)
+    .map((line) => `${indent}${horizontalGradient(line, GRADIENT_PINK, GRADIENT_YELLOW)}`);
+
+  return [first, ...rest].join("\n");
 }
 
 export function formatErrorMessage(text: string): string {

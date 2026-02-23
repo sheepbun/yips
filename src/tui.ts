@@ -143,20 +143,10 @@ function replaceOutputBlock(
   return lines.length;
 }
 
-function appendSessionHeader(state: RuntimeState, version: string, width: number): void {
-  appendOutput(state, "");
-  const titleLines = renderTitleBox(buildTitleBoxOptions(state, version, width));
-  for (const line of titleLines) {
-    appendOutput(state, line);
-  }
-  appendOutput(state, "");
-}
-
-function resetSession(state: RuntimeState, version: string, width: number): void {
+function resetSession(state: RuntimeState): void {
   state.outputLines = [];
   state.messageCount = 0;
   state.history = [];
-  appendSessionHeader(state, version, width);
 }
 
 function createRuntimeState(options: TuiOptions): RuntimeState {
@@ -188,6 +178,65 @@ function withCursorAt(content: string, index: number): string {
   const safeIndex = Math.max(0, Math.min(index, chars.length - 1));
   chars[safeIndex] = CURSOR_MARKER;
   return chars.join("");
+}
+
+interface VisibleLayoutSlices {
+  titleLines: string[];
+  outputLines: string[];
+  promptLines: string[];
+}
+
+export function computeVisibleLayoutSlices(
+  rows: number,
+  titleLines: string[],
+  outputLines: string[],
+  promptLines: string[]
+): VisibleLayoutSlices {
+  const safeRows = Math.max(1, rows);
+  const promptCount = Math.min(promptLines.length, safeRows);
+  const visiblePrompt = promptLines.slice(-promptCount);
+  const upperRowCount = Math.max(0, safeRows - visiblePrompt.length);
+
+  if (upperRowCount === 0) {
+    return {
+      titleLines: [],
+      outputLines: [],
+      promptLines: visiblePrompt
+    };
+  }
+
+  const stackedUpper = [...titleLines, ...outputLines];
+  if (stackedUpper.length <= upperRowCount) {
+    const outputPadding = new Array<string>(upperRowCount - stackedUpper.length).fill("");
+    return {
+      titleLines: [...titleLines],
+      outputLines: [...outputPadding, ...outputLines],
+      promptLines: visiblePrompt
+    };
+  }
+
+  const upperTail = stackedUpper.slice(-upperRowCount);
+  const titleBoundary = titleLines.length;
+  const firstVisibleStackIndex = stackedUpper.length - upperTail.length;
+
+  const visibleTitle: string[] = [];
+  const visibleOutput: string[] = [];
+
+  for (let offset = 0; offset < upperTail.length; offset++) {
+    const line = upperTail[offset] ?? "";
+    const stackIndex = firstVisibleStackIndex + offset;
+    if (stackIndex < titleBoundary) {
+      visibleTitle.push(line);
+    } else {
+      visibleOutput.push(line);
+    }
+  }
+
+  return {
+    titleLines: visibleTitle,
+    outputLines: visibleOutput,
+    promptLines: visiblePrompt
+  };
 }
 
 export function buildPromptRenderLines(
@@ -365,7 +414,6 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
 
     if (!stateRef.current) {
       const state = createRuntimeState(options);
-      appendSessionHeader(state, version, dimensions.columns);
       stateRef.current = state;
     }
 
@@ -595,7 +643,7 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
           }
 
           if (result.action === "clear") {
-            resetSession(currentState, version, dimensionsRef.current.columns);
+            resetSession(currentState);
           }
 
           forceRender();
@@ -610,7 +658,7 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
 
         await handleUserMessage(trimmed);
       },
-      [createComposer, exit, forceRender, handleUserMessage, version]
+      [createComposer, exit, forceRender, handleUserMessage]
     );
 
     const dispatchComposerEvent = useCallback(
@@ -726,19 +774,34 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
       ? `${formatBackendName(state.config.backend)} · ${state.config.model} · ${state.busyLabel}`
       : `${formatBackendName(state.config.backend)} · ${state.config.model}`;
 
+    const titleLines = renderTitleBox(buildTitleBoxOptions(state, version, dimensions.columns));
     const promptLines = buildPromptRenderLines(dimensions.columns, statusText, promptLayout, true);
-    const outputCapacity = Math.max(1, dimensions.rows - promptLines.length);
-    const visibleOutput = state.outputLines.slice(-outputCapacity);
+    const visible = computeVisibleLayoutSlices(
+      dimensions.rows,
+      titleLines,
+      state.outputLines,
+      promptLines
+    );
 
-    const outputNodes = visibleOutput.map((line, index) =>
+    const titleNodes = visible.titleLines.map((line, index) =>
+      React.createElement(Text, { key: `title-${index}` }, line.length > 0 ? line : " ")
+    );
+
+    const outputNodes = visible.outputLines.map((line, index) =>
       React.createElement(Text, { key: `out-${index}` }, line.length > 0 ? line : " ")
     );
 
-    const promptNodes = promptLines.map((line, index) =>
+    const promptNodes = visible.promptLines.map((line, index) =>
       React.createElement(Text, { key: `prompt-${index}` }, line)
     );
 
-    return React.createElement(Box, { flexDirection: "column" }, ...outputNodes, ...promptNodes);
+    return React.createElement(
+      Box,
+      { flexDirection: "column" },
+      ...titleNodes,
+      ...outputNodes,
+      ...promptNodes
+    );
   };
 }
 

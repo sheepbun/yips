@@ -520,3 +520,83 @@ Validation:
 Next:
 - Re-test in native Alacritty/i3 with `YIPS_DEBUG_KEYS=1 npm run dev`.
 - If `Ctrl+Enter` still appears as plain CR submit, share the emitted `[debug stdin]` line(s) for direct parser extension.
+
+## 2026-02-23 21:32 UTC — Exchange 24
+Summary: Refactored TUI viewport rendering so the title box is fixed at the top and the prompt box remains anchored at the bottom.
+Changed:
+- Updated `src/tui.ts`:
+  - removed title-box insertion into `outputLines` (deleted session-header append path)
+  - simplified `resetSession(...)` to clear conversation/output state only
+  - added exported `computeVisibleLayoutSlices(...)` helper to allocate fixed top title, middle output, and fixed bottom prompt rows based on terminal height
+  - integrated live per-render title computation (`renderTitleBox(...)`) so model/backend/session metadata updates are reflected immediately
+  - changed final Ink node composition order to always render `title -> output -> prompt`
+  - fixed zero-capacity middle slice edge case (`slice(-0)`) by returning empty output rows when no middle viewport space exists
+- Updated `tests/tui-resize-render.test.ts`:
+  - added `computeVisibleLayoutSlices` coverage for:
+    - normal height allocation
+    - short-height behavior preserving prompt rows first
+    - prompt-taller-than-terminal clipping behavior
+Validation:
+- `npm run typecheck` — clean
+- `npm test` — clean (119 passing)
+Next:
+- Perform an interactive visual pass with `npm run dev` to confirm top/bottom anchoring behavior across manual terminal resizes and multiline prompt growth.
+
+## 2026-02-23 21:35 UTC — Exchange 25
+Summary: Fixed prompt anchoring regression by padding the middle viewport so the prompt always renders on the terminal’s bottom rows.
+Changed:
+- Updated `src/tui.ts`:
+  - adjusted `computeVisibleLayoutSlices(...)` to pad middle output rows with blanks when output history is shorter than available middle height
+  - this guarantees `title + middle + prompt` always fills the visible row budget, keeping prompt rows bottom-anchored
+- Updated `tests/tui-resize-render.test.ts`:
+  - added `pads the middle viewport so prompt stays anchored at the bottom` regression test
+  - validates blank middle-row padding and exact total row occupancy
+Validation:
+- `npm run typecheck` — clean
+- `npm test` — clean (120 passing)
+Next:
+- Run `npm run dev` and manually resize the terminal to verify the prompt remains fixed to the bottom under live interaction.
+
+## 2026-02-23 21:39 UTC — Exchange 26
+Summary: Updated viewport behavior so output can scroll the title box off-screen while keeping the prompt anchored to the bottom.
+Changed:
+- Updated `src/tui.ts`:
+  - changed `computeVisibleLayoutSlices(...)` to treat the upper region as a single scrollable stack of `title + output`
+  - upper viewport now renders the tail of that stack, allowing output growth to progressively displace and eventually hide title lines
+  - retained top padding for sparse history so total rows still fill terminal height and prompt remains bottom-anchored
+- Updated `tests/tui-resize-render.test.ts`:
+  - revised slice expectations to reflect stacked upper-tail behavior
+  - added/updated coverage verifying output can fully bump title off-screen
+Validation:
+- `npm run typecheck` — clean
+- `npm test` — clean (120 passing)
+Next:
+- Verify live UX in `npm run dev` to confirm title displacement feels correct during long conversations and terminal resizes.
+
+## 2026-02-23 21:41 UTC — Exchange 27
+Summary: Adjusted upper-viewport padding so the title starts at the top initially, while still allowing output growth to push it off-screen later.
+Changed:
+- Updated `src/tui.ts`:
+  - refined `computeVisibleLayoutSlices(...)` for non-overflow cases to place blank padding after `title + output` (not before), keeping title top-aligned at startup
+  - added explicit `upperRowCount === 0` guard so prompt-only height does not render title/output rows
+- Updated `tests/tui-resize-render.test.ts`:
+  - updated padding regression expectation to assert title-first rendering with trailing upper-region blanks
+Validation:
+- `npm run typecheck` — clean
+- `npm test` — clean (120 passing)
+Next:
+- Validate interactively with `npm run dev` that initial render shows title at top and long output subsequently displaces it as intended.
+
+## 2026-02-23 21:44 UTC — Exchange 28
+Summary: Updated upper-viewport fill behavior so chat output grows upward from the prompt into empty space before reaching the title box.
+Changed:
+- Updated `src/tui.ts`:
+  - in non-overflow upper viewport cases, `computeVisibleLayoutSlices(...)` now returns `title + leading-gap + output` (instead of trailing-gap)
+  - this bottom-aligns output directly above the prompt, so new chat lines consume padding upward toward the title
+- Updated `tests/tui-resize-render.test.ts`:
+  - revised non-overflow padding expectation to enforce leading blank rows before output
+Validation:
+- `npm run typecheck` — clean
+- `npm test` — clean (120 passing)
+Next:
+- Run an interactive `npm run dev` check to confirm visual growth direction matches expectation during active conversation.

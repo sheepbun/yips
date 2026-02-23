@@ -197,7 +197,7 @@ function createRuntimeState(options: TuiOptions): RuntimeState {
     config: runtimeConfig,
     messageCount: 0,
     username: options.username ?? process.env["USER"] ?? "user",
-    sessionName: options.sessionName ?? "session",
+    sessionName: options.sessionName ?? "",
     inputHistory: [],
     history: [],
     busy: false,

@@ -102,6 +102,17 @@ describe("renderTitleBox", () => {
     expect(fullText).not.toContain("llamacpp · ");
   });
 
+  it("does not render a session label in bottom border when session is not set", () => {
+    const lines = renderTitleBox(makeOptions({ width: 80, sessionName: "" }));
+    const plain = lines.map(stripMarkup);
+    const lastLine = plain[plain.length - 1] ?? "";
+
+    expect(lastLine).toContain("╰");
+    expect(lastLine).toContain("╯");
+    expect(lastLine).not.toContain("session");
+    expect(lastLine).not.toContain("test session");
+  });
+
   it("aligns right-column gradients to the outer title-box borders", () => {
     const width = 80;
     const lines = renderTitleBox(makeOptions({ width }));

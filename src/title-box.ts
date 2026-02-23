@@ -130,7 +130,12 @@ function makeBottomBorder(sessionName: string, width: number): string {
   if (width <= 0) return "";
 
   const borderChars = Array.from({ length: Math.max(0, width - 2) }, () => "─");
-  const displayName = ` ${sessionName.replace(/_/g, " ")} `;
+  const trimmedSessionName = sessionName.trim();
+  if (trimmedSessionName.length === 0) {
+    return horizontalGradient(`╰${borderChars.join("")}╯`, GRADIENT_PINK, GRADIENT_YELLOW);
+  }
+
+  const displayName = ` ${trimmedSessionName.replace(/_/g, " ")} `;
 
   if (displayName.length <= borderChars.length) {
     const start = Math.floor((borderChars.length - displayName.length) / 2);

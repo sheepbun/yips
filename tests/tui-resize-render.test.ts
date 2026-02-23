@@ -6,6 +6,7 @@ import { buildPromptRenderLines, computeVisibleLayoutSlices } from "../src/tui";
 import { stripMarkup } from "../src/title-box";
 
 const INPUT_PINK_ANSI = "\u001b[38;2;255;204;255m";
+const MODEL_INFO_BLUE_ANSI = "\u001b[38;2;137;207;240m";
 
 describe("buildPromptRenderLines", () => {
   it("renders rounded prompt frame with prefix, content, and cursor", () => {
@@ -18,6 +19,7 @@ describe("buildPromptRenderLines", () => {
     expect(lines).toHaveLength(layout.rowCount + 2);
     expect(lines[0]).toContain("\u001b[");
     expect(lines[1]).toContain(INPUT_PINK_ANSI);
+    expect(lines[lines.length - 1]).toContain(MODEL_INFO_BLUE_ANSI);
     expect(plain[0]).toBe(frame.top);
     expect(plain[lines.length - 1]).toBe(frame.bottom);
     expect(plain[1]).toContain(">>> hello");

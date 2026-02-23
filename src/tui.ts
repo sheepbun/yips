@@ -2,21 +2,28 @@
 
 import terminalKit from "terminal-kit";
 
-import { colorText, DARK_BLUE, GRADIENT_PINK, GRADIENT_YELLOW, horizontalGradient } from "./colors";
+import {
+  colorText,
+  DARK_BLUE,
+  GRADIENT_PINK,
+  GRADIENT_YELLOW,
+  horizontalGradient,
+  INPUT_PINK
+} from "./colors";
 import { createDefaultRegistry, parseCommand } from "./commands";
 import type { CommandRegistry, SessionContext } from "./commands";
-import { formatAssistantMessage, formatDimMessage, formatUserMessage } from "./messages";
+import { LlamaClient } from "./llama-client";
+import {
+  formatAssistantMessage,
+  formatDimMessage,
+  formatErrorMessage,
+  formatUserMessage,
+  formatWarningMessage
+} from "./messages";
 import { PulsingSpinner } from "./spinner";
 import { renderTitleBox } from "./title-box";
 import type { TitleBoxOptions } from "./title-box";
-import type { AppConfig } from "./types";
-
-export interface TuiOptions {
-  config: AppConfig;
-  username?: string;
-  model?: string;
-  sessionName?: string;
-}
+import type { AppConfig, ChatMessage, TuiOptions } from "./types";
 
 interface TuiState {
   outputLines: string[];
@@ -25,9 +32,14 @@ interface TuiState {
   config: AppConfig;
   messageCount: number;
   username: string;
-  model: string;
   sessionName: string;
   inputHistory: string[];
+  history: ChatMessage[];
+}
+
+interface AssistantReply {
+  text: string;
+  rendered: boolean;
 }
 
 const term = terminalKit.terminal;
@@ -59,7 +71,7 @@ function renderStatusBar(state: TuiState, spinner: PulsingSpinner): void {
   term.markupOnly(separator);
 
   term.moveTo(1, y);
-  const statusLeft = `${state.config.backend} · ${state.model} · ${state.messageCount} msgs`;
+  const statusLeft = `${state.config.backend} · ${state.config.model}`;
   const statusContent = spinner.isActive()
     ? `${colorText(statusLeft, DARK_BLUE)}  ${spinner.render()}`
     : colorText(statusLeft, DARK_BLUE);
@@ -71,7 +83,7 @@ function renderInputLine(): void {
   const y = term.height;
   term.moveTo(1, y);
   term.eraseLine();
-  term.markupOnly(colorText(">>> ", GRADIENT_PINK));
+  term.markupOnly(colorText(">>> ", INPUT_PINK));
 }
 
 function appendOutput(state: TuiState, text: string): void {
@@ -79,6 +91,12 @@ function appendOutput(state: TuiState, text: string): void {
   for (const line of lines) {
     state.outputLines.push(line);
   }
+}
+
+function replaceOutputBlock(state: TuiState, start: number, count: number, text: string): number {
+  const lines = text.split("\n");
+  state.outputLines.splice(start, count, ...lines);
+  return lines.length;
 }
 
 function renderAll(state: TuiState, spinner: PulsingSpinner): void {
@@ -93,45 +111,90 @@ function buildTitleBoxOptions(state: TuiState, version: string): TitleBoxOptions
     version,
     username: state.username,
     backend: state.config.backend,
-    model: state.model,
+    model: state.config.model,
     tokenUsage: "0/8192",
     cwd: process.cwd(),
     sessionName: state.sessionName
   };
 }
 
-export async function startTui(options: TuiOptions): Promise<void> {
-  const state: TuiState = {
-    outputLines: [],
-    scrollOffset: 0,
-    running: true,
-    config: options.config,
-    messageCount: 0,
-    username: options.username ?? process.env["USER"] ?? "user",
-    model: options.model ?? "default",
-    sessionName: options.sessionName ?? "session",
-    inputHistory: []
-  };
-
-  const spinner = new PulsingSpinner();
-  const registry: CommandRegistry = createDefaultRegistry();
-  const version = "0.1.0";
-
-  term.fullscreen(true);
-  term.grabInput({ mouse: "button" });
-
+function appendSessionHeader(state: TuiState, version: string): void {
+  appendOutput(state, "");
   const titleLines = renderTitleBox(buildTitleBoxOptions(state, version));
   for (const line of titleLines) {
     appendOutput(state, line);
   }
   appendOutput(state, "");
-  appendOutput(
-    state,
-    formatAssistantMessage("Welcome! Type /help for commands, or start chatting.")
-  );
-  appendOutput(state, "");
+}
 
+function resetSession(state: TuiState, version: string): void {
+  state.outputLines = [];
+  state.scrollOffset = 0;
+  state.messageCount = 0;
+  state.history = [];
+  appendSessionHeader(state, version);
+}
+
+async function withSpinner<T>(
+  state: TuiState,
+  spinner: PulsingSpinner,
+  label: string,
+  task: () => Promise<T>
+): Promise<T> {
+  spinner.start(label);
+  const interval = setInterval(() => {
+    if (state.running) {
+      renderAll(state, spinner);
+    }
+  }, 90);
   renderAll(state, spinner);
+
+  try {
+    return await task();
+  } finally {
+    clearInterval(interval);
+    spinner.stop();
+    renderAll(state, spinner);
+  }
+}
+
+function formatError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+export async function startTui(options: TuiOptions): Promise<void> {
+  const modelOverride = options.model?.trim();
+  const runtimeConfig: AppConfig = {
+    ...options.config,
+    model: modelOverride && modelOverride.length > 0 ? modelOverride : options.config.model
+  };
+
+  const state: TuiState = {
+    outputLines: [],
+    scrollOffset: 0,
+    running: true,
+    config: runtimeConfig,
+    messageCount: 0,
+    username: options.username ?? process.env["USER"] ?? "user",
+    sessionName: options.sessionName ?? "session",
+    inputHistory: [],
+    history: []
+  };
+
+  const spinner = new PulsingSpinner();
+  const registry: CommandRegistry = createDefaultRegistry();
+  const version = "0.1.0";
+  const llamaClient = new LlamaClient({
+    baseUrl: state.config.llamaBaseUrl,
+    model: state.config.model
+  });
+
+  term.fullscreen(true);
+  term.grabInput({ mouse: "button" });
+
+  appendSessionHeader(state, version);
+  renderAll(state, spinner);
+  setupResizeHandler(state, spinner);
 
   term.on("key", (key: string) => {
     if (key === "CTRL_C") {
@@ -152,6 +215,106 @@ export async function startTui(options: TuiOptions): Promise<void> {
       config: state.config,
       messageCount: state.messageCount
     };
+  }
+
+  async function requestAssistantFromLlama(): Promise<AssistantReply> {
+    llamaClient.setModel(state.config.model);
+
+    if (!state.config.streaming) {
+      const text = await withSpinner(state, spinner, "Thinking...", async () =>
+        llamaClient.chat(state.history, state.config.model)
+      );
+      return { text, rendered: false };
+    }
+
+    const timestamp = new Date();
+    let streamText = "";
+    const blockStart = state.outputLines.length;
+    let blockLength = 1;
+    appendOutput(state, formatAssistantMessage("", timestamp));
+    renderAll(state, spinner);
+
+    try {
+      streamText = await llamaClient.streamChat(
+        state.history,
+        {
+          onToken: (token: string) => {
+            streamText += token;
+            blockLength = replaceOutputBlock(
+              state,
+              blockStart,
+              blockLength,
+              formatAssistantMessage(streamText, timestamp)
+            );
+            renderAll(state, spinner);
+          }
+        },
+        state.config.model
+      );
+
+      if (streamText.length === 0) {
+        throw new Error("Streaming response ended without assistant content.");
+      }
+
+      return { text: streamText, rendered: true };
+    } catch {
+      appendOutput(state, formatWarningMessage("Streaming failed. Retrying without streaming."));
+      renderAll(state, spinner);
+
+      try {
+        const fallbackText = await withSpinner(state, spinner, "Retrying...", async () =>
+          llamaClient.chat(state.history, state.config.model)
+        );
+        replaceOutputBlock(
+          state,
+          blockStart,
+          blockLength,
+          formatAssistantMessage(fallbackText, timestamp)
+        );
+        renderAll(state, spinner);
+        return { text: fallbackText, rendered: true };
+      } catch (fallbackError) {
+        state.outputLines.splice(blockStart, blockLength);
+        throw fallbackError;
+      }
+    }
+  }
+
+  async function handleUserMessage(text: string): Promise<void> {
+    state.messageCount += 1;
+    appendOutput(state, formatUserMessage(text));
+    renderAll(state, spinner);
+
+    state.history.push({ role: "user", content: text });
+
+    if (state.config.backend !== "llamacpp") {
+      const echo = `Echo: ${text}`;
+      appendOutput(
+        state,
+        formatWarningMessage(
+          `Backend '${state.config.backend}' is not implemented yet. Using echo.`
+        )
+      );
+      appendOutput(state, formatAssistantMessage(echo));
+      appendOutput(state, "");
+      state.history.push({ role: "assistant", content: echo });
+      renderAll(state, spinner);
+      return;
+    }
+
+    try {
+      const reply = await requestAssistantFromLlama();
+      if (!reply.rendered) {
+        appendOutput(state, formatAssistantMessage(reply.text));
+      }
+      state.history.push({ role: "assistant", content: reply.text });
+      appendOutput(state, "");
+    } catch (error) {
+      appendOutput(state, formatErrorMessage(`Request failed: ${formatError(error)}`));
+      appendOutput(state, "");
+    }
+
+    renderAll(state, spinner);
   }
 
   while (state.running) {
@@ -195,18 +358,10 @@ export async function startTui(options: TuiOptions): Promise<void> {
       }
 
       if (result.action === "clear") {
-        state.outputLines = [];
-        const titleLines2 = renderTitleBox(buildTitleBoxOptions(state, version));
-        for (const line of titleLines2) {
-          appendOutput(state, line);
-        }
-        appendOutput(state, "");
+        resetSession(state, version);
       }
     } else {
-      state.messageCount += 1;
-      appendOutput(state, formatUserMessage(trimmed));
-      appendOutput(state, formatAssistantMessage(`Echo: ${trimmed}`));
-      appendOutput(state, "");
+      await handleUserMessage(trimmed);
     }
   }
 }

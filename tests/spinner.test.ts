@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { PulsingSpinner } from "../src/spinner";
 import { stripMarkup } from "../src/title-box";
@@ -30,6 +30,21 @@ describe("PulsingSpinner", () => {
 
     expect(plain).toContain("Thinking...");
     expect(plain).toMatch(/\(\d+s\)/);
+  });
+
+  it("formats elapsed time as minutes when over 60 seconds", () => {
+    const nowSpy = vi.spyOn(Date, "now");
+    try {
+      nowSpy.mockReturnValue(1_000);
+      const spinner = new PulsingSpinner("Thinking...");
+      spinner.start();
+
+      nowSpy.mockReturnValue(66_000);
+      const plain = stripMarkup(spinner.render());
+      expect(plain).toContain("(1m 5s)");
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 
   it("cycles through frames on successive renders", () => {

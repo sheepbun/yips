@@ -1,11 +1,11 @@
 /** Pulsing braille spinner with color oscillation. */
 
-import { colorText, DIM_GRAY, GRADIENT_PINK, GRADIENT_YELLOW, interpolateColor } from "./colors";
+import { colorText, GRADIENT_PINK, GRADIENT_YELLOW, interpolateColor } from "./colors";
 import type { Rgb } from "./colors";
 
 const SPINNER_FRAMES = ["⠹", "⢸", "⣰", "⣤", "⣆", "⡇", "⠏", "⠛"] as const;
 const FRAME_COUNT = SPINNER_FRAMES.length;
-const OSCILLATION_HZ = 2;
+const OSCILLATION_RATE = 2.0;
 
 export class PulsingSpinner {
   private label: string;
@@ -45,23 +45,33 @@ export class PulsingSpinner {
     return Math.floor((Date.now() - this.startTime) / 1000);
   }
 
+  private formatElapsed(seconds: number): string {
+    const minutes = Math.floor(seconds / 60);
+    const remainder = seconds % 60;
+    if (minutes === 0) {
+      return `${remainder}s`;
+    }
+    return `${minutes}m ${remainder}s`;
+  }
+
   render(): string {
     const frame = SPINNER_FRAMES[this.frameIndex % FRAME_COUNT]!;
     this.frameIndex = (this.frameIndex + 1) % FRAME_COUNT;
 
     const elapsed = this.getElapsed();
-    const t = (Math.sin(elapsed * Math.PI * OSCILLATION_HZ) + 1) / 2;
+    const t = (Math.sin(elapsed * OSCILLATION_RATE) + 1) / 2;
     const color = interpolateColor(GRADIENT_PINK, GRADIENT_YELLOW, t);
+    const timeText = this.formatElapsed(elapsed);
 
     const spinnerChar = colorText(frame, color);
     const labelText = colorText(this.label, color);
-    const suffix = colorText(`(${elapsed}s)`, DIM_GRAY);
+    const suffix = colorText(`(${timeText})`, color);
 
     return `${spinnerChar} ${labelText} ${suffix}`;
   }
 
   static computeOscillationColor(elapsedSeconds: number): Rgb {
-    const t = (Math.sin(elapsedSeconds * Math.PI * OSCILLATION_HZ) + 1) / 2;
+    const t = (Math.sin(elapsedSeconds * OSCILLATION_RATE) + 1) / 2;
     return interpolateColor(GRADIENT_PINK, GRADIENT_YELLOW, t);
   }
 }

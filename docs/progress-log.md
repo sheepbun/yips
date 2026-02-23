@@ -635,3 +635,87 @@ Validation:
 - `npm run format:check` — clean
 Next:
 - Run `npm run dev` and submit a multiline prompt to confirm history rendering stays pink on every user-output line.
+
+## 2026-02-23 22:38 UTC — Exchange 31
+Summary: Matched prompt-box border status text color with the title-box model/provider token light blue.
+Changed:
+- Updated `src/tui.ts`:
+  - imported `GRADIENT_BLUE` and added `clipPromptStatusText(...)` to mirror prompt status clipping logic
+  - changed `buildPromptRenderLines(...)` bottom-row rendering to keep border/corners styled while rendering the right-aligned status segment in `GRADIENT_BLUE`
+- Updated `tests/tui-resize-render.test.ts`:
+  - added regression assertion that the prompt bottom row includes blue ANSI (`38;2;137;207;240`) for model/provider status text
+Validation:
+- `npm run typecheck` — clean
+- `npm test` — clean (121 passing)
+Next:
+- Run `npm run dev` and confirm visually that the prompt border status text now matches the title-box light blue token color in your terminal theme.
+
+## 2026-02-23 22:41 UTC — Exchange 32
+Summary: Updated the title box label from "Yips CLI" to "Yips".
+Changed:
+- Updated `src/title-box.ts`:
+  - changed top border title constant from `Yips CLI` to `Yips`
+- Updated `tests/title-box.test.ts`:
+  - adjusted expectations to match the new title text in full, single, and minimal layouts
+Validation:
+- `npm test -- tests/title-box.test.ts` — clean (11 passing)
+Next:
+- Run `npm run dev` for a quick visual check that the top border now renders `Yips` at runtime.
+
+## 2026-02-23 22:44 UTC — Exchange 33
+Summary: Aligned right-column title-box gradients to the full box borders so tips and the section divider no longer restart from local column pink.
+Changed:
+- Updated `src/title-box.ts`:
+  - added `styleLeftTextGlobalGradient(...)` to color right-column text using global column positions against the full title-box width
+  - wired right-column "Tips for getting started" rows and the divider row to global-gradient styling in full layout
+- Updated `tests/title-box.test.ts`:
+  - added regression coverage that validates ANSI gradient start color for the tips row and divider row matches the expected outer-border-relative position
+Validation:
+- `npm test -- tests/title-box.test.ts` — clean (12 passing)
+- `npm run typecheck` — clean
+Next:
+- Run `npm run dev` and visually confirm the right-panel gradient now sits in the expected yellow-shifted range relative to the title-box borders.
+
+## 2026-02-23 22:49 UTC — Exchange 34
+Summary: Anchored title-box greeting and cwd gradients to each string span so colors begin/end on the first/last visible character.
+Changed:
+- Updated `src/title-box.ts`:
+  - added `styleCenteredTextWithGradientSpan(...)` to center text while applying gradient only across the actual string, leaving side padding uncolored
+  - switched full/single layout welcome rows and cwd rows to use the new helper
+- Updated `tests/title-box.test.ts`:
+  - added regression coverage validating ANSI start/end colors for both "Welcome back {user}!" and `{cwd}` in single layout
+Validation:
+- `npm test` — clean (123 passing)
+- `npm run typecheck` — clean
+Next:
+- Run `npm run dev` for a quick visual check that centered greeting/cwd gradients now start and end exactly on the text bounds.
+
+## 2026-02-23 15:51 UTC — Exchange 35
+Summary: Changed the full-layout title-box "Recent activity" label color to white.
+Changed:
+- Updated `src/title-box.ts`:
+  - added `white` style support in `styleLeftText(...)` using ANSI `rgb(255,255,255)`
+  - switched full-layout right-column "Recent activity" row from blue to white
+- Updated `tests/title-box.test.ts`:
+  - added regression test asserting the "Recent activity" text starts with white ANSI foreground color
+Validation:
+- `npm test -- tests/title-box.test.ts` — clean (14 passing)
+Next:
+- Run `npm run dev` and visually confirm the full-layout "Recent activity" row appears white in your terminal theme.
+
+## 2026-02-23 22:56 UTC — Exchange 36
+Summary: Hid model and token usage in title/prompt status when no real model is loaded, showing provider-only until a model is available.
+Changed:
+- Updated `src/tui.ts`:
+  - added `resolveLoadedModel(...)` to treat unresolved model values as missing (`""` and `"default"`)
+  - `buildTitleBoxOptions(...)` now omits model/token usage when no loaded model is available
+  - added `buildPromptStatusText(...)` so prompt border status renders provider-only until a loaded model exists (busy label still appended when active)
+- Updated `src/title-box.ts`:
+  - `buildModelInfo(...)` now composes provider/model/token from available fields and returns provider-only when model is missing
+- Updated `tests/title-box.test.ts`:
+  - added regression test verifying model/token text stays hidden when model is missing
+Validation:
+- `npm run typecheck` — clean
+- `npm test -- tests/title-box.test.ts tests/tui-resize-render.test.ts` — clean
+Next:
+- Run `npm run dev` for an interactive visual pass to confirm provider-only status appears before model load and model/token appear once a model is set.

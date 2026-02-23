@@ -37,7 +37,7 @@ const YIPS_LOGO = [
 ];
 
 const LOGO_WIDTH = 28;
-const TOP_TITLE = "Yips CLI";
+const TOP_TITLE = "Yips";
 const TOP_TITLE_FALLBACK = "Yips";
 const TOP_BORDER_MIN_WIDTH = 25;
 
@@ -143,11 +143,17 @@ function makeBottomBorder(sessionName: string, width: number): string {
 }
 
 function buildModelInfo(backend: string, model: string, tokenUsage: string): string {
-  const usage = tokenUsage.trim();
-  if (usage.length === 0) {
-    return `${backend} · ${model}`;
+  const trimmedModel = model.trim();
+  if (trimmedModel.length === 0) {
+    return backend;
   }
-  return `${backend} · ${model} · ${usage}`;
+
+  const parts = [backend, trimmedModel];
+  const usage = tokenUsage.trim();
+  if (usage.length > 0) {
+    parts.push(usage);
+  }
+  return parts.join(" · ");
 }
 
 function padLine(markup: string, plain: string, width: number): string {
@@ -190,10 +196,29 @@ function styleCenteredText(
   }
 }
 
+function styleCenteredTextWithGradientSpan(text: string, width: number): { markup: string; plain: string } {
+  if (width <= 0) return { markup: "", plain: "" };
+
+  const clipped = text.slice(0, width);
+  if (clipped.length >= width) {
+    return {
+      markup: horizontalGradient(clipped, GRADIENT_PINK, GRADIENT_YELLOW),
+      plain: clipped
+    };
+  }
+
+  const leftPadding = Math.floor((width - clipped.length) / 2);
+  const rightPadding = width - clipped.length - leftPadding;
+  return {
+    markup: `${" ".repeat(leftPadding)}${horizontalGradient(clipped, GRADIENT_PINK, GRADIENT_YELLOW)}${" ".repeat(rightPadding)}`,
+    plain: `${" ".repeat(leftPadding)}${clipped}${" ".repeat(rightPadding)}`
+  };
+}
+
 function styleLeftText(
   text: string,
   width: number,
-  style: "plain" | "gradient" | "blue" | "dim"
+  style: "plain" | "gradient" | "blue" | "white" | "dim"
 ): { markup: string; plain: string } {
   const clipped = text.slice(0, Math.max(0, width));
   const padded = fitText(clipped, width);
@@ -213,6 +238,14 @@ function styleLeftText(
         markup: `${colorText(clipped, GRADIENT_BLUE)}${" ".repeat(Math.max(0, width - clipped.length))}`,
         plain: padded
       };
+    case "white":
+      if (clipped.length === 0) return { markup: padded, plain: padded };
+      return {
+        markup: `${colorText(clipped, { r: 255, g: 255, b: 255 })}${" ".repeat(
+          Math.max(0, width - clipped.length)
+        )}`,
+        plain: padded
+      };
     case "dim":
       if (clipped.length === 0) return { markup: padded, plain: padded };
       return {
@@ -222,6 +255,37 @@ function styleLeftText(
     case "plain":
       return { markup: padded, plain: padded };
   }
+}
+
+function styleLeftTextGlobalGradient(
+  text: string,
+  width: number,
+  totalWidth: number,
+  startColumn: number
+): { markup: string; plain: string } {
+  const clipped = text.slice(0, Math.max(0, width));
+  const padded = fitText(clipped, width);
+  if (clipped.length === 0) return { markup: padded, plain: padded };
+
+  const maxColumn = Math.max(totalWidth - 1, 1);
+  const startColor = interpolateColor(
+    GRADIENT_PINK,
+    GRADIENT_YELLOW,
+    Math.max(0, Math.min(1, startColumn / maxColumn))
+  );
+  const endColumn = startColumn + Math.max(clipped.length - 1, 0);
+  const endColor = interpolateColor(
+    GRADIENT_PINK,
+    GRADIENT_YELLOW,
+    Math.max(0, Math.min(1, endColumn / maxColumn))
+  );
+
+  return {
+    markup: `${horizontalGradient(clipped, startColor, endColor)}${" ".repeat(
+      Math.max(0, width - clipped.length)
+    )}`,
+    plain: padded
+  };
 }
 
 function centerLogoLine(
@@ -276,10 +340,9 @@ function renderSingleColumn(
   const rows: Array<{ markup: string; plain: string }> = [];
   rows.push(styleCenteredText("", innerWidth, "plain"));
   rows.push(
-    styleCenteredText(
+    styleCenteredTextWithGradientSpan(
       mode === "single" ? `Welcome back ${username}!` : `Hi ${username}!`,
-      innerWidth,
-      "gradient"
+      innerWidth
     )
   );
   rows.push(styleCenteredText("", innerWidth, "plain"));
@@ -295,7 +358,7 @@ function renderSingleColumn(
   rows.push(styleCenteredText(modelInfo, innerWidth, "blue"));
 
   if (mode === "single") {
-    rows.push(styleCenteredText(cwd, innerWidth, "gradient"));
+    rows.push(styleCenteredTextWithGradientSpan(cwd, innerWidth));
   }
 
   rows.push(styleCenteredText("", innerWidth, "plain"));
@@ -322,27 +385,48 @@ function renderFull(options: TitleBoxOptions): string[] {
   const middleBorder = colorText("│", middleBorderColor);
   const rightBorder = horizontalGradient("│", GRADIENT_YELLOW, GRADIENT_YELLOW);
   const gradientLogo = diagonalGradient(YIPS_LOGO, GRADIENT_PINK, GRADIENT_YELLOW);
+  const rightStartColumn = leftWidth + 2;
 
   const leftRows: Array<{ markup: string; plain: string }> = [
     styleCenteredText("", leftWidth, "plain"),
-    styleCenteredText(`Welcome back ${username}!`, leftWidth, "gradient"),
+    styleCenteredTextWithGradientSpan(`Welcome back ${username}!`, leftWidth),
     styleCenteredText("", leftWidth, "plain")
   ];
   for (let i = 0; i < YIPS_LOGO.length; i++) {
     leftRows.push(centerLogoLine(gradientLogo[i] ?? "", YIPS_LOGO[i] ?? "", leftWidth));
   }
   leftRows.push(styleCenteredText(modelInfo, leftWidth, "blue"));
-  leftRows.push(styleCenteredText(cwd, leftWidth, "gradient"));
+  leftRows.push(styleCenteredTextWithGradientSpan(cwd, leftWidth));
   leftRows.push(styleCenteredText("", leftWidth, "plain"));
 
   const rightRows: Array<{ markup: string; plain: string }> = [
-    styleLeftText("Tips for getting started:", rightWidth, "gradient"),
-    styleLeftText("- Ask questions, edit files, or run commands.", rightWidth, "gradient"),
-    styleLeftText("- Be specific for the best results.", rightWidth, "gradient"),
-    styleLeftText("- /help for more information.", rightWidth, "gradient"),
+    styleLeftTextGlobalGradient("Tips for getting started:", rightWidth, width, rightStartColumn),
+    styleLeftTextGlobalGradient(
+      "- Ask questions, edit files, or run commands.",
+      rightWidth,
+      width,
+      rightStartColumn
+    ),
+    styleLeftTextGlobalGradient(
+      "- Be specific for the best results.",
+      rightWidth,
+      width,
+      rightStartColumn
+    ),
+    styleLeftTextGlobalGradient(
+      "- /help for more information.",
+      rightWidth,
+      width,
+      rightStartColumn
+    ),
     styleLeftText("", rightWidth, "plain"),
-    styleLeftText("─".repeat(Math.max(0, rightWidth)), rightWidth, "gradient"),
-    styleLeftText("Recent activity", rightWidth, "blue"),
+    styleLeftTextGlobalGradient(
+      "─".repeat(Math.max(0, rightWidth)),
+      rightWidth,
+      width,
+      rightStartColumn
+    ),
+    styleLeftText("Recent activity", rightWidth, "white"),
     styleLeftText("No recent activity yet.", rightWidth, "dim")
   ];
 

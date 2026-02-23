@@ -1,17 +1,18 @@
-/** Main TUI orchestrator using terminal-kit alternate screen. */
+/** Main TUI orchestrator using Ink. */
 
-import terminalKit from "terminal-kit";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 
+import { getVersion } from "./version";
+
+import { createDefaultRegistry, parseCommand } from "./commands";
+import type { CommandRegistry, SessionContext } from "./commands";
 import {
   colorText,
-  DARK_BLUE,
   GRADIENT_PINK,
   GRADIENT_YELLOW,
   horizontalGradient,
   INPUT_PINK
 } from "./colors";
-import { createDefaultRegistry, parseCommand } from "./commands";
-import type { CommandRegistry, SessionContext } from "./commands";
 import { LlamaClient } from "./llama-client";
 import {
   formatAssistantMessage,
@@ -20,14 +21,28 @@ import {
   formatUserMessage,
   formatWarningMessage
 } from "./messages";
-import { PulsingSpinner } from "./spinner";
+import { buildPromptBoxFrame } from "./prompt-box";
+import {
+  PromptComposer,
+  type PromptComposerEvent,
+  type PromptComposerLayout
+} from "./prompt-composer";
+import { InputEngine, type InputAction } from "./input-engine";
 import { renderTitleBox } from "./title-box";
 import type { TitleBoxOptions } from "./title-box";
 import type { AppConfig, ChatMessage, TuiOptions } from "./types";
 
-interface TuiState {
+const PROMPT_PREFIX = ">>> ";
+const CURSOR_MARKER = "▌";
+const KEY_DEBUG_ENABLED = process.env["YIPS_DEBUG_KEYS"] === "1";
+
+interface AssistantReply {
+  text: string;
+  rendered: boolean;
+}
+
+interface RuntimeState {
   outputLines: string[];
-  scrollOffset: number;
   running: boolean;
   config: AppConfig;
   messageCount: number;
@@ -35,82 +50,74 @@ interface TuiState {
   sessionName: string;
   inputHistory: string[];
   history: ChatMessage[];
+  busy: boolean;
+  busyLabel: string;
 }
 
-interface AssistantReply {
-  text: string;
-  rendered: boolean;
+interface InkModule {
+  render: (
+    node: React.ReactNode,
+    options?: { exitOnCtrlC?: boolean }
+  ) => { waitUntilExit: () => Promise<void> };
+  Box: React.ComponentType<{
+    flexDirection?: "row" | "column";
+    children?: React.ReactNode;
+  }>;
+  Text: React.ComponentType<{ children?: React.ReactNode }>;
+  useApp: () => { exit: (error?: Error) => void };
+  useStdin: () => {
+    stdin: NodeJS.ReadStream;
+    setRawMode: (value: boolean) => void;
+    isRawModeSupported: boolean;
+  };
+  useStdout: () => {
+    stdout: NodeJS.WriteStream;
+    write: (data: string) => void;
+  };
 }
 
-const term = terminalKit.terminal;
-
-function getOutputAreaHeight(): number {
-  return Math.max(1, term.height - 3);
+function formatBackendName(backend: string): string {
+  return backend === "llamacpp" ? "llama.cpp" : backend;
 }
 
-function renderOutputArea(state: TuiState): void {
-  const areaHeight = getOutputAreaHeight();
-  const visibleStart = Math.max(0, state.outputLines.length - areaHeight - state.scrollOffset);
-
-  for (let row = 0; row < areaHeight; row++) {
-    const lineIndex = visibleStart + row;
-    term.moveTo(1, row + 1);
-    term.eraseLine();
-    if (lineIndex < state.outputLines.length) {
-      term.markupOnly(state.outputLines[lineIndex]!);
-    }
-  }
+function charLength(text: string): number {
+  return Array.from(text).length;
 }
 
-function renderStatusBar(state: TuiState, spinner: PulsingSpinner): void {
-  const y = term.height - 1;
-  term.moveTo(1, y);
-  term.eraseLine();
-
-  const separator = horizontalGradient("─".repeat(term.width), GRADIENT_PINK, GRADIENT_YELLOW);
-  term.markupOnly(separator);
-
-  term.moveTo(1, y);
-  const statusLeft = `${state.config.backend} · ${state.config.model}`;
-  const statusContent = spinner.isActive()
-    ? `${colorText(statusLeft, DARK_BLUE)}  ${spinner.render()}`
-    : colorText(statusLeft, DARK_BLUE);
-
-  term.markupOnly(` ${statusContent}`);
+function toDebugText(input: string): string {
+  return Array.from(input)
+    .map((char) => {
+      const codePoint = char.codePointAt(0);
+      if (codePoint === undefined) return "";
+      if (codePoint === 0x1b) return "<ESC>";
+      if (codePoint === 0x0d) return "<CR>";
+      if (codePoint === 0x0a) return "<LF>";
+      if (codePoint === 0x08) return "<BS>";
+      if (codePoint === 0x7f) return "<DEL>";
+      if (codePoint < 0x20 || codePoint === 0x7f) {
+        return `<0x${codePoint.toString(16).padStart(2, "0")}>`;
+      }
+      return char;
+    })
+    .join("");
 }
 
-function renderInputLine(): void {
-  const y = term.height;
-  term.moveTo(1, y);
-  term.eraseLine();
-  term.markupOnly(colorText(">>> ", INPUT_PINK));
+function toDebugBytes(input: string): string {
+  return Array.from(Buffer.from(input, "latin1"))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join(" ");
 }
 
-function appendOutput(state: TuiState, text: string): void {
-  const lines = text.split("\n");
-  for (const line of lines) {
-    state.outputLines.push(line);
-  }
-}
-
-function replaceOutputBlock(state: TuiState, start: number, count: number, text: string): number {
-  const lines = text.split("\n");
-  state.outputLines.splice(start, count, ...lines);
-  return lines.length;
-}
-
-function renderAll(state: TuiState, spinner: PulsingSpinner): void {
-  renderOutputArea(state);
-  renderStatusBar(state, spinner);
-  renderInputLine();
-}
-
-function buildTitleBoxOptions(state: TuiState, version: string): TitleBoxOptions {
+function buildTitleBoxOptions(
+  state: RuntimeState,
+  version: string,
+  width: number
+): TitleBoxOptions {
   return {
-    width: term.width,
+    width,
     version,
     username: state.username,
-    backend: state.config.backend,
+    backend: formatBackendName(state.config.backend),
     model: state.config.model,
     tokenUsage: "0/8192",
     cwd: process.cwd(),
@@ -118,259 +125,600 @@ function buildTitleBoxOptions(state: TuiState, version: string): TitleBoxOptions
   };
 }
 
-function appendSessionHeader(state: TuiState, version: string): void {
+function appendOutput(state: RuntimeState, text: string): void {
+  const lines = text.split("\n");
+  for (const line of lines) {
+    state.outputLines.push(line);
+  }
+}
+
+function replaceOutputBlock(
+  state: RuntimeState,
+  start: number,
+  count: number,
+  text: string
+): number {
+  const lines = text.split("\n");
+  state.outputLines.splice(start, count, ...lines);
+  return lines.length;
+}
+
+function appendSessionHeader(state: RuntimeState, version: string, width: number): void {
   appendOutput(state, "");
-  const titleLines = renderTitleBox(buildTitleBoxOptions(state, version));
+  const titleLines = renderTitleBox(buildTitleBoxOptions(state, version, width));
   for (const line of titleLines) {
     appendOutput(state, line);
   }
   appendOutput(state, "");
 }
 
-function resetSession(state: TuiState, version: string): void {
+function resetSession(state: RuntimeState, version: string, width: number): void {
   state.outputLines = [];
-  state.scrollOffset = 0;
   state.messageCount = 0;
   state.history = [];
-  appendSessionHeader(state, version);
+  appendSessionHeader(state, version, width);
 }
 
-async function withSpinner<T>(
-  state: TuiState,
-  spinner: PulsingSpinner,
-  label: string,
-  task: () => Promise<T>
-): Promise<T> {
-  spinner.start(label);
-  const interval = setInterval(() => {
-    if (state.running) {
-      renderAll(state, spinner);
-    }
-  }, 90);
-  renderAll(state, spinner);
-
-  try {
-    return await task();
-  } finally {
-    clearInterval(interval);
-    spinner.stop();
-    renderAll(state, spinner);
-  }
-}
-
-function formatError(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-export async function startTui(options: TuiOptions): Promise<void> {
+function createRuntimeState(options: TuiOptions): RuntimeState {
   const modelOverride = options.model?.trim();
   const runtimeConfig: AppConfig = {
     ...options.config,
     model: modelOverride && modelOverride.length > 0 ? modelOverride : options.config.model
   };
 
-  const state: TuiState = {
+  return {
     outputLines: [],
-    scrollOffset: 0,
     running: true,
     config: runtimeConfig,
     messageCount: 0,
     username: options.username ?? process.env["USER"] ?? "user",
     sessionName: options.sessionName ?? "session",
     inputHistory: [],
-    history: []
+    history: [],
+    busy: false,
+    busyLabel: ""
   };
+}
 
-  const spinner = new PulsingSpinner();
-  const registry: CommandRegistry = createDefaultRegistry();
-  const version = "0.1.0";
-  const llamaClient = new LlamaClient({
-    baseUrl: state.config.llamaBaseUrl,
-    model: state.config.model
-  });
-
-  term.fullscreen(true);
-  term.grabInput({ mouse: "button" });
-
-  appendSessionHeader(state, version);
-  renderAll(state, spinner);
-  setupResizeHandler(state, spinner);
-
-  term.on("key", (key: string) => {
-    if (key === "CTRL_C") {
-      shutdown();
-    }
-  });
-
-  function shutdown(): void {
-    state.running = false;
-    term.grabInput(false);
-    term.fullscreen(false);
-    term.styleReset("\n");
-    process.exit(0);
+function withCursorAt(content: string, index: number): string {
+  const chars = Array.from(content);
+  if (chars.length === 0) {
+    return content;
   }
+  const safeIndex = Math.max(0, Math.min(index, chars.length - 1));
+  chars[safeIndex] = CURSOR_MARKER;
+  return chars.join("");
+}
 
-  function getContext(): SessionContext {
-    return {
-      config: state.config,
-      messageCount: state.messageCount
-    };
-  }
+export function buildPromptRenderLines(
+  width: number,
+  statusText: string,
+  promptLayout: PromptComposerLayout,
+  showCursor: boolean = true
+): string[] {
+  const frame = buildPromptBoxFrame(width, statusText, promptLayout.rowCount);
 
-  async function requestAssistantFromLlama(): Promise<AssistantReply> {
-    llamaClient.setModel(state.config.model);
+  const lines: string[] = [horizontalGradient(frame.top, GRADIENT_PINK, GRADIENT_YELLOW)];
 
-    if (!state.config.streaming) {
-      const text = await withSpinner(state, spinner, "Thinking...", async () =>
-        llamaClient.chat(state.history, state.config.model)
+  for (let rowIndex = 0; rowIndex < frame.middleRows.length; rowIndex++) {
+    if (width <= 1) {
+      lines.push(
+        horizontalGradient(frame.middleRows[rowIndex] ?? "", GRADIENT_PINK, GRADIENT_YELLOW)
       );
-      return { text, rendered: false };
+      continue;
     }
 
-    const timestamp = new Date();
-    let streamText = "";
-    const blockStart = state.outputLines.length;
-    let blockLength = 1;
-    appendOutput(state, formatAssistantMessage("", timestamp));
-    renderAll(state, spinner);
+    const prefix = rowIndex === 0 ? promptLayout.prefix : "";
+    const contentChars = Array.from(`${prefix}${promptLayout.rows[rowIndex] ?? ""}`).slice(
+      0,
+      frame.innerWidth
+    );
+    while (contentChars.length < frame.innerWidth) {
+      contentChars.push(" ");
+    }
 
-    try {
-      streamText = await llamaClient.streamChat(
-        state.history,
-        {
-          onToken: (token: string) => {
-            streamText += token;
-            blockLength = replaceOutputBlock(
-              state,
-              blockStart,
-              blockLength,
-              formatAssistantMessage(streamText, timestamp)
-            );
-            renderAll(state, spinner);
-          }
-        },
-        state.config.model
+    let plainInner = contentChars.join("");
+    if (showCursor && rowIndex === promptLayout.cursorRow && frame.innerWidth > 0) {
+      const cursorOffset = rowIndex === 0 ? charLength(prefix) : 0;
+      const cursorIndex = Math.max(
+        0,
+        Math.min(frame.innerWidth - 1, cursorOffset + promptLayout.cursorCol)
       );
-
-      if (streamText.length === 0) {
-        throw new Error("Streaming response ended without assistant content.");
-      }
-
-      return { text: streamText, rendered: true };
-    } catch {
-      appendOutput(state, formatWarningMessage("Streaming failed. Retrying without streaming."));
-      renderAll(state, spinner);
-
-      try {
-        const fallbackText = await withSpinner(state, spinner, "Retrying...", async () =>
-          llamaClient.chat(state.history, state.config.model)
-        );
-        replaceOutputBlock(
-          state,
-          blockStart,
-          blockLength,
-          formatAssistantMessage(fallbackText, timestamp)
-        );
-        renderAll(state, spinner);
-        return { text: fallbackText, rendered: true };
-      } catch (fallbackError) {
-        state.outputLines.splice(blockStart, blockLength);
-        throw fallbackError;
-      }
+      plainInner = withCursorAt(plainInner, cursorIndex);
     }
+
+    const leftBorder = colorText("│", GRADIENT_PINK);
+    const rightBorder = colorText("│", GRADIENT_YELLOW);
+
+    if (rowIndex === 0) {
+      const prefixLength = Math.min(frame.innerWidth, charLength(prefix));
+      const innerChars = Array.from(plainInner);
+      const prefixText = innerChars.slice(0, prefixLength).join("");
+      const restText = innerChars.slice(prefixLength).join("");
+      const coloredPrefix = prefixLength > 0 ? colorText(prefixText, INPUT_PINK) : "";
+      lines.push(`${leftBorder}${coloredPrefix}${restText}${rightBorder}`);
+      continue;
+    }
+
+    lines.push(`${leftBorder}${plainInner}${rightBorder}`);
   }
 
-  async function handleUserMessage(text: string): Promise<void> {
-    state.messageCount += 1;
-    appendOutput(state, formatUserMessage(text));
-    renderAll(state, spinner);
+  lines.push(horizontalGradient(frame.bottom, GRADIENT_PINK, GRADIENT_YELLOW));
+  return lines;
+}
 
-    state.history.push({ role: "user", content: text });
+function formatError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
 
-    if (state.config.backend !== "llamacpp") {
-      const echo = `Echo: ${text}`;
-      appendOutput(
-        state,
-        formatWarningMessage(
-          `Backend '${state.config.backend}' is not implemented yet. Using echo.`
-        )
-      );
-      appendOutput(state, formatAssistantMessage(echo));
-      appendOutput(state, "");
-      state.history.push({ role: "assistant", content: echo });
-      renderAll(state, spinner);
-      return;
-    }
-
-    try {
-      const reply = await requestAssistantFromLlama();
-      if (!reply.rendered) {
-        appendOutput(state, formatAssistantMessage(reply.text));
-      }
-      state.history.push({ role: "assistant", content: reply.text });
-      appendOutput(state, "");
-    } catch (error) {
-      appendOutput(state, formatErrorMessage(`Request failed: ${formatError(error)}`));
-      appendOutput(state, "");
-    }
-
-    renderAll(state, spinner);
+function formatInputAction(action: InputAction): string {
+  switch (action.type) {
+    case "insert":
+      return `insert(${JSON.stringify(action.text)})`;
+    case "submit":
+    case "newline":
+    case "backspace":
+    case "delete":
+    case "move-left":
+    case "move-right":
+    case "move-up":
+    case "move-down":
+    case "home":
+    case "end":
+    case "cancel":
+    case "tab":
+      return action.type;
   }
+}
 
-  while (state.running) {
-    renderAll(state, spinner);
+function applyInputAction(
+  composer: PromptComposer,
+  action: InputAction
+): PromptComposerEvent | null {
+  switch (action.type) {
+    case "insert":
+      for (const char of Array.from(action.text)) {
+        composer.handleKey(char, { isCharacter: true });
+      }
+      return null;
+    case "newline":
+      return composer.handleKey("CTRL_ENTER");
+    case "submit":
+      return composer.handleKey("ENTER");
+    case "backspace":
+      return composer.handleKey("BACKSPACE");
+    case "delete":
+      return composer.handleKey("DELETE");
+    case "move-left":
+      return composer.handleKey("LEFT");
+    case "move-right":
+      return composer.handleKey("RIGHT");
+    case "move-up":
+      return composer.handleKey("UP");
+    case "move-down":
+      return composer.handleKey("DOWN");
+    case "home":
+      return composer.handleKey("HOME");
+    case "end":
+      return composer.handleKey("END");
+    case "tab":
+      return null;
+    case "cancel":
+      return { type: "cancel" };
+  }
+}
 
-    const inputY = term.height;
-    term.moveTo(5, inputY);
+interface InkAppProps {
+  options: TuiOptions;
+  version: string;
+  ink: InkModule;
+}
 
-    const { promise } = term.inputField({
-      cancelable: true,
-      history: state.inputHistory,
-      autoComplete: registry.getNames().map((n) => `/${n}`),
-      autoCompleteMenu: true
-    } as terminalKit.Terminal.InputFieldOptions);
+function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
+  const { Box, Text, useApp, useStdin, useStdout } = ink;
 
-    const input = await promise;
+  return function InkApp({ options, version }) {
+    const { exit } = useApp();
+    const { stdin, isRawModeSupported, setRawMode } = useStdin();
+    const { stdout } = useStdout();
 
-    if (input === undefined) {
-      shutdown();
-      return;
+    const [dimensions, setDimensions] = useState(() => ({
+      columns: stdout.columns ?? 80,
+      rows: stdout.rows ?? 24
+    }));
+    const [, setRenderVersion] = useState(0);
+
+    const stateRef = useRef<RuntimeState | null>(null);
+    const registryRef = useRef<CommandRegistry>(createDefaultRegistry());
+    const composerRef = useRef<PromptComposer | null>(null);
+    const llamaClientRef = useRef<LlamaClient | null>(null);
+    const inputEngineRef = useRef<InputEngine>(new InputEngine());
+    const dimensionsRef = useRef(dimensions);
+
+    const forceRender = useCallback(() => {
+      setRenderVersion((value) => value + 1);
+    }, []);
+
+    dimensionsRef.current = dimensions;
+
+    if (!stateRef.current) {
+      const state = createRuntimeState(options);
+      appendSessionHeader(state, version, dimensions.columns);
+      stateRef.current = state;
     }
 
-    const trimmed = input.trim();
-    if (trimmed.length === 0) continue;
+    const state = stateRef.current;
 
-    state.inputHistory.push(trimmed);
+    if (!llamaClientRef.current) {
+      llamaClientRef.current = new LlamaClient({
+        baseUrl: state.config.llamaBaseUrl,
+        model: state.config.model
+      });
+    }
 
-    const parsed = parseCommand(trimmed);
-
-    if (parsed) {
-      const result = registry.dispatch(parsed.command, parsed.args, getContext());
-
-      if (result.output) {
-        appendOutput(state, formatDimMessage(result.output));
-        appendOutput(state, "");
+    const createComposer = useCallback((): PromptComposer => {
+      const currentState = stateRef.current;
+      if (!currentState) {
+        throw new Error("Runtime state is not initialized.");
       }
 
-      if (result.action === "exit") {
-        shutdown();
+      return new PromptComposer({
+        interiorWidth: Math.max(0, dimensionsRef.current.columns - 2),
+        history: [...currentState.inputHistory],
+        autoComplete: registryRef.current.getNames().map((name) => `/${name}`),
+        prefix: PROMPT_PREFIX
+      });
+    }, []);
+
+    if (!composerRef.current) {
+      composerRef.current = createComposer();
+    }
+
+    useEffect(() => {
+      return () => {
+        inputEngineRef.current.reset();
+      };
+    }, []);
+
+    useEffect(() => {
+      const onResize = (): void => {
+        const next = {
+          columns: stdout.columns ?? 80,
+          rows: stdout.rows ?? 24
+        };
+        setDimensions(next);
+      };
+
+      stdout.on("resize", onResize);
+      return () => {
+        stdout.off("resize", onResize);
+      };
+    }, [stdout]);
+
+    useEffect(() => {
+      const composer = composerRef.current;
+      if (!composer) return;
+      composer.setInteriorWidth(Math.max(0, dimensions.columns - 2));
+      forceRender();
+    }, [dimensions.columns, forceRender]);
+
+    useEffect(() => {
+      if (!isRawModeSupported) {
         return;
       }
 
-      if (result.action === "clear") {
-        resetSession(state, version);
+      setRawMode(true);
+      return () => {
+        setRawMode(false);
+      };
+    }, [isRawModeSupported, setRawMode]);
+
+    const requestAssistantFromLlama = useCallback(async (): Promise<AssistantReply> => {
+      const currentState = stateRef.current;
+      const llamaClient = llamaClientRef.current;
+      if (!currentState || !llamaClient) {
+        throw new Error("Chat runtime is not initialized.");
       }
-    } else {
-      await handleUserMessage(trimmed);
-    }
-  }
+
+      llamaClient.setModel(currentState.config.model);
+
+      if (!currentState.config.streaming) {
+        currentState.busy = true;
+        currentState.busyLabel = "Thinking...";
+        forceRender();
+
+        try {
+          const text = await llamaClient.chat(currentState.history, currentState.config.model);
+          return { text, rendered: false };
+        } finally {
+          currentState.busy = false;
+          currentState.busyLabel = "";
+          forceRender();
+        }
+      }
+
+      const timestamp = new Date();
+      let streamText = "";
+      const blockStart = currentState.outputLines.length;
+      let blockLength = 1;
+      appendOutput(currentState, formatAssistantMessage("", timestamp));
+      forceRender();
+
+      try {
+        streamText = await llamaClient.streamChat(
+          currentState.history,
+          {
+            onToken: (token: string): void => {
+              streamText += token;
+              blockLength = replaceOutputBlock(
+                currentState,
+                blockStart,
+                blockLength,
+                formatAssistantMessage(streamText, timestamp)
+              );
+              forceRender();
+            }
+          },
+          currentState.config.model
+        );
+
+        if (streamText.length === 0) {
+          throw new Error("Streaming response ended without assistant content.");
+        }
+
+        return { text: streamText, rendered: true };
+      } catch {
+        appendOutput(
+          currentState,
+          formatWarningMessage("Streaming failed. Retrying without streaming.")
+        );
+        currentState.busy = true;
+        currentState.busyLabel = "Retrying...";
+        forceRender();
+
+        try {
+          const fallbackText = await llamaClient.chat(
+            currentState.history,
+            currentState.config.model
+          );
+          replaceOutputBlock(
+            currentState,
+            blockStart,
+            blockLength,
+            formatAssistantMessage(fallbackText, timestamp)
+          );
+          return { text: fallbackText, rendered: true };
+        } catch (fallbackError) {
+          currentState.outputLines.splice(blockStart, blockLength);
+          throw fallbackError;
+        } finally {
+          currentState.busy = false;
+          currentState.busyLabel = "";
+          forceRender();
+        }
+      }
+    }, [forceRender]);
+
+    const handleUserMessage = useCallback(
+      async (text: string): Promise<void> => {
+        const currentState = stateRef.current;
+        if (!currentState) {
+          return;
+        }
+
+        currentState.messageCount += 1;
+        appendOutput(currentState, formatUserMessage(text));
+        currentState.history.push({ role: "user", content: text });
+        forceRender();
+
+        if (currentState.config.backend !== "llamacpp") {
+          const echo = `Echo: ${text}`;
+          appendOutput(
+            currentState,
+            formatWarningMessage(
+              `Backend '${currentState.config.backend}' is not implemented yet. Using echo.`
+            )
+          );
+          appendOutput(currentState, formatAssistantMessage(echo));
+          appendOutput(currentState, "");
+          currentState.history.push({ role: "assistant", content: echo });
+          forceRender();
+          return;
+        }
+
+        try {
+          const reply = await requestAssistantFromLlama();
+          if (!reply.rendered) {
+            appendOutput(currentState, formatAssistantMessage(reply.text));
+          }
+          currentState.history.push({ role: "assistant", content: reply.text });
+          appendOutput(currentState, "");
+        } catch (error) {
+          appendOutput(currentState, formatErrorMessage(`Request failed: ${formatError(error)}`));
+          appendOutput(currentState, "");
+        }
+
+        forceRender();
+      },
+      [forceRender, requestAssistantFromLlama]
+    );
+
+    const processSubmittedInput = useCallback(
+      async (input: string): Promise<void> => {
+        const currentState = stateRef.current;
+        if (!currentState) {
+          return;
+        }
+
+        composerRef.current = createComposer();
+        forceRender();
+
+        const trimmed = input.trim();
+        if (trimmed.length === 0) return;
+
+        currentState.inputHistory.push(trimmed);
+
+        const parsed = parseCommand(trimmed);
+
+        if (parsed) {
+          const context: SessionContext = {
+            config: currentState.config,
+            messageCount: currentState.messageCount
+          };
+          const result = registryRef.current.dispatch(parsed.command, parsed.args, context);
+
+          if (result.output) {
+            appendOutput(currentState, formatDimMessage(result.output));
+            appendOutput(currentState, "");
+          }
+
+          if (result.action === "clear") {
+            resetSession(currentState, version, dimensionsRef.current.columns);
+          }
+
+          forceRender();
+
+          if (result.action === "exit") {
+            currentState.running = false;
+            exit();
+          }
+
+          return;
+        }
+
+        await handleUserMessage(trimmed);
+      },
+      [createComposer, exit, forceRender, handleUserMessage, version]
+    );
+
+    const dispatchComposerEvent = useCallback(
+      (event: PromptComposerEvent): void => {
+        const composer = composerRef.current;
+
+        if (event.type === "submit") {
+          void processSubmittedInput(event.value);
+          return;
+        }
+
+        if (event.type === "cancel") {
+          const currentState = stateRef.current;
+          if (currentState) {
+            currentState.running = false;
+          }
+          exit();
+          return;
+        }
+
+        if (event.type === "autocomplete-menu") {
+          const firstOption = event.options[0];
+          if (composer && firstOption) {
+            composer.applyAutocompleteChoice(event.tokenStart, event.tokenEnd, firstOption);
+          }
+        }
+
+        forceRender();
+      },
+      [exit, forceRender, processSubmittedInput]
+    );
+
+    useEffect(() => {
+      const onData = (chunk: Buffer | string): void => {
+        const currentState = stateRef.current;
+        const composer = composerRef.current;
+        if (!currentState || !composer) {
+          return;
+        }
+
+        const sequence = Buffer.isBuffer(chunk) ? chunk.toString("latin1") : String(chunk);
+        const actions = inputEngineRef.current.pushChunk(chunk);
+
+        if (KEY_DEBUG_ENABLED) {
+          const actionSummary = actions.map(formatInputAction).join(", ");
+          appendOutput(
+            currentState,
+            formatDimMessage(
+              `[debug stdin] bytes=${toDebugBytes(sequence)} text=${toDebugText(sequence)} actions=[${actionSummary}]`
+            )
+          );
+          forceRender();
+        }
+
+        if (actions.length === 0) {
+          return;
+        }
+
+        composer.setInteriorWidth(Math.max(0, dimensionsRef.current.columns - 2));
+
+        let shouldRender = false;
+
+        for (const action of actions) {
+          if (action.type === "cancel") {
+            currentState.running = false;
+            exit();
+            return;
+          }
+
+          if (currentState.busy) {
+            continue;
+          }
+
+          const event = applyInputAction(composer, action);
+          if (!event) {
+            shouldRender = true;
+            continue;
+          }
+
+          if (event.type === "none") {
+            shouldRender = true;
+            continue;
+          }
+
+          dispatchComposerEvent(event);
+          return;
+        }
+
+        if (shouldRender) {
+          forceRender();
+        }
+      };
+
+      stdin.on("data", onData);
+      return () => {
+        stdin.off("data", onData);
+      };
+    }, [dispatchComposerEvent, exit, forceRender, stdin]);
+
+    const composer = composerRef.current;
+    composer.setInteriorWidth(Math.max(0, dimensions.columns - 2));
+    const promptLayout = composer.getLayout();
+
+    const statusText = state.busy
+      ? `${formatBackendName(state.config.backend)} · ${state.config.model} · ${state.busyLabel}`
+      : `${formatBackendName(state.config.backend)} · ${state.config.model}`;
+
+    const promptLines = buildPromptRenderLines(dimensions.columns, statusText, promptLayout, true);
+    const outputCapacity = Math.max(1, dimensions.rows - promptLines.length);
+    const visibleOutput = state.outputLines.slice(-outputCapacity);
+
+    const outputNodes = visibleOutput.map((line, index) =>
+      React.createElement(Text, { key: `out-${index}` }, line.length > 0 ? line : " ")
+    );
+
+    const promptNodes = promptLines.map((line, index) =>
+      React.createElement(Text, { key: `prompt-${index}` }, line)
+    );
+
+    return React.createElement(Box, { flexDirection: "column" }, ...outputNodes, ...promptNodes);
+  };
 }
 
-/** Handle terminal resize events. */
-function setupResizeHandler(state: TuiState, spinner: PulsingSpinner): void {
-  term.on("resize", () => {
-    renderAll(state, spinner);
+export async function startTui(options: TuiOptions): Promise<void> {
+  const version = await getVersion();
+  const ink = (await import("ink")) as unknown as InkModule;
+  const App = createInkApp(ink);
+  const instance = ink.render(React.createElement(App, { options, version }), {
+    exitOnCtrlC: false
   });
-}
 
-export { setupResizeHandler };
+  await instance.waitUntilExit();
+}

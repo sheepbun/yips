@@ -16,7 +16,7 @@
 ### llama.cpp (primary LLM backend)
 
 - **Why**: Direct control over model lifecycle — download, serve, stop, switch. CUDA and Metal support for GPU inference. OpenAI-compatible HTTP API for clean integration.
-- **How it works**: Yips starts a `llama-server` subprocess, sends requests to `http://localhost:{port}/v1/chat/completions`, and manages the process lifecycle.
+- **How it works**: Yips sends OpenAI-compatible chat requests to `http://localhost:{port}/v1/chat/completions` (streaming and non-streaming), with in-memory conversation history assembled in the TUI session.
 - **Comparison to yips-cli**: Same approach. The Python version already uses llama.cpp as its primary backend.
 
 ### Config Format (JSON)
@@ -40,12 +40,12 @@
 - **Choice**: Vitest.
 - **Why**: Fast TypeScript-first test runner with straightforward setup.
 
-### TUI Framework (terminal-kit)
+### TUI Framework (Ink)
 
-- **Choice**: terminal-kit.
-- **Why**: Fine-grained terminal control with truecolor support (`^#rrggbb` markup), built-in `inputField()` with history and autocompletion, alternate screen buffer support, and direct cursor addressing for the three-zone layout (output area, status bar, input line).
-- **Alternatives considered**: Ink (React dependency, limited low-level control), blessed (maintenance unclear, callback-heavy API).
-- **Comparison to yips-cli**: Replaces Rich (Live, Panel, Tree) and prompt_toolkit with a single library providing equivalent capabilities.
+- **Choice**: Ink.
+- **Why**: React-style component model with portable input handling, predictable render/update lifecycle, and easier long-term maintainability than low-level terminal drawing loops.
+- **Alternatives considered**: terminal-kit (more manual terminal control, heavier direct cursor management), blessed (maintenance unclear, callback-heavy API).
+- **Comparison to yips-cli**: Replaces Rich (Live, Panel, Tree) and prompt_toolkit with a React-driven CLI rendering model.
 
 ### Distribution
 
@@ -69,7 +69,7 @@ For reference, the Python CLI's stack:
 |---------|----------|----------------|
 | Language | Python 3 | TypeScript |
 | Runtime | CPython | Node.js |
-| TUI | Rich (Live, Panel, Tree) | terminal-kit |
+| TUI | Rich (Live, Panel, Tree) | Ink |
 | LLM backend | llama.cpp + LM Studio + Claude CLI | llama.cpp + Claude CLI |
 | Config | `.yips_config.json` (JSON) | `.yips_config.json` (JSON) |
 | Skills | Python scripts (subprocess) | TypeScript modules |
@@ -78,4 +78,4 @@ For reference, the Python CLI's stack:
 
 ---
 
-> Last updated: 2026-02-22
+> Last updated: 2026-02-23

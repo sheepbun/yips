@@ -93,13 +93,20 @@ export function createDefaultRegistry(): CommandRegistry {
 
   registry.register("clear", () => ({ action: "clear" }), "Clear the screen");
 
+  registry.register("new", () => ({ action: "clear" }), "Start a new conversation");
+
   registry.register(
     "model",
-    (args) => {
-      if (args) {
-        return { output: `Model set to: ${args}`, action: "continue" };
+    (args, context) => {
+      const trimmed = args.trim();
+      if (trimmed.length > 0) {
+        context.config.model = trimmed;
+        return { output: `Model set to: ${trimmed}`, action: "continue" };
       }
-      return { output: "Usage: /model <model_name>", action: "continue" };
+      return {
+        output: `Current model: ${context.config.model}\nUsage: /model <model_name>`,
+        action: "continue"
+      };
     },
     "View or set the current model"
   );

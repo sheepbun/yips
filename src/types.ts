@@ -4,6 +4,8 @@ export interface AppConfig {
   streaming: boolean;
   verbose: boolean;
   backend: Backend;
+  llamaBaseUrl: string;
+  model: string;
 }
 
 export interface SessionState {
@@ -30,4 +32,11 @@ export interface TuiOptions {
   username?: string;
   model?: string;
   sessionName?: string;
+}
+
+export type ChatRole = "system" | "user" | "assistant";
+
+export interface ChatMessage {
+  role: ChatRole;
+  content: string;
 }

@@ -1,4 +1,4 @@
-/** Color palette and gradient utilities for terminal-kit markup. */
+/** Color palette and gradient utilities for ANSI truecolor output. */
 
 export interface Rgb {
   r: number;
@@ -18,6 +18,8 @@ export const ERROR_RED: Rgb = { r: 0xff, g: 0x44, b: 0x44 };
 export const WARNING_YELLOW: Rgb = { r: 0xff, g: 0xcc, b: 0x00 };
 export const SUCCESS_GREEN: Rgb = { r: 0x44, g: 0xff, b: 0x44 };
 export const DIM_GRAY: Rgb = { r: 0x88, g: 0x88, b: 0x88 };
+
+const ANSI_RESET_FOREGROUND = "\u001b[39m";
 
 // --- Color utilities ---
 
@@ -46,17 +48,40 @@ export function interpolateColor(start: Rgb, end: Rgb, t: number): Rgb {
   };
 }
 
-// --- Terminal-kit markup helpers ---
-
-/** Wrap a single character with terminal-kit truecolor markup. */
-export function colorChar(char: string, color: Rgb): string {
-  return `^#${toHex(color).slice(1)}${char}`;
+function toAnsiColor(color: Rgb): string {
+  const r = Math.round(Math.max(0, Math.min(255, color.r)));
+  const g = Math.round(Math.max(0, Math.min(255, color.g)));
+  const b = Math.round(Math.max(0, Math.min(255, color.b)));
+  return `\u001b[38;2;${r};${g};${b}m`;
 }
 
-/** Apply a solid color to an entire string using terminal-kit markup. */
+export function stripAnsi(text: string): string {
+  let output = "";
+
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === "\u001b" && text[i + 1] === "[") {
+      i += 2;
+      while (i < text.length && text[i] !== "m") {
+        i += 1;
+      }
+      continue;
+    }
+
+    output += text[i] ?? "";
+  }
+
+  return output;
+}
+
+/** Wrap a single character with ANSI truecolor sequence. */
+export function colorChar(char: string, color: Rgb): string {
+  return `${toAnsiColor(color)}${char}`;
+}
+
+/** Apply a solid color to an entire string using ANSI truecolor. */
 export function colorText(text: string, color: Rgb): string {
   if (text.length === 0) return "";
-  return `^#${toHex(color).slice(1)}${text}^:`;
+  return `${toAnsiColor(color)}${text}${ANSI_RESET_FOREGROUND}`;
 }
 
 /**
@@ -64,17 +89,21 @@ export function colorText(text: string, color: Rgb): string {
  * Each visible character gets its own color interpolated between start and end.
  */
 export function horizontalGradient(text: string, startColor: Rgb, endColor: Rgb): string {
-  if (text.length === 0) return "";
-  if (text.length === 1) return colorChar(text, startColor) + "^:";
-
-  const chars: string[] = [];
-  for (let i = 0; i < text.length; i++) {
-    const t = i / (text.length - 1);
-    const color = interpolateColor(startColor, endColor, t);
-    chars.push(colorChar(text[i]!, color));
+  const chars = Array.from(text);
+  if (chars.length === 0) return "";
+  if (chars.length === 1) {
+    return `${colorChar(chars[0] ?? "", startColor)}${ANSI_RESET_FOREGROUND}`;
   }
-  chars.push("^:");
-  return chars.join("");
+
+  const gradientChars: string[] = [];
+  for (let i = 0; i < chars.length; i++) {
+    const t = i / (chars.length - 1);
+    const color = interpolateColor(startColor, endColor, t);
+    gradientChars.push(colorChar(chars[i] ?? "", color));
+  }
+
+  gradientChars.push(ANSI_RESET_FOREGROUND);
+  return gradientChars.join("");
 }
 
 /**
@@ -88,20 +117,23 @@ export function diagonalGradient(
 ): string[] {
   if (lines.length === 0) return [];
 
-  const maxLen = Math.max(...lines.map((l) => l.length));
+  const splitLines = lines.map((line) => Array.from(line));
+  const maxLen = Math.max(...splitLines.map((lineChars) => lineChars.length));
   if (maxLen === 0) return lines.map(() => "");
 
   const totalSteps = lines.length - 1 + maxLen - 1;
 
-  return lines.map((line, row) => {
-    if (line.length === 0) return "";
-    const chars: string[] = [];
-    for (let col = 0; col < line.length; col++) {
+  return splitLines.map((lineChars, row) => {
+    if (lineChars.length === 0) return "";
+
+    const gradientChars: string[] = [];
+    for (let col = 0; col < lineChars.length; col++) {
       const t = totalSteps > 0 ? (row + col) / totalSteps : 0;
       const color = interpolateColor(startColor, endColor, t);
-      chars.push(colorChar(line[col]!, color));
+      gradientChars.push(colorChar(lineChars[col] ?? "", color));
     }
-    chars.push("^:");
-    return chars.join("");
+
+    gradientChars.push(ANSI_RESET_FOREGROUND);
+    return gradientChars.join("");
   });
 }

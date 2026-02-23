@@ -2,13 +2,30 @@ import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { getDefaultConfig, loadConfig } from "../src/config";
 
 async function createTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "yips-config-test-"));
 }
+
+const originalLlamaBaseUrl = process.env["YIPS_LLAMA_BASE_URL"];
+const originalModel = process.env["YIPS_MODEL"];
+
+afterEach(() => {
+  if (originalLlamaBaseUrl === undefined) {
+    delete process.env["YIPS_LLAMA_BASE_URL"];
+  } else {
+    process.env["YIPS_LLAMA_BASE_URL"] = originalLlamaBaseUrl;
+  }
+
+  if (originalModel === undefined) {
+    delete process.env["YIPS_MODEL"];
+  } else {
+    process.env["YIPS_MODEL"] = originalModel;
+  }
+});
 
 describe("loadConfig", () => {
   it("returns defaults when config file is missing", async () => {
@@ -42,7 +59,9 @@ describe("loadConfig", () => {
       JSON.stringify({
         streaming: false,
         verbose: true,
-        backend: "claude"
+        backend: "claude",
+        llamaBaseUrl: "http://localhost:9000",
+        model: "qwen3"
       }),
       "utf8"
     );
@@ -54,7 +73,9 @@ describe("loadConfig", () => {
     expect(result.config).toEqual({
       streaming: false,
       verbose: true,
-      backend: "claude"
+      backend: "claude",
+      llamaBaseUrl: "http://localhost:9000",
+      model: "qwen3"
     });
   });
 
@@ -66,7 +87,9 @@ describe("loadConfig", () => {
       JSON.stringify({
         streaming: "yes",
         verbose: true,
-        backend: "invalid-backend"
+        backend: "invalid-backend",
+        llamaBaseUrl: "not-a-url",
+        model: "   "
       }),
       "utf8"
     );
@@ -77,7 +100,30 @@ describe("loadConfig", () => {
     expect(result.config).toEqual({
       streaming: true,
       verbose: true,
-      backend: "llamacpp"
+      backend: "llamacpp",
+      llamaBaseUrl: "http://127.0.0.1:8080",
+      model: "default"
     });
+  });
+
+  it("applies environment overrides for model and base URL", async () => {
+    const dir = await createTempDir();
+    const configPath = join(dir, "env-config.json");
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        model: "file-model",
+        llamaBaseUrl: "http://127.0.0.1:9999"
+      }),
+      "utf8"
+    );
+
+    process.env["YIPS_MODEL"] = "env-model";
+    process.env["YIPS_LLAMA_BASE_URL"] = "http://localhost:8888/";
+
+    const result = await loadConfig(configPath);
+
+    expect(result.config.model).toBe("env-model");
+    expect(result.config.llamaBaseUrl).toBe("http://localhost:8888");
   });
 });

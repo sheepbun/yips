@@ -10,7 +10,8 @@ import {
   GRADIENT_YELLOW,
   horizontalGradient,
   INPUT_PINK,
-  interpolateColor
+  interpolateColor,
+  stripAnsi
 } from "./colors";
 
 export interface TitleBoxOptions {
@@ -114,13 +115,15 @@ function makeTopBorder(version: string, width: number): string {
   const closing = ` ${"─".repeat(Math.max(0, borderAvailable))}╮`;
   appendBorder(closing);
 
-  pieces.push("^:");
   return pieces.join("");
 }
 
-/** Strip terminal-kit markup sequences for length calculation. */
+/** Strip ANSI and legacy terminal-kit markup sequences for test/plain rendering. */
 export function stripMarkup(text: string): string {
-  return text.replace(/\^\[#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})\]|\^#[0-9a-fA-F]{6}|\^:/g, "");
+  return stripAnsi(text).replace(
+    /\^\[#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})\]|\^#[0-9a-fA-F]{6}|\^:/g,
+    ""
+  );
 }
 
 function makeBottomBorder(sessionName: string, width: number): string {
@@ -172,7 +175,10 @@ function styleCenteredText(
 
   switch (style) {
     case "gradient":
-      return { markup: horizontalGradient(centered, GRADIENT_PINK, GRADIENT_YELLOW), plain: centered };
+      return {
+        markup: horizontalGradient(centered, GRADIENT_PINK, GRADIENT_YELLOW),
+        plain: centered
+      };
     case "blue":
       return { markup: colorText(centered, GRADIENT_BLUE), plain: centered };
     case "pink":
@@ -218,7 +224,11 @@ function styleLeftText(
   }
 }
 
-function centerLogoLine(logoMarkup: string, logoPlain: string, width: number): { markup: string; plain: string } {
+function centerLogoLine(
+  logoMarkup: string,
+  logoPlain: string,
+  width: number
+): { markup: string; plain: string } {
   const paddingLeft = Math.max(0, Math.floor((width - logoPlain.length) / 2));
   const paddingRight = Math.max(0, width - logoPlain.length - paddingLeft);
   return {
@@ -227,7 +237,10 @@ function centerLogoLine(logoMarkup: string, logoPlain: string, width: number): {
   };
 }
 
-function renderSingleColumn(options: TitleBoxOptions, mode: "single" | "compact" | "minimal"): string[] {
+function renderSingleColumn(
+  options: TitleBoxOptions,
+  mode: "single" | "compact" | "minimal"
+): string[] {
   const { width, version, username, backend, model, tokenUsage, cwd, sessionName } = options;
   const innerWidth = Math.max(0, width - 2);
   const lines: string[] = [];

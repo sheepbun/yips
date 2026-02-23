@@ -1,4 +1,4 @@
-/** Conversation message formatting with terminal-kit color markup. */
+/** Conversation message formatting with ANSI truecolor styling. */
 
 import {
   colorText,

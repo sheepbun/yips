@@ -99,6 +99,11 @@ describe("stripMarkup", () => {
     expect(stripMarkup("^[#ff1493]H^[#ff3456]e^[#ff5619]l^:")).toBe("Hel");
   });
 
+  it("removes ANSI SGR color sequences", () => {
+    expect(stripMarkup("\u001b[38;2;255;20;147mA\u001b[39m")).toBe("A");
+    expect(stripMarkup("\u001b[38;2;255;20;147mHi\u001b[39m")).toBe("Hi");
+  });
+
   it("returns plain text unchanged", () => {
     expect(stripMarkup("hello")).toBe("hello");
   });

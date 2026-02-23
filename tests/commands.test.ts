@@ -91,6 +91,7 @@ describe("createDefaultRegistry", () => {
     expect(registry.has("model")).toBe(true);
     expect(registry.has("stream")).toBe(true);
     expect(registry.has("verbose")).toBe(true);
+    expect(registry.has("keys")).toBe(true);
   });
 
   it("/help lists commands", () => {
@@ -153,5 +154,15 @@ describe("createDefaultRegistry", () => {
     const registry = createDefaultRegistry();
     const result = registry.dispatch("model", "qwen3", createContext());
     expect(result.output).toContain("qwen3");
+  });
+
+  it("/keys shows diagnostics guidance", () => {
+    const registry = createDefaultRegistry();
+    const result = registry.dispatch("keys", "", createContext());
+    expect(result.action).toBe("continue");
+    expect(result.output).toContain("YIPS_DEBUG_KEYS=1 npm run dev");
+    expect(result.output).toContain("Ctrl+Enter");
+    expect(result.output).toContain("\\u001b[13;5u");
+    expect(result.output).toContain("\\u001b[13;5~");
   });
 });

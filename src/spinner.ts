@@ -6,17 +6,20 @@ import type { Rgb } from "./colors";
 const SPINNER_FRAMES = ["⠹", "⢸", "⣰", "⣤", "⣆", "⡇", "⠏", "⠛"] as const;
 const FRAME_COUNT = SPINNER_FRAMES.length;
 const OSCILLATION_RATE = 2.0;
+const FRAME_INTERVAL_MS = 80;
 
 export class PulsingSpinner {
   private label: string;
   private frameIndex: number;
   private startTime: number;
+  private lastFrameTime: number;
   private active: boolean;
 
   constructor(label = "Thinking...") {
     this.label = label;
     this.frameIndex = 0;
     this.startTime = Date.now();
+    this.lastFrameTime = this.startTime;
     this.active = false;
   }
 
@@ -26,6 +29,7 @@ export class PulsingSpinner {
     }
     this.frameIndex = 0;
     this.startTime = Date.now();
+    this.lastFrameTime = this.startTime;
     this.active = true;
   }
 
@@ -55,11 +59,18 @@ export class PulsingSpinner {
   }
 
   render(): string {
+    const now = Date.now();
+    const elapsedSinceFrame = now - this.lastFrameTime;
+    if (elapsedSinceFrame >= FRAME_INTERVAL_MS) {
+      const frameSteps = Math.floor(elapsedSinceFrame / FRAME_INTERVAL_MS);
+      this.frameIndex = (this.frameIndex + frameSteps) % FRAME_COUNT;
+      this.lastFrameTime += frameSteps * FRAME_INTERVAL_MS;
+    }
     const frame = SPINNER_FRAMES[this.frameIndex % FRAME_COUNT]!;
-    this.frameIndex = (this.frameIndex + 1) % FRAME_COUNT;
 
-    const elapsed = this.getElapsed();
-    const t = (Math.sin(elapsed * OSCILLATION_RATE) + 1) / 2;
+    const elapsedSeconds = Math.max(0, (now - this.startTime) / 1000);
+    const elapsed = Math.floor(elapsedSeconds);
+    const t = (Math.sin(elapsedSeconds * OSCILLATION_RATE) + 1) / 2;
     const color = interpolateColor(GRADIENT_PINK, GRADIENT_YELLOW, t);
     const timeText = this.formatElapsed(elapsed);
 

@@ -1965,3 +1965,57 @@ Validation:
 - `npm test` — clean (24 files, 241 tests)
 Next:
 - Optional manual visual pass with `npm run dev` to confirm the transient busy row behavior feels right in your terminal while waiting for first streaming token.
+
+## 2026-02-24 21:47 UTC — Exchange 56
+Summary: Made Model Manager model selection persist before leaving the panel so startup consistently loads the last selected model.
+Changed:
+- Updated `src/tui.ts` model-manager submit path:
+  - replaced fire-and-forget `saveConfig(...)` call with an awaited async flow.
+  - added temporary loading state (`Saving selected model...`) while persisting selection.
+  - now switches back to chat only after config save succeeds.
+  - on save failure, stays in Model Manager and surfaces an inline error (`Failed to save model selection: ...`).
+  - preserves existing behavior of setting backend to `llamacpp` and setting `config.model` to selected model id.
+Validation:
+- `npm test -- tests/tui-resize-render.test.ts tests/commands.test.ts` — clean (51 passing)
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+Next:
+- Optional manual check with `npm run dev`: select a model in Model Manager, restart Yips, and confirm the same model is loaded on startup.
+
+## 2026-02-24 21:55 UTC — Exchange 57
+Summary: Restored Thinking indicator to ~60fps render updates while keeping spinner glyph cadence stable.
+Changed:
+- Updated `src/tui.ts`:
+  - changed busy animation repaint interval from `80ms` to `16ms` (~60fps) for smoother transient Thinking row animation.
+- Updated `src/spinner.ts`:
+  - made spinner frame progression time-based (`80ms` per frame) instead of advancing one frame on every render.
+  - added internal frame timing state (`lastFrameTime`) and stepped frame advancement based on elapsed wall-clock time.
+  - preserves existing pulsing color + elapsed-time display behavior.
+- Updated `tests/spinner.test.ts`:
+  - adjusted frame-cycling test to mock `Date.now()` and advance by `80ms`, matching time-based frame logic.
+Validation:
+- `npm test -- tests/spinner.test.ts tests/tui-busy-indicator.test.ts tests/tui-resize-render.test.ts` — clean (28 passing)
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+Next:
+- Optional visual check with `npm run dev` to confirm motion smoothness and spinner cadence in your terminal renderer.
+
+## 2026-02-24 21:59 UTC — Exchange 58
+Summary: Fixed Thinking-row ordering and restored smooth yips-cli-style color pulsing.
+Changed:
+- Updated `src/tui.ts` streaming request path:
+  - removed pre-stream empty assistant placeholder append.
+  - `blockLength` now starts at `0`, so no timestamped Yips assistant header is rendered above `Thinking...` before first token.
+  - first token now inserts the assistant block directly via `replaceOutputBlock(...)`.
+- Updated `src/spinner.ts` color animation timing:
+  - color pulse now uses fractional elapsed seconds (`(now - startTime) / 1000`) instead of integer seconds.
+  - keeps elapsed-time text formatting as whole seconds for display.
+  - result: smooth continuous pink↔yellow oscillation matching yips-cli behavior.
+- Updated `tests/spinner.test.ts`:
+  - added sub-second oscillation regression assertion to verify color changes within fractional seconds.
+Validation:
+- `npm test -- tests/spinner.test.ts tests/tui-busy-indicator.test.ts tests/tui-resize-render.test.ts` — clean (29 passing)
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+Next:
+- Optional manual visual check with `npm run dev` to verify no timestamp/header appears before first streaming token and color pulsing looks right in your terminal.

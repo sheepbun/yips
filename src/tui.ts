@@ -28,6 +28,7 @@ import {
   formatUserMessage,
   formatWarningMessage
 } from "./messages";
+import { PulsingSpinner } from "./spinner";
 import { buildPromptBoxFrame } from "./prompt-box";
 import {
   PromptComposer,
@@ -109,6 +110,7 @@ const ANSI_RESET_ALL = "\u001b[0m";
 const DOWNLOADER_MIN_SEARCH_CHARS = 3;
 const DOWNLOADER_SEARCH_DEBOUNCE_MS = 400;
 const DOWNLOADER_PROGRESS_RENDER_INTERVAL_MS = 200;
+const BUSY_SPINNER_RENDER_INTERVAL_MS = 80;
 
 interface AssistantReply {
   text: string;
@@ -314,7 +316,7 @@ function resolveLoadedModelSizeBytes(config: AppConfig, loadedModel: string): nu
   }
 }
 
-function buildPromptStatusText(state: RuntimeState): string {
+export function buildPromptStatusText(state: RuntimeState): string {
   if (state.uiMode === "sessions") {
     return "sessions · browse";
   }
@@ -330,10 +332,19 @@ function buildPromptStatusText(state: RuntimeState): string {
   if (loadedModel) {
     parts.push(getFriendlyModelName(loadedModel, state.config.nicknames));
   }
-  if (state.busy) {
-    parts.push(state.busyLabel);
-  }
   return parts.join(" · ");
+}
+
+export function composeOutputLines(options: {
+  outputLines: string[];
+  autocompleteOverlay: string[];
+  busyLine?: string;
+}): string[] {
+  const lines = [...options.outputLines, ...options.autocompleteOverlay];
+  if (options.busyLine && options.busyLine.length > 0) {
+    lines.push(options.busyLine);
+  }
+  return lines;
 }
 
 function appendOutput(state: RuntimeState, text: string): void {
@@ -740,10 +751,39 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
       totalBytes: number | null;
     } | null>(null);
     const downloaderAbortControllerRef = useRef<AbortController | null>(null);
+    const busySpinnerRef = useRef<PulsingSpinner | null>(null);
 
     const forceRender = useCallback(() => {
       setRenderVersion((value) => value + 1);
     }, []);
+
+    const startBusyIndicator = useCallback(
+      (label: string): void => {
+        const currentState = stateRef.current;
+        if (!currentState) {
+          return;
+        }
+        if (!busySpinnerRef.current) {
+          busySpinnerRef.current = new PulsingSpinner(label);
+        }
+        busySpinnerRef.current.start(label);
+        currentState.busy = true;
+        currentState.busyLabel = label;
+        forceRender();
+      },
+      [forceRender]
+    );
+
+    const stopBusyIndicator = useCallback((): void => {
+      const currentState = stateRef.current;
+      if (!currentState) {
+        return;
+      }
+      busySpinnerRef.current?.stop();
+      currentState.busy = false;
+      currentState.busyLabel = "";
+      forceRender();
+    }, [forceRender]);
 
     dimensionsRef.current = dimensions;
 
@@ -951,6 +991,20 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
     }, [forceRender]);
 
     useEffect(() => {
+      const tick = setInterval(() => {
+        const currentState = stateRef.current;
+        if (!currentState?.busy || !busySpinnerRef.current?.isActive()) {
+          return;
+        }
+        forceRender();
+      }, BUSY_SPINNER_RENDER_INTERVAL_MS);
+
+      return () => {
+        clearInterval(tick);
+      };
+    }, [forceRender]);
+
+    useEffect(() => {
       const onResize = (): void => {
         const next = {
           columns: stdout.columns ?? 80,
@@ -1002,24 +1056,22 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
       llamaClient.setModel(currentState.config.model);
 
       if (!currentState.config.streaming) {
-        currentState.busy = true;
-        currentState.busyLabel = "Thinking...";
-        forceRender();
+        startBusyIndicator("Thinking...");
 
         try {
           const result = await llamaClient.chat(currentState.history, currentState.config.model);
           return { text: result.text, rendered: false, totalTokens: result.usage?.totalTokens };
         } finally {
-          currentState.busy = false;
-          currentState.busyLabel = "";
-          forceRender();
+          stopBusyIndicator();
         }
       }
 
       const timestamp = new Date();
       let streamText = "";
+      let receivedFirstToken = false;
       const blockStart = currentState.outputLines.length;
       let blockLength = 1;
+      startBusyIndicator("Thinking...");
       appendOutput(currentState, formatAssistantMessage("", timestamp));
       forceRender();
 
@@ -1028,6 +1080,10 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
           currentState.history,
           {
             onToken: (token: string): void => {
+              if (!receivedFirstToken) {
+                receivedFirstToken = true;
+                stopBusyIndicator();
+              }
               streamText += token;
               blockLength = replaceOutputBlock(
                 currentState,
@@ -1043,6 +1099,7 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
         streamText = streamResult.text;
 
         if (streamText.length === 0) {
+          stopBusyIndicator();
           throw new Error("Streaming response ended without assistant content.");
         }
 
@@ -1052,13 +1109,12 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
           totalTokens: streamResult.usage?.totalTokens
         };
       } catch {
+        stopBusyIndicator();
         appendOutput(
           currentState,
           formatWarningMessage("Streaming failed. Retrying without streaming.")
         );
-        currentState.busy = true;
-        currentState.busyLabel = "Retrying...";
-        forceRender();
+        startBusyIndicator("Retrying...");
 
         try {
           const fallbackResult = await llamaClient.chat(
@@ -1081,12 +1137,10 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
           currentState.outputLines.splice(blockStart, blockLength);
           throw fallbackError;
         } finally {
-          currentState.busy = false;
-          currentState.busyLabel = "";
-          forceRender();
+          stopBusyIndicator();
         }
       }
-    }, [forceRender]);
+    }, [forceRender, startBusyIndicator, stopBusyIndicator]);
 
     const loadDownloaderModels = useCallback(
       async (
@@ -2139,7 +2193,12 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
         ? []
         : buildAutocompleteOverlayLines(composer, registryRef.current);
 
-    const outputLines = [...state.outputLines, ...autocompleteOverlay];
+    const busyLine = state.busy && busySpinnerRef.current ? busySpinnerRef.current.render() : "";
+    const outputLines = composeOutputLines({
+      outputLines: state.outputLines,
+      autocompleteOverlay,
+      busyLine
+    });
     if (state.uiMode === "downloader" && state.downloader) {
       outputLines.push("");
       outputLines.push(

@@ -142,15 +142,15 @@ function buildModelRows(state: DownloaderState, contentWidth: number, rowCount: 
     return rows;
   }
 
-  const dlWidth = 8;
-  const likesWidth = 7;
-  const sizeWidth = 6;
+  const dlWidth = 9;
+  const likesWidth = 6;
+  const sizeWidth = 5;
   const dateWidth = 10;
   const staticWidth = 2 + 3 + dlWidth + 3 + likesWidth + 3 + sizeWidth + 3 + dateWidth;
   const modelWidth = Math.max(8, contentWidth - staticWidth);
 
-  const header = `  ${"Model".padEnd(modelWidth, " ")} | ${"DL".padStart(dlWidth, " ")} | ${"Likes".padStart(likesWidth, " ")} | ${"Size".padStart(sizeWidth, " ")} | ${"Updated".padStart(dateWidth, " ")}`;
-  rows.push(colorText(header, GRADIENT_BLUE));
+  const header = `  ${"Model".padEnd(modelWidth, " ")} | ${"Downloads".padStart(dlWidth, " ")} | ${"Likes".padStart(likesWidth, " ")} | ${"Size".padStart(sizeWidth, " ")} | ${"Updated".padStart(dateWidth, " ")}`;
+  rows.push(horizontalGradient(header, GRADIENT_PINK, GRADIENT_YELLOW));
 
   const visibleRowCount = Math.max(0, rowCount - 1);
   const start = state.modelScrollOffset;

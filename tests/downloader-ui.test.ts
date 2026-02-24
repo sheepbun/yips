@@ -120,9 +120,18 @@ describe("downloader-ui", () => {
 
     const plainLines = renderDownloaderLines({ width: 100, state }).map((line) => stripAnsi(line));
     const headerLine = plainLines.find(
-      (line) => line.includes("Model") && line.includes("DL") && line.includes("Updated")
+      (line) => line.includes("Model") && line.includes("Downloads") && line.includes("Updated")
     );
     expect(headerLine).toBeDefined();
+    const headerMarkupLine =
+      renderDownloaderLines({ width: 100, state }).find(
+        (line) =>
+          stripAnsi(line).includes("Model") &&
+          stripAnsi(line).includes("Downloads") &&
+          stripAnsi(line).includes("Updated")
+      ) ?? "";
+    const headerColorRuns = Math.max(0, headerMarkupLine.split("38;2;").length - 1);
+    expect(headerColorRuns).toBeGreaterThan(4);
 
     const modelLine = plainLines.find((line) => line.includes("org/model-alpha"));
     expect(modelLine).toBeDefined();

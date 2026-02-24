@@ -116,18 +116,62 @@ function buildModelRows(
   }
 
   const markerWidth = 3;
-  const backendWidth = 9;
-  const providerWidth = 14;
-  const sizeWidth = 7;
   const separators = 4 * 3;
-  const staticWidth = markerWidth + backendWidth + providerWidth + sizeWidth + separators;
-  const dynamicWidth = Math.max(18, contentWidth - staticWidth);
-  let nameWidth = Math.max(10, Math.min(22, Math.floor(dynamicWidth * 0.45)));
-  let fileWidth = Math.max(8, dynamicWidth - nameWidth);
-  if (fileWidth < 12) {
-    const reclaim = 12 - fileWidth;
-    nameWidth = Math.max(10, nameWidth - reclaim);
-    fileWidth = Math.max(8, dynamicWidth - nameWidth);
+  const minBackendWidth = 9;
+  const minProviderWidth = 14;
+  const minNameWidth = 16;
+  const minFileWidth = 18;
+  const minSizeWidth = 7;
+
+  let backendWidth = minBackendWidth;
+  let providerWidth = minProviderWidth;
+  let nameWidth = minNameWidth;
+  let fileWidth = minFileWidth;
+  let sizeWidth = minSizeWidth;
+
+  const minimumTotalColumnWidth =
+    minBackendWidth + minProviderWidth + minNameWidth + minFileWidth + minSizeWidth;
+  const availableTotalColumnWidth = Math.max(5, contentWidth - markerWidth - separators);
+
+  if (availableTotalColumnWidth >= minimumTotalColumnWidth) {
+    const extra = availableTotalColumnWidth - minimumTotalColumnWidth;
+    const growBy = Math.floor(extra / 5);
+    const remainder = extra % 5;
+    backendWidth += growBy + (remainder > 0 ? 1 : 0);
+    providerWidth += growBy + (remainder > 1 ? 1 : 0);
+    nameWidth += growBy + (remainder > 2 ? 1 : 0);
+    fileWidth += growBy + (remainder > 3 ? 1 : 0);
+    sizeWidth += growBy;
+  } else {
+    const minAllowed: [number, number, number, number, number] = [4, 6, 8, 8, 4];
+    const widths: [number, number, number, number, number] = [
+      backendWidth,
+      providerWidth,
+      nameWidth,
+      fileWidth,
+      sizeWidth
+    ];
+    const reduceOrder: Array<0 | 1 | 2 | 3 | 4> = [3, 2, 1, 0, 4];
+    let deficit = minimumTotalColumnWidth - availableTotalColumnWidth;
+
+    while (deficit > 0) {
+      let reducedThisPass = false;
+      for (const index of reduceOrder) {
+        if (deficit <= 0) {
+          break;
+        }
+        if (widths[index] > minAllowed[index]) {
+          widths[index] -= 1;
+          deficit -= 1;
+          reducedThisPass = true;
+        }
+      }
+      if (!reducedThisPass) {
+        break;
+      }
+    }
+
+    [backendWidth, providerWidth, nameWidth, fileWidth, sizeWidth] = widths;
   }
 
   const rows: string[] = [];

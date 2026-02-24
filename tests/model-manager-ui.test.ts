@@ -28,16 +28,51 @@ describe("model-manager-ui", () => {
   const modelInfoBlue = `\u001b[38;2;${GRADIENT_BLUE.r};${GRADIENT_BLUE.g};${GRADIENT_BLUE.b}m`;
 
   it("renders bordered frame and footer", () => {
+    const state = makeState({
+      allModels: [
+        {
+          id: "org/repo/model.gguf",
+          name: "model",
+          friendlyName: "repo",
+          host: "org",
+          backend: "llamacpp",
+          friendlyBackend: "llama.cpp",
+          sizeBytes: 10,
+          sizeGb: 0,
+          canRun: true,
+          reason: "Fits RAM+VRAM",
+          path: "/tmp/model.gguf"
+        }
+      ],
+      models: [
+        {
+          id: "org/repo/model.gguf",
+          name: "model",
+          friendlyName: "repo",
+          host: "org",
+          backend: "llamacpp",
+          friendlyBackend: "llama.cpp",
+          sizeBytes: 10,
+          sizeGb: 0,
+          canRun: true,
+          reason: "Fits RAM+VRAM",
+          path: "/tmp/model.gguf"
+        }
+      ]
+    });
     const lines = renderModelManagerLines({
       width: 90,
       currentModel: "default",
-      state: makeState()
+      state
     });
     const plain = lines.map((line) => stripAnsi(line));
 
     expect(plain[0]).toContain("Yips Model Manager");
     expect(lines[0]).toContain(modelInfoBlue);
     expect(plain.at(-1)).toContain("╯");
+    expect(plain.join("\n")).toContain("Backend");
+    expect(plain.join("\n")).toContain("Provider");
+    expect(plain.join("\n")).toContain("File");
     expect(plain.join("\n")).toContain("[Del] Delete Local");
   });
 
@@ -67,7 +102,7 @@ describe("model-manager-ui", () => {
         {
           id: "org/repo/model.gguf",
           name: "model",
-          friendlyName: "model",
+          friendlyName: "repo",
           host: "org",
           backend: "llamacpp",
           friendlyBackend: "llama.cpp",
@@ -82,7 +117,7 @@ describe("model-manager-ui", () => {
         {
           id: "org/repo/model.gguf",
           name: "model",
-          friendlyName: "model",
+          friendlyName: "repo",
           host: "org",
           backend: "llamacpp",
           friendlyBackend: "llama.cpp",
@@ -101,6 +136,10 @@ describe("model-manager-ui", () => {
       state
     });
 
-    expect(stripAnsi(lines.join("\n"))).toContain(">* org");
+    const plain = stripAnsi(lines.join("\n"));
+    expect(plain).toContain(">* llama.cpp");
+    expect(plain).toContain("| org");
+    expect(plain).toContain("| repo");
+    expect(plain).toContain("| model.gguf");
   });
 });

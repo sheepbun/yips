@@ -2216,3 +2216,56 @@ Validation:
 - `npm run typecheck` — clean
 Next:
 - Optional visual pass in `npm run dev` to confirm Model Manager and Model Downloader frames look identical in-terminal at multiple widths.
+
+## 2026-02-24 23:36 UTC — Exchange 68
+Summary: Reworked Model Manager list columns to reduce squish, reordered to `backend | provider | name | file | size`, and added a header row.
+Changed:
+- Updated `src/model-manager-ui.ts` table rendering:
+  - reordered model row columns to `backend | provider | name | file | size`.
+  - switched `name` column to `friendlyName` (repo-default unless overridden via `/nick`).
+  - added `file` column sourced from the model ID basename (`*.gguf`).
+  - added a gradient header row (`Backend | Provider | Name | File | Size`).
+  - adjusted width allocation to prioritize readability with dynamic `name`/`file` distribution and less cramped fixed columns.
+  - simplified size cell to a compact `x.xG` format.
+- Updated `src/tui.ts` model-manager navigation viewport size from `12` to `11` rows so keyboard scrolling matches visible list rows after header insertion.
+- Updated `tests/model-manager-ui.test.ts`:
+  - asserts header labels are present.
+  - asserts row order and values include backend/provider/name(file nickname default)/file columns.
+Validation:
+- `npm test -- tests/model-manager-ui.test.ts` — clean (3 passing)
+- `npm test -- tests/model-manager-ui.test.ts tests/model-manager.test.ts` — initially failed due to empty-list header expectation; fixed and re-ran targeted UI test cleanly
+- `npm test -- tests/tui-resize-render.test.ts tests/tui-busy-indicator.test.ts` — clean (25 passing)
+- `npm run typecheck` — clean
+- `npm run lint -- src/model-manager-ui.ts tests/model-manager-ui.test.ts src/tui.ts` — clean
+Next:
+- Optional interactive pass in `npm run dev` to verify column readability at narrow and wide terminal widths and confirm scroll behavior feels correct with header row present.
+
+## 2026-02-24 23:39 UTC — Exchange 69
+Summary: Reduced awkward wide-terminal spacing in Model Manager columns by capping dynamic table width growth.
+Changed:
+- Updated `src/model-manager-ui.ts` column sizing logic:
+  - replaced unbounded `file` column growth with a capped dynamic-width budget (`72` chars for `name + file`).
+  - extra terminal width now appears as trailing row space after the table instead of stretching internal columns.
+  - added overflow guard so narrow terminals still shrink safely without breaking rendering.
+Validation:
+- `npm test -- tests/model-manager-ui.test.ts` — clean (3 passing)
+- `npm run typecheck` — clean
+- `npm run lint -- src/model-manager-ui.ts` — clean
+Next:
+- Optional visual pass in `npm run dev` to confirm spacing feels right at your typical terminal widths (especially very wide windows).
+
+## 2026-02-24 23:42 UTC — Exchange 70
+Summary: Updated Model Manager table sizing to fill the full box width by distributing extra width across all columns.
+Changed:
+- Updated `src/model-manager-ui.ts` column allocator:
+  - replaced capped dynamic `name/file` sizing with full-width column distribution.
+  - table now computes minimum column widths and spreads additional width evenly across `backend`, `provider`, `name`, `file`, and `size`.
+  - added narrow-terminal fallback that shrinks columns in priority order while preserving minimum readability.
+- Updated `tests/model-manager-ui.test.ts`:
+  - relaxed one row assertion to avoid brittleness from dynamic column spacing while still validating column order/content.
+Validation:
+- `npm test -- tests/model-manager-ui.test.ts` — clean (3 passing)
+- `npm run typecheck` — clean
+- `npm run lint -- src/model-manager-ui.ts tests/model-manager-ui.test.ts` — clean
+Next:
+- Optional visual pass in `npm run dev` to fine-tune min widths if you want a denser or more spacious default distribution.

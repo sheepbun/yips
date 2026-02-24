@@ -136,6 +136,18 @@ describe("computeVisibleLayoutSlices", () => {
     expect(visible.promptLines).toEqual(["prompt-1", "prompt-2"]);
   });
 
+  it("keeps the full title visible until output exactly fills the gap", () => {
+    const title = ["title-1", "title-2", "title-3"];
+    const output = ["out-1", "out-2", "out-3"];
+    const prompt = ["prompt-1", "prompt-2"];
+
+    const visible = computeVisibleLayoutSlices(8, title, output, prompt);
+
+    expect(visible.titleLines).toEqual(["title-1", "title-2", "title-3"]);
+    expect(visible.outputLines).toEqual(["out-1", "out-2", "out-3"]);
+    expect(visible.promptLines).toEqual(["prompt-1", "prompt-2"]);
+  });
+
   it("shows only prompt rows if prompt is taller than terminal height", () => {
     const title = ["title-1", "title-2"];
     const output = ["out-1", "out-2"];

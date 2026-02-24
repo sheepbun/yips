@@ -3,3 +3,5 @@ node_modules/
 coverage/
 .claude/
 .obsidian/
+
+.yips_config.json

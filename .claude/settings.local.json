@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:generalistprogrammer.com)",
+      "WebFetch(domain:www.npmjs.com)",
+      "Bash(npm install:*)",
+      "Bash(ls:*)",
+      "Bash(node:*)",
+      "Bash(npm info:*)",
+      "Bash(npx tsc:*)",
+      "Bash(npx vitest:*)",
+      "Bash(npx eslint:*)",
+      "Bash(npx tsc -p tsconfig.build.json 2>&1 && npx prettier --check \"src/**/*.ts\" \"tests/**/*.ts\" 2>&1)",
+      "Bash(npx prettier:*)",
+      "Bash(npm run lint && npm run typecheck && npm test && npm run build && npm run format:check 2>&1)",
+      "Bash(git init:*)",
+      "Bash(git:*)",
+      "Bash(npm run:*)",
+      "Bash(npm test:*)"
+    ]
+  }
+}

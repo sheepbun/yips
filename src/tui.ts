@@ -1991,7 +1991,7 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
               currentState.modelManager = moveModelManagerSelection(
                 currentState.modelManager,
                 -1,
-                12
+                11
               );
               continue;
             }
@@ -2000,7 +2000,7 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
               currentState.modelManager = moveModelManagerSelection(
                 currentState.modelManager,
                 1,
-                12
+                11
               );
               continue;
             }

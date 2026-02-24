@@ -5,6 +5,7 @@ import {
   GRADIENT_PINK,
   GRADIENT_YELLOW,
   horizontalGradient,
+  horizontalGradientAtOffset,
   horizontalGradientBackground,
   stripAnsi,
   WARNING_YELLOW,
@@ -17,6 +18,8 @@ const BLACK: Rgb = { r: 0x00, g: 0x00, b: 0x00 };
 const CURRENT_MODEL_BLUE: Rgb = { r: 0x89, g: 0xcf, b: 0xf0 };
 const FOCUS_ACCENT_BG: Rgb = { r: 0xff, g: 0xcc, b: 0xff };
 const MODEL_MANAGER_BODY_ROWS = 12;
+const ANSI_BOLD_ON = "\u001b[1m";
+const ANSI_BOLD_OFF = "\u001b[22m";
 
 interface ModelManagerRenderOptions {
   width: number;
@@ -52,10 +55,17 @@ function makeBorderTop(width: number): string {
 
   const prefix = "╭─── ";
   const titleBrand = "Yips";
-  const titleDetail = " Model Manager ";
-  const plainTitleLen = charLength(`${prefix}${titleBrand}${titleDetail}`);
+  const titleDetail = " Model Manager";
+  const titleTail = " ";
+  const prefixLen = charLength(prefix);
+  const titleBrandLen = charLength(titleBrand);
+  const titleDetailLen = charLength(titleDetail);
+  const titleTailLen = charLength(titleTail);
+  const plainTitleLen = prefixLen + titleBrandLen + titleDetailLen + titleTailLen;
   const fill = "─".repeat(Math.max(0, width - plainTitleLen - 1));
-  return `${horizontalGradient(prefix, GRADIENT_PINK, GRADIENT_YELLOW)}${horizontalGradient(titleBrand, GRADIENT_PINK, GRADIENT_YELLOW)}${colorText(titleDetail, GRADIENT_BLUE)}${horizontalGradient(fill, GRADIENT_PINK, GRADIENT_YELLOW)}${colorText("╮", GRADIENT_YELLOW)}`;
+  const fillOffset = prefixLen + titleBrandLen + titleDetailLen + titleTailLen;
+  const cornerOffset = width - 1;
+  return `${horizontalGradientAtOffset(prefix, GRADIENT_PINK, GRADIENT_YELLOW, 0, width)}${ANSI_BOLD_ON}${horizontalGradient(titleBrand, GRADIENT_PINK, GRADIENT_YELLOW)}${colorText(titleDetail, GRADIENT_BLUE)}${ANSI_BOLD_OFF}${horizontalGradientAtOffset(titleTail, GRADIENT_PINK, GRADIENT_YELLOW, prefixLen + titleBrandLen + titleDetailLen, width)}${horizontalGradientAtOffset(fill, GRADIENT_PINK, GRADIENT_YELLOW, fillOffset, width)}${horizontalGradientAtOffset("╮", GRADIENT_PINK, GRADIENT_YELLOW, cornerOffset, width)}`;
 }
 
 function makeBorderBottom(width: number): string {
@@ -183,7 +193,11 @@ export function renderModelManagerLines(options: ModelManagerRenderOptions): str
   rows.push(...bodyRows.map((row) => lineWithBorders(row, innerWidth)));
   rows.push(
     lineWithBorders(
-      "[Enter] Select  [↑/↓] Move  [Del] Delete Local  [T] Downloader  [Esc] Close",
+      horizontalGradient(
+        "[Enter] Select  [↑/↓] Move  [Del] Delete Local  [T] Downloader  [Esc] Close",
+        GRADIENT_PINK,
+        GRADIENT_YELLOW
+      ),
       innerWidth
     )
   );

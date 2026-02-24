@@ -21,6 +21,7 @@ const PORT_CONFLICT_POLICIES: ReadonlySet<LlamaPortConflictPolicy> = new Set([
   "kill-user"
 ]);
 export const DEFAULT_CONFIG_PATH = ".yips_config.json";
+export const CONFIG_PATH_ENV_VAR = "YIPS_CONFIG_PATH";
 
 export function getDefaultConfig(): AppConfig {
   const llamaHost = "127.0.0.1";
@@ -46,6 +47,12 @@ export function getDefaultConfig(): AppConfig {
 }
 
 export function resolveConfigPath(configPath = DEFAULT_CONFIG_PATH): string {
+  if (configPath === DEFAULT_CONFIG_PATH) {
+    const envPath = process.env[CONFIG_PATH_ENV_VAR]?.trim();
+    if (envPath && envPath.length > 0) {
+      return resolve(envPath);
+    }
+  }
   return resolve(process.cwd(), configPath);
 }
 
@@ -278,31 +285,46 @@ export function mergeConfig(defaults: AppConfig, candidate: unknown): AppConfig 
 }
 
 export async function loadConfig(configPath = DEFAULT_CONFIG_PATH): Promise<LoadConfigResult> {
-  const path = resolveConfigPath(configPath);
   const defaults = getDefaultConfig();
+  const path = resolveConfigPath(configPath);
+  const legacyDefaultPath = resolve(process.cwd(), DEFAULT_CONFIG_PATH);
+  const candidatePaths: string[] = [path];
 
-  try {
-    await access(path, fsConstants.R_OK);
-  } catch {
+  if (configPath === DEFAULT_CONFIG_PATH && path !== legacyDefaultPath) {
+    candidatePaths.push(legacyDefaultPath);
+  }
+
+  let readablePath: string | null = null;
+  for (const candidatePath of candidatePaths) {
+    try {
+      await access(candidatePath, fsConstants.R_OK);
+      readablePath = candidatePath;
+      break;
+    } catch {
+      // keep trying
+    }
+  }
+
+  if (!readablePath) {
     return { config: applyEnvOverrides(defaults), path, source: "default" };
   }
 
   try {
-    const rawConfig = await readFile(path, "utf8");
+    const rawConfig = await readFile(readablePath, "utf8");
     const parsedConfig: unknown = JSON.parse(rawConfig);
 
     return {
       config: applyEnvOverrides(mergeConfig(defaults, parsedConfig)),
-      path,
+      path: readablePath,
       source: "file"
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return {
       config: applyEnvOverrides(defaults),
-      path,
+      path: readablePath,
       source: "default",
-      warning: `Failed to load config at ${path}: ${message}`
+      warning: `Failed to load config at ${readablePath}: ${message}`
     };
   }
 }

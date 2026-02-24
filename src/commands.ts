@@ -309,14 +309,6 @@ export function createDefaultRegistry(): CommandRegistry {
   );
 
   registry.register(
-    "models",
-    async () => {
-      return { action: "continue", uiAction: { type: "open-model-manager" } };
-    },
-    "Open the interactive Model Manager"
-  );
-
-  registry.register(
     "sessions",
     async () => {
       return { action: "continue", uiAction: { type: "open-sessions" } };

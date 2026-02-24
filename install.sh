@@ -12,7 +12,7 @@ YIPS_MODELS_DIR="${YIPS_DIR}/models"
 YIPS_ENV_FILE="${YIPS_DIR}/env.sh"
 YIPS_BIN_DIR="${HOME}/.local/bin"
 YIPS_LAUNCHER_PATH="${YIPS_BIN_DIR}/yips"
-YIPS_CONFIG_PATH="${REPO_ROOT}/.yips_config.json"
+YIPS_CONFIG_PATH="${YIPS_DIR}/config.json"
 
 OS_NAME=""
 PKG_MANAGER=""
@@ -289,13 +289,14 @@ write_env_file() {
   local temp_file
   temp_file="$(mktemp)"
   if [[ -f "${YIPS_ENV_FILE}" ]]; then
-    grep -vE '^export (LLAMA_SERVER_PATH|YIPS_LLAMA_SERVER_PATH|YIPS_LLAMA_MODELS_DIR|YIPS_BIN_DIR)=' "${YIPS_ENV_FILE}" \
+    grep -vE '^export (LLAMA_SERVER_PATH|YIPS_LLAMA_SERVER_PATH|YIPS_LLAMA_MODELS_DIR|YIPS_CONFIG_PATH|YIPS_BIN_DIR)=' "${YIPS_ENV_FILE}" \
       | grep -vE '^export PATH="\$YIPS_BIN_DIR:\$PATH"$' >"${temp_file}" || true
   fi
   {
     echo "export LLAMA_SERVER_PATH=\"${LLAMA_SERVER_BIN}\""
     echo "export YIPS_LLAMA_SERVER_PATH=\"${LLAMA_SERVER_BIN}\""
     echo "export YIPS_LLAMA_MODELS_DIR=\"${YIPS_MODELS_DIR}\""
+    echo "export YIPS_CONFIG_PATH=\"${YIPS_CONFIG_PATH}\""
     echo "export YIPS_BIN_DIR=\"${YIPS_BIN_DIR}\""
     echo 'export PATH="$YIPS_BIN_DIR:$PATH"'
   } >>"${temp_file}"

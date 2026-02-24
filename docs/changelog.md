@@ -54,6 +54,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Changed
 
+- llama.cpp startup now performs a localhost-only fresh-session reset before TUI launch:
+  - stops Yips-managed llama-server state and starts a new server/model load on startup
+  - fails startup immediately with actionable diagnostics if reset/start fails
+  - skips reset for non-local endpoints to avoid disrupting remote/shared backends
+- Config persistence now supports canonical path pinning via `YIPS_CONFIG_PATH`:
+  - `loadConfig`/`saveConfig` use `YIPS_CONFIG_PATH` when set (default only)
+  - default-load fallback still reads legacy `.yips_config.json` when env path is absent/unreadable
+  - installer now exports `YIPS_CONFIG_PATH=~/.yips/config.json` in `~/.yips/env.sh`
 - `docs/guides/getting-started.md` now reflects runnable TUI commands and llama.cpp chat behavior
 - `docs/contributing.md` updated with implemented toolchain (npm, Vitest, ESLint, Prettier)
 - `docs/roadmap.md` and `docs/stack.md` updated with Milestone 0 decisions and completed items

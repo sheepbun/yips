@@ -20,7 +20,12 @@ import {
 } from "./colors";
 import { LlamaClient } from "./llama-client";
 import type { ChatResult } from "./llama-client";
-import { ensureLlamaReady, formatLlamaStartupFailure, stopLlamaServer } from "./llama-server";
+import {
+  ensureLlamaReady,
+  formatLlamaStartupFailure,
+  resetLlamaForFreshSession,
+  stopLlamaServer
+} from "./llama-server";
 import {
   formatAssistantMessage,
   formatDimMessage,
@@ -1015,37 +1020,6 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
     useEffect(() => {
       void refreshModelAutocomplete();
     }, [refreshModelAutocomplete]);
-
-    useEffect(() => {
-      let canceled = false;
-      void (async () => {
-        const currentState = stateRef.current;
-        if (!currentState || currentState.config.backend !== "llamacpp") {
-          return;
-        }
-        const result = await ensureLlamaReady(currentState.config);
-        if (canceled || result.ready) {
-          return;
-        }
-        if (result.failure) {
-          appendOutput(
-            currentState,
-            formatWarningMessage(
-              `llama.cpp startup check failed:\n${formatLlamaStartupFailure(
-                result.failure,
-                currentState.config
-              )}`
-            )
-          );
-          appendOutput(currentState, "");
-          forceRender();
-        }
-      })();
-
-      return () => {
-        canceled = true;
-      };
-    }, [forceRender]);
 
     useEffect(() => {
       const tick = setInterval(() => {
@@ -2393,6 +2367,7 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
 
 export async function startTui(options: TuiOptions): Promise<"exit" | "restart"> {
   let restartRequested = false;
+  await ensureFreshLlamaSessionOnStartup(options);
   const version = await getVersion();
   const ink = (await import("ink")) as unknown as InkModule;
   const App = createInkApp(ink);
@@ -2411,4 +2386,22 @@ export async function startTui(options: TuiOptions): Promise<"exit" | "restart">
 
   await instance.waitUntilExit();
   return restartRequested ? "restart" : "exit";
+}
+
+export async function ensureFreshLlamaSessionOnStartup(
+  options: TuiOptions,
+  deps: { reset: typeof resetLlamaForFreshSession } = { reset: resetLlamaForFreshSession }
+): Promise<void> {
+  if (options.config.backend !== "llamacpp") {
+    return;
+  }
+  const configuredModel = options.config.model.trim().toLowerCase();
+  if (configuredModel.length === 0 || configuredModel === "default") {
+    return;
+  }
+
+  const resetResult = await deps.reset(options.config);
+  if (resetResult.failure) {
+    throw new Error(formatLlamaStartupFailure(resetResult.failure, options.config));
+  }
 }

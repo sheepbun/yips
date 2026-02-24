@@ -73,6 +73,13 @@ interface RunningServerState {
 
 let runningState: RunningServerState | null = null;
 
+const LOCAL_ENDPOINT_HOSTS: ReadonlySet<string> = new Set([
+  "localhost",
+  "127.0.0.1",
+  "0.0.0.0",
+  "::1"
+]);
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolveSleep) => {
     setTimeout(resolveSleep, ms);
@@ -107,6 +114,21 @@ function buildBaseUrl(config: AppConfig): string {
   const fallback = `http://${host}:${port}`;
   const trimmed = config.llamaBaseUrl?.trim();
   return trimmed.length > 0 ? trimmed.replace(/\/+$/, "") : fallback;
+}
+
+function isLocalHostname(hostname: string): boolean {
+  const normalized = hostname.trim().toLowerCase().replace(/^\[(.*)\]$/u, "$1");
+  return LOCAL_ENDPOINT_HOSTS.has(normalized) || normalized.startsWith("127.");
+}
+
+export function isLocalLlamaEndpoint(config: AppConfig): boolean {
+  const baseUrl = buildBaseUrl(config);
+  try {
+    const parsed = new URL(baseUrl);
+    return isLocalHostname(parsed.hostname);
+  } catch {
+    return false;
+  }
 }
 
 function buildDefaultDeps(overrides?: Partial<LlamaRuntimeDeps>): LlamaRuntimeDeps {
@@ -566,6 +588,18 @@ export async function stopLlamaServer(): Promise<void> {
   const state = runningState;
   runningState = null;
   await killProcess(state.process);
+}
+
+export async function resetLlamaForFreshSession(
+  config: AppConfig,
+  overrides?: Partial<LlamaRuntimeDeps>
+): Promise<StartLlamaServerResult> {
+  if (!isLocalLlamaEndpoint(config)) {
+    return { started: false };
+  }
+
+  await stopLlamaServer();
+  return startLlamaServer(config, overrides);
 }
 
 async function createStartContext(config: AppConfig): Promise<StartContext | StartLlamaServerResult> {

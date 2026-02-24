@@ -34,7 +34,7 @@ What `install.sh` does:
   - launcher defaults to source mode (`npm run dev`) so it always reflects latest local commits
   - set `YIPS_USE_DIST=1` to force compiled `dist/index.js` when desired
 - Installs Node dependencies for Yips (`npm install`)
-- Creates or patches `.yips_config.json` with llama lifecycle defaults without overwriting existing user settings
+- Creates or patches config at `$YIPS_CONFIG_PATH` (defaults to `~/.yips/config.json`) with llama lifecycle defaults without overwriting existing user settings
 - If Node runtime linkage is broken on Arch, auto-attempts repair by reinstalling `nodejs npm simdjson`
 - Supports optional CUDA toolkit install via `--cuda` (for Linux package managers)
 
@@ -67,7 +67,7 @@ Yips now boots the Ink-based TUI by default in interactive terminals.
 
 When you start Yips:
 
-1. Yips loads `.yips_config.json` when available
+1. Yips loads config from `$YIPS_CONFIG_PATH` when set (otherwise `.yips_config.json` in current working directory)
 2. Yips opens the interactive TUI (title header, conversation pane, and prompt composer)
 3. Yips routes slash commands locally and sends regular messages to the configured llama.cpp-compatible chat endpoint
 

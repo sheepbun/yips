@@ -9,6 +9,8 @@ import { getDefaultConfig } from "../src/config";
 import {
   ensureLlamaReady,
   formatLlamaStartupFailure,
+  isLocalLlamaEndpoint,
+  resetLlamaForFreshSession,
   startLlamaServer,
   stopLlamaServer
 } from "../src/llama-server";
@@ -286,5 +288,49 @@ describe("formatLlamaStartupFailure", () => {
     expect(formatted).toContain("Conflict: PID 777");
     expect(formatted).toContain("which llama-server");
     expect(formatted).toContain("ls /tmp/models/qwen.gguf");
+  });
+});
+
+describe("isLocalLlamaEndpoint", () => {
+  it("returns true for localhost and loopback hosts", () => {
+    expect(isLocalLlamaEndpoint(withConfig({ llamaBaseUrl: "http://localhost:8080" }))).toBe(true);
+    expect(isLocalLlamaEndpoint(withConfig({ llamaBaseUrl: "http://127.0.0.1:8080" }))).toBe(true);
+    expect(isLocalLlamaEndpoint(withConfig({ llamaBaseUrl: "http://127.0.2.1:8080" }))).toBe(true);
+    expect(isLocalLlamaEndpoint(withConfig({ llamaBaseUrl: "http://[::1]:8080" }))).toBe(true);
+  });
+
+  it("returns false for non-local hosts", () => {
+    expect(isLocalLlamaEndpoint(withConfig({ llamaBaseUrl: "http://10.0.0.4:8080" }))).toBe(false);
+    expect(
+      isLocalLlamaEndpoint(withConfig({ llamaBaseUrl: "https://models.example.com:443" }))
+    ).toBe(false);
+  });
+});
+
+describe("resetLlamaForFreshSession", () => {
+  it("is a no-op for non-local endpoints", async () => {
+    const result = await resetLlamaForFreshSession(
+      withConfig({
+        llamaBaseUrl: "https://models.example.com:443",
+        llamaServerPath: "/definitely/missing",
+        model: "missing.gguf"
+      })
+    );
+
+    expect(result).toEqual({ started: false });
+  });
+
+  it("propagates startup failure for localhost endpoints", async () => {
+    const result = await resetLlamaForFreshSession(
+      withConfig({
+        llamaBaseUrl: "http://127.0.0.1:8080",
+        llamaServerPath: "/definitely/missing",
+        model: "missing.gguf"
+      })
+    );
+
+    expect(result.started).toBe(false);
+    expect(result.failure).toBeDefined();
+    expect(result.failure?.kind).not.toBe("port-unavailable");
   });
 });

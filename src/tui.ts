@@ -55,7 +55,11 @@ import {
   type DownloaderState
 } from "./downloader-state";
 import { getSystemSpecs } from "./hardware";
-import { deleteLocalModel, getModelDisplayName, listLocalModels } from "./model-manager";
+import {
+  deleteLocalModel,
+  getFriendlyModelName,
+  listLocalModels
+} from "./model-manager";
 import { renderModelManagerLines } from "./model-manager-ui";
 import {
   createModelManagerState,
@@ -240,7 +244,9 @@ function buildTitleBoxOptions(
   width: number
 ): TitleBoxOptions {
   const loadedModel = resolveLoadedModel(state.config.model);
-  const modelLabel = loadedModel ? getModelDisplayName(loadedModel) : "";
+  const modelLabel = loadedModel
+    ? getFriendlyModelName(loadedModel, state.config.nicknames)
+    : "";
   return {
     width,
     version,
@@ -275,7 +281,7 @@ function buildPromptStatusText(state: RuntimeState): string {
   const loadedModel = resolveLoadedModel(state.config.model);
   const parts = [provider];
   if (loadedModel) {
-    parts.push(getModelDisplayName(loadedModel));
+    parts.push(getFriendlyModelName(loadedModel, state.config.nicknames));
   }
   if (state.busy) {
     parts.push(state.busyLabel);

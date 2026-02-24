@@ -10,6 +10,8 @@ LLAMA_SERVER_BIN="${LLAMA_BUILD_DIR}/bin/llama-server"
 YIPS_DIR="${HOME}/.yips"
 YIPS_MODELS_DIR="${YIPS_DIR}/models"
 YIPS_ENV_FILE="${YIPS_DIR}/env.sh"
+YIPS_BIN_DIR="${HOME}/.local/bin"
+YIPS_LAUNCHER_PATH="${YIPS_BIN_DIR}/yips"
 YIPS_CONFIG_PATH="${REPO_ROOT}/.yips_config.json"
 
 OS_NAME=""
@@ -280,22 +282,45 @@ validate_llama_server_binary() {
 
 ensure_yips_dirs() {
   mkdir -p "${YIPS_MODELS_DIR}"
+  mkdir -p "${YIPS_BIN_DIR}"
 }
 
 write_env_file() {
   local temp_file
   temp_file="$(mktemp)"
   if [[ -f "${YIPS_ENV_FILE}" ]]; then
-    grep -vE '^export (LLAMA_SERVER_PATH|YIPS_LLAMA_SERVER_PATH|YIPS_LLAMA_MODELS_DIR)=' "${YIPS_ENV_FILE}" >"${temp_file}" || true
+    grep -vE '^export (LLAMA_SERVER_PATH|YIPS_LLAMA_SERVER_PATH|YIPS_LLAMA_MODELS_DIR|YIPS_BIN_DIR)=' "${YIPS_ENV_FILE}" \
+      | grep -vE '^export PATH="\$YIPS_BIN_DIR:\$PATH"$' >"${temp_file}" || true
   fi
   {
     echo "export LLAMA_SERVER_PATH=\"${LLAMA_SERVER_BIN}\""
     echo "export YIPS_LLAMA_SERVER_PATH=\"${LLAMA_SERVER_BIN}\""
     echo "export YIPS_LLAMA_MODELS_DIR=\"${YIPS_MODELS_DIR}\""
+    echo "export YIPS_BIN_DIR=\"${YIPS_BIN_DIR}\""
+    echo 'export PATH="$YIPS_BIN_DIR:$PATH"'
   } >>"${temp_file}"
   mv "${temp_file}" "${YIPS_ENV_FILE}"
   chmod 600 "${YIPS_ENV_FILE}"
   log "Updated ${YIPS_ENV_FILE}"
+}
+
+install_yips_launcher() {
+  cat >"${YIPS_LAUNCHER_PATH}" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+REPO_ROOT="${REPO_ROOT}"
+if [[ ! -d "\${REPO_ROOT}" ]]; then
+  echo "[yips launcher] Repository path not found: \${REPO_ROOT}" >&2
+  exit 1
+fi
+cd "\${REPO_ROOT}"
+if [[ -f "dist/index.js" ]]; then
+  exec node dist/index.js "\$@"
+fi
+exec npm run dev -- "\$@"
+EOF
+  chmod +x "${YIPS_LAUNCHER_PATH}"
+  log "Installed launcher: ${YIPS_LAUNCHER_PATH}"
 }
 
 update_yips_config() {
@@ -389,6 +414,7 @@ print_summary() {
   echo
   echo "Summary:"
   echo "  - llama-server: ${LLAMA_SERVER_BIN}"
+  echo "  - yips launcher: ${YIPS_LAUNCHER_PATH}"
   echo "  - Yips env file: ${YIPS_ENV_FILE}"
   echo "  - Models dir: ${YIPS_MODELS_DIR}"
   echo "  - .yips_config.json: ${YIPS_CONFIG_PATH}"
@@ -416,6 +442,7 @@ main() {
   write_env_file
   install_node_dependencies
   update_yips_config
+  install_yips_launcher
   print_summary
 }
 

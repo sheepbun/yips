@@ -15,7 +15,7 @@ git clone https://github.com/sheepbun/yips.git
 cd yips
 ./install.sh
 source ~/.yips/env.sh
-npm run dev
+yips
 ```
 
 For NVIDIA + CUDA toolkit setup during install, use:
@@ -30,6 +30,7 @@ What `install.sh` does:
 - On Arch, uses a full-upgrade `pacman -Syu` package workflow to avoid partial-upgrade linker mismatches
 - Clones or updates `~/llama.cpp`, builds `llama-server` (CUDA when available, CPU fallback)
 - Creates `~/.yips/models` and writes runtime exports to `~/.yips/env.sh`
+- Installs a `~/.local/bin/yips` launcher so Yips can be run from any directory (after sourcing `~/.yips/env.sh`)
 - Installs Node dependencies for Yips (`npm install`)
 - Creates or patches `.yips_config.json` with llama lifecycle defaults without overwriting existing user settings
 - If Node runtime linkage is broken on Arch, auto-attempts repair by reinstalling `nodejs npm simdjson`

@@ -110,7 +110,7 @@ const ANSI_RESET_ALL = "\u001b[0m";
 const DOWNLOADER_MIN_SEARCH_CHARS = 3;
 const DOWNLOADER_SEARCH_DEBOUNCE_MS = 400;
 const DOWNLOADER_PROGRESS_RENDER_INTERVAL_MS = 200;
-const BUSY_SPINNER_RENDER_INTERVAL_MS = 80;
+const BUSY_SPINNER_RENDER_INTERVAL_MS = 16;
 
 interface AssistantReply {
   text: string;
@@ -1070,9 +1070,8 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
       let streamText = "";
       let receivedFirstToken = false;
       const blockStart = currentState.outputLines.length;
-      let blockLength = 1;
+      let blockLength = 0;
       startBusyIndicator("Thinking...");
-      appendOutput(currentState, formatAssistantMessage("", timestamp));
       forceRender();
 
       try {
@@ -1909,25 +1908,34 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
                 continue;
               }
 
-              currentState.config.backend = "llamacpp";
-              currentState.config.model = selected.id;
-              void saveConfig(currentState.config).catch((error: unknown) => {
+              currentState.modelManager = setModelManagerLoading(
+                currentState.modelManager,
+                "Saving selected model..."
+              );
+              forceRender();
+              void (async () => {
                 const state = stateRef.current;
-                if (!state) {
+                if (!state || !state.modelManager) {
                   return;
                 }
-                appendOutput(
-                  state,
-                  formatWarningMessage(`Config save failed: ${formatError(error)}`)
-                );
-                forceRender();
-              });
 
-              appendOutput(currentState, formatDimMessage(`Model set to: ${selected.id}`));
-              appendOutput(currentState, "");
-              currentState.uiMode = "chat";
-              composerRef.current = createComposer();
-              forceRender();
+                state.config.backend = "llamacpp";
+                state.config.model = selected.id;
+
+                try {
+                  await saveConfig(state.config);
+                  appendOutput(state, formatDimMessage(`Model set to: ${selected.id}`));
+                  appendOutput(state, "");
+                  state.uiMode = "chat";
+                  composerRef.current = createComposer();
+                } catch (error) {
+                  state.modelManager = setModelManagerError(
+                    state.modelManager,
+                    `Failed to save model selection: ${formatError(error)}`
+                  );
+                }
+                forceRender();
+              })();
               return;
             }
           }

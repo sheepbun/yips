@@ -48,13 +48,20 @@ describe("PulsingSpinner", () => {
   });
 
   it("cycles through frames on successive renders", () => {
-    const spinner = new PulsingSpinner("test");
-    spinner.start();
+    const nowSpy = vi.spyOn(Date, "now");
+    try {
+      nowSpy.mockReturnValue(1_000);
+      const spinner = new PulsingSpinner("test");
+      spinner.start();
 
-    const frame1 = stripMarkup(spinner.render());
-    const frame2 = stripMarkup(spinner.render());
+      const frame1 = stripMarkup(spinner.render());
+      nowSpy.mockReturnValue(1_080);
+      const frame2 = stripMarkup(spinner.render());
 
-    expect(frame1[0]).not.toBe(frame2[0]);
+      expect(frame1[0]).not.toBe(frame2[0]);
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 
   it("updates label", () => {
@@ -80,5 +87,12 @@ describe("PulsingSpinner", () => {
     expect(color.g).toBeLessThanOrEqual(255);
     expect(color.b).toBeGreaterThanOrEqual(0);
     expect(color.b).toBeLessThanOrEqual(255);
+  });
+
+  it("oscillation color changes at sub-second intervals", () => {
+    const early = PulsingSpinner.computeOscillationColor(0);
+    const later = PulsingSpinner.computeOscillationColor(0.25);
+
+    expect(early).not.toEqual(later);
   });
 });

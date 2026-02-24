@@ -16,6 +16,7 @@ OS_NAME=""
 PKG_MANAGER=""
 INSTALL_PREFIX=()
 APT_UPDATED=0
+INSTALL_CUDA=0
 
 log() {
   printf '[install] %s\n' "$*"
@@ -47,6 +48,8 @@ detect_platform() {
 
   if command -v apt-get >/dev/null 2>&1; then
     PKG_MANAGER="apt"
+  elif command -v pacman >/dev/null 2>&1; then
+    PKG_MANAGER="pacman"
   elif command -v dnf >/dev/null 2>&1; then
     PKG_MANAGER="dnf"
   elif command -v brew >/dev/null 2>&1; then
@@ -64,6 +67,29 @@ detect_platform() {
   log "Detected OS=${OS_NAME}, package manager=${PKG_MANAGER}"
 }
 
+parse_args() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --cuda)
+        INSTALL_CUDA=1
+        shift
+        ;;
+      -h|--help)
+        cat <<'EOF'
+Usage: ./install.sh [--cuda]
+
+Options:
+  --cuda    Install CUDA toolkit via package manager and build llama.cpp with CUDA.
+EOF
+        exit 0
+        ;;
+      *)
+        die "Unknown argument: $1 (try --help)"
+        ;;
+    esac
+  done
+}
+
 install_packages_apt() {
   local packages=("$@")
   if [[ "$APT_UPDATED" -eq 0 ]]; then
@@ -78,9 +104,39 @@ install_packages_dnf() {
   "${INSTALL_PREFIX[@]}" dnf install -y "${packages[@]}"
 }
 
+install_packages_pacman() {
+  local packages=("$@")
+  "${INSTALL_PREFIX[@]}" pacman -Sy --needed --noconfirm "${packages[@]}"
+}
+
 install_packages_brew() {
   local packages=("$@")
   brew install "${packages[@]}"
+}
+
+install_cuda_toolkit() {
+  if [[ "${INSTALL_CUDA}" -ne 1 ]]; then
+    return
+  fi
+
+  log "--cuda enabled: installing CUDA toolkit prerequisites"
+  case "$PKG_MANAGER" in
+    apt)
+      install_packages_apt nvidia-cuda-toolkit
+      ;;
+    pacman)
+      install_packages_pacman cuda
+      ;;
+    dnf)
+      install_packages_dnf cuda
+      ;;
+    brew)
+      warn "CUDA installation is not managed on macOS via Homebrew by this script; continuing without toolkit install."
+      ;;
+    *)
+      die "Unsupported package manager for CUDA install: ${PKG_MANAGER}"
+      ;;
+  esac
 }
 
 ensure_prerequisites() {
@@ -101,6 +157,9 @@ ensure_prerequisites() {
   case "$PKG_MANAGER" in
     apt)
       install_packages_apt git cmake build-essential curl nodejs npm
+      ;;
+    pacman)
+      install_packages_pacman git cmake base-devel curl nodejs npm
       ;;
     dnf)
       install_packages_dnf git cmake gcc-c++ make curl nodejs npm
@@ -138,12 +197,24 @@ num_jobs() {
 
 build_llama_cpu() {
   log "Building llama.cpp (CPU mode)"
-  cmake -S "${LLAMA_REPO_DIR}" -B "${LLAMA_BUILD_DIR}"
+  # Ensure prior CUDA configure state does not leak into CPU fallback.
+  rm -f "${LLAMA_BUILD_DIR}/CMakeCache.txt"
+  rm -rf "${LLAMA_BUILD_DIR}/CMakeFiles"
+  cmake -S "${LLAMA_REPO_DIR}" -B "${LLAMA_BUILD_DIR}" -DGGML_CUDA=OFF
   cmake --build "${LLAMA_BUILD_DIR}" -j "$(num_jobs)"
 }
 
 build_llama_cuda_then_fallback() {
+  if [[ "${INSTALL_CUDA}" -eq 1 ]]; then
+    log "--cuda enabled: attempting CUDA build first."
+  fi
+
   if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1; then
+    if ! command -v nvcc >/dev/null 2>&1; then
+      warn "NVIDIA GPU detected but nvcc is unavailable. Skipping CUDA build and using CPU mode."
+      build_llama_cpu
+      return
+    fi
     log "NVIDIA GPU detected. Attempting CUDA build."
     if cmake -S "${LLAMA_REPO_DIR}" -B "${LLAMA_BUILD_DIR}" -DGGML_CUDA=ON &&
       cmake --build "${LLAMA_BUILD_DIR}" -j "$(num_jobs)"; then
@@ -288,8 +359,10 @@ print_summary() {
 }
 
 main() {
+  parse_args "$@"
   detect_platform
   ensure_prerequisites
+  install_cuda_toolkit
   setup_llama_repo
   build_llama_cuda_then_fallback
   validate_llama_server_binary

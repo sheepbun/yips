@@ -1306,3 +1306,50 @@ Validation:
 - `npm test` — clean
 Next:
 - Add a focused installer smoke-check in CI (shell syntax + dry-run validation) once a non-destructive dry-run mode is introduced.
+
+## 2026-02-24 04:20 UTC — Exchange 22
+Summary: Added Arch Linux `pacman` support to `install.sh` and updated setup docs accordingly.
+Changed:
+- Updated `install.sh` package manager detection to include `pacman`.
+- Added `install_packages_pacman()` helper using `pacman -Sy --needed --noconfirm`.
+- Added Arch dependency mapping in prerequisite install flow:
+  - `git cmake base-devel curl nodejs npm`
+- Updated `docs/guides/getting-started.md` to list `pacman` among supported package managers for automated install.
+Validation:
+- Script logic review for package-manager dispatch path (`apt`/`pacman`/`dnf`/`brew`) completed.
+Next:
+- Optionally add a non-destructive `--dry-run` mode to `install.sh` and validate pacman branch in CI without root installs.
+
+## 2026-02-24 04:24 UTC — Exchange 23
+Summary: Fixed Arch installer CUDA fallback failure by preventing stale CMake CUDA cache from poisoning CPU fallback; added nvcc gate for CUDA attempts.
+Changed:
+- Updated `install.sh` CPU fallback path:
+  - clears `${LLAMA_BUILD_DIR}/CMakeCache.txt` and `${LLAMA_BUILD_DIR}/CMakeFiles` before reconfigure
+  - explicitly configures CPU build with `-DGGML_CUDA=OFF`
+- Updated CUDA decision logic:
+  - if NVIDIA GPU is present but `nvcc` is missing, installer now skips CUDA attempt and goes straight to CPU build with a warning
+- Verified script syntax with `bash -n install.sh`.
+Validation:
+- `bash -n install.sh` — clean
+Next:
+- Optionally add an explicit Arch CUDA prerequisite hint (e.g. `cuda` package) when `nvidia-smi` is present but `nvcc` is absent.
+
+## 2026-02-24 04:27 UTC — Exchange 24
+Summary: Added explicit opt-in CUDA install flag (`--cuda`) to installer.
+Changed:
+- Updated `install.sh`:
+  - added argument parsing with `--cuda` and `--help`
+  - added CUDA toolkit install step gated by `--cuda`
+  - package mapping for CUDA toolkit install:
+    - `apt`: `nvidia-cuda-toolkit`
+    - `pacman`: `cuda`
+    - `dnf`: `cuda`
+  - default install behavior remains unchanged unless `--cuda` is passed
+- Updated docs:
+  - `docs/guides/getting-started.md` now documents `./install.sh --cuda`
+  - `docs/changelog.md` updated with `--cuda` support note
+Validation:
+- `bash -n install.sh` — clean
+- `./install.sh --help` output verified
+Next:
+- Add `--dry-run` mode to validate package actions in CI without privileged installs.

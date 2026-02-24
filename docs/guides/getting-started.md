@@ -18,13 +18,20 @@ source ~/.yips/env.sh
 npm run dev
 ```
 
+For NVIDIA + CUDA toolkit setup during install, use:
+
+```sh
+./install.sh --cuda
+```
+
 What `install.sh` does:
 
-- Installs required system dependencies (`git`, `cmake`, build tools, `node`, `npm`, `curl`) using `apt`/`dnf`/`brew` when needed
+- Installs required system dependencies (`git`, `cmake`, build tools, `node`, `npm`, `curl`) using `apt`/`pacman`/`dnf`/`brew` when needed
 - Clones or updates `~/llama.cpp`, builds `llama-server` (CUDA when available, CPU fallback)
 - Creates `~/.yips/models` and writes runtime exports to `~/.yips/env.sh`
 - Installs Node dependencies for Yips (`npm install`)
 - Creates or patches `.yips_config.json` with llama lifecycle defaults without overwriting existing user settings
+- Supports optional CUDA toolkit install via `--cuda` (for Linux package managers)
 
 If no GGUF model exists yet, open Yips and use `/download` or `/model` to fetch/select one.
 

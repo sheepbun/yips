@@ -40,6 +40,7 @@ export interface DownloaderState {
   cacheQuery: string;
   modelCacheByTab: Partial<Record<DownloaderTab, HfModelSummary[]>>;
   preloadingTabs: boolean;
+  cancelConfirmOpen: boolean;
 }
 
 export function tabToSort(tab: DownloaderTab): HfModelSort {
@@ -81,7 +82,8 @@ export function createDownloaderState(memory: {
     diskFreeGb: memory.diskFreeGb ?? 0,
     cacheQuery: "",
     modelCacheByTab: {},
-    preloadingTabs: false
+    preloadingTabs: false,
+    cancelConfirmOpen: false
   };
 }
 
@@ -106,7 +108,8 @@ export function setModels(state: DownloaderState, models: HfModelSummary[]): Dow
     phase: "idle",
     loading: false,
     errorMessage: "",
-    download: null
+    download: null,
+    cancelConfirmOpen: false
   };
 }
 
@@ -125,7 +128,8 @@ export function setFiles(
     phase: "idle",
     loading: false,
     errorMessage: "",
-    download: null
+    download: null,
+    cancelConfirmOpen: false
   };
 }
 
@@ -136,7 +140,8 @@ export function setLoading(state: DownloaderState, message: string): DownloaderS
     loading: true,
     loadingMessage: message,
     errorMessage: "",
-    download: null
+    download: null,
+    cancelConfirmOpen: false
   };
 }
 
@@ -147,7 +152,8 @@ export function setLoadingModels(state: DownloaderState, message: string): Downl
     loading: true,
     loadingMessage: message,
     errorMessage: "",
-    download: null
+    download: null,
+    cancelConfirmOpen: false
   };
 }
 
@@ -158,7 +164,8 @@ export function setLoadingFiles(state: DownloaderState, message: string): Downlo
     loading: true,
     loadingMessage: message,
     errorMessage: "",
-    download: null
+    download: null,
+    cancelConfirmOpen: false
   };
 }
 
@@ -183,7 +190,8 @@ export function startDownload(
       startedAtMs: now,
       lastUpdateAtMs: now,
       statusText
-    }
+    },
+    cancelConfirmOpen: false
   };
 }
 
@@ -218,7 +226,8 @@ export function finishDownload(state: DownloaderState): DownloaderState {
     loading: false,
     loadingMessage: "",
     errorMessage: "",
-    download: null
+    download: null,
+    cancelConfirmOpen: false
   };
 }
 
@@ -276,7 +285,8 @@ export function setError(state: DownloaderState, message: string): DownloaderSta
     phase: "error",
     loading: false,
     errorMessage: message,
-    download: null
+    download: null,
+    cancelConfirmOpen: false
   };
 }
 
@@ -286,7 +296,8 @@ export function setDownloaderError(state: DownloaderState, message: string): Dow
     phase: "error",
     loading: false,
     errorMessage: message,
-    download: null
+    download: null,
+    cancelConfirmOpen: false
   };
 }
 
@@ -300,7 +311,28 @@ export function closeFileView(state: DownloaderState): DownloaderState {
     phase: "idle",
     loading: false,
     errorMessage: "",
-    download: null
+    download: null,
+    cancelConfirmOpen: false
+  };
+}
+
+export function openCancelConfirm(state: DownloaderState): DownloaderState {
+  if (state.phase !== "downloading" || !state.download) {
+    return state;
+  }
+  return {
+    ...state,
+    cancelConfirmOpen: true
+  };
+}
+
+export function closeCancelConfirm(state: DownloaderState): DownloaderState {
+  if (!state.cancelConfirmOpen) {
+    return state;
+  }
+  return {
+    ...state,
+    cancelConfirmOpen: false
   };
 }
 

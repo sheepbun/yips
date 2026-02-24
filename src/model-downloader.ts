@@ -1,5 +1,5 @@
 import { createWriteStream } from "node:fs";
-import { mkdir } from "node:fs/promises";
+import { mkdir, rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, normalize, resolve } from "node:path";
 
@@ -354,75 +354,91 @@ export async function downloadModelFile(
 
   await mkdir(dirname(outputPath), { recursive: true });
 
-  const fileUrl =
-    `https://huggingface.co/${encodePath(repoId)}/resolve/${encodeURIComponent(revision)}/` +
-    `${encodePath(safeFilename)}?download=true`;
-  const response = await getFetch(options.fetchImpl)(fileUrl, { signal: options.signal });
-
-  if (!response.ok) {
-    throw new Error(`Download failed with HTTP ${response.status} ${response.statusText}`);
-  }
-  if (!response.body) {
-    throw new Error("Download failed: response body is empty.");
-  }
-
-  const contentLengthHeader = response.headers.get("content-length");
-  const parsedLength = contentLengthHeader ? Number.parseInt(contentLengthHeader, 10) : Number.NaN;
-  const totalBytes = Number.isFinite(parsedLength) && parsedLength > 0 ? parsedLength : null;
-
-  const emitProgress = (bytesDownloaded: number): void => {
-    if (!options.onProgress) {
-      return;
-    }
-    options.onProgress({
-      bytesDownloaded,
-      totalBytes
-    });
-  };
-
   let byteCount = 0;
-  emitProgress(byteCount);
-  await new Promise<void>((resolvePromise, rejectPromise) => {
-    const writer = createWriteStream(outputPath);
+  let completed = false;
 
-    writer.on("error", rejectPromise);
-    writer.on("finish", resolvePromise);
+  try {
+    const fileUrl =
+      `https://huggingface.co/${encodePath(repoId)}/resolve/${encodeURIComponent(revision)}/` +
+      `${encodePath(safeFilename)}?download=true`;
+    const response = await getFetch(options.fetchImpl)(fileUrl, { signal: options.signal });
 
-    const reader = response.body?.getReader();
-    if (!reader) {
-      writer.destroy(new Error("Download failed: could not create stream reader."));
-      return;
+    if (!response.ok) {
+      throw new Error(`Download failed with HTTP ${response.status} ${response.statusText}`);
+    }
+    if (!response.body) {
+      throw new Error("Download failed: response body is empty.");
     }
 
-    const pump = async (): Promise<void> => {
-      try {
-        let reading = true;
-        while (reading) {
-          const chunk = await reader.read();
-          if (chunk.done) {
-            writer.end();
-            reading = false;
-            continue;
-          }
-          const value = chunk.value;
-          byteCount += value.byteLength;
-          emitProgress(byteCount);
-          if (!writer.write(Buffer.from(value))) {
-            await new Promise<void>((drainResolve) => {
-              writer.once("drain", drainResolve);
-            });
-          }
-        }
-      } catch (error) {
-        writer.destroy(error instanceof Error ? error : new Error(String(error)));
+    const contentLengthHeader = response.headers.get("content-length");
+    const parsedLength = contentLengthHeader
+      ? Number.parseInt(contentLengthHeader, 10)
+      : Number.NaN;
+    const totalBytes = Number.isFinite(parsedLength) && parsedLength > 0 ? parsedLength : null;
+
+    const emitProgress = (bytesDownloaded: number): void => {
+      if (!options.onProgress) {
+        return;
       }
+      options.onProgress({
+        bytesDownloaded,
+        totalBytes
+      });
     };
 
-    void pump();
-  });
+    emitProgress(byteCount);
+    await new Promise<void>((resolvePromise, rejectPromise) => {
+      const writer = createWriteStream(outputPath);
 
-  emitProgress(byteCount);
-  return { localPath: outputPath, byteCount };
+      writer.on("error", rejectPromise);
+      writer.on("finish", resolvePromise);
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        writer.destroy(new Error("Download failed: could not create stream reader."));
+        return;
+      }
+
+      const pump = async (): Promise<void> => {
+        try {
+          let reading = true;
+          while (reading) {
+            const chunk = await reader.read();
+            if (chunk.done) {
+              writer.end();
+              reading = false;
+              continue;
+            }
+            const value = chunk.value;
+            byteCount += value.byteLength;
+            emitProgress(byteCount);
+            if (!writer.write(Buffer.from(value))) {
+              await new Promise<void>((drainResolve) => {
+                writer.once("drain", drainResolve);
+              });
+            }
+          }
+        } catch (error) {
+          writer.destroy(error instanceof Error ? error : new Error(String(error)));
+        }
+      };
+
+      void pump();
+    });
+
+    emitProgress(byteCount);
+    completed = true;
+    return { localPath: outputPath, byteCount };
+  } catch (error) {
+    if (!completed) {
+      try {
+        await rm(outputPath, { force: true });
+      } catch {
+        // Preserve the original download error when cleanup fails.
+      }
+    }
+    throw error;
+  }
 }
 
 function formatCount(value: number): string {

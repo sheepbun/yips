@@ -255,6 +255,11 @@ function buildDownloadingRows(
   return rows;
 }
 
+function buildCancelConfirmRows(innerWidth: number): string[] {
+  const message = fitLeft("Cancel download and delete partial file?", Math.max(1, innerWidth));
+  return [colorText(message, WARNING_YELLOW), ""];
+}
+
 export function renderDownloaderLines(options: DownloaderRenderOptions): string[] {
   const width = Math.max(20, options.width);
   const state = options.state;
@@ -293,7 +298,9 @@ export function renderDownloaderLines(options: DownloaderRenderOptions): string[
       );
     }
   } else if (state.phase === "downloading") {
-    bodyRows = buildDownloadingRows(state, innerWidth);
+    bodyRows = state.cancelConfirmOpen
+      ? buildCancelConfirmRows(innerWidth)
+      : buildDownloadingRows(state, innerWidth);
   } else if (state.phase === "loading-files") {
     bodyRows = fillRows([`Loading: ${state.loadingMessage}`], DOWNLOADER_FILE_BODY_ROWS);
   } else if (state.phase === "error" && state.errorMessage.length > 0) {
@@ -313,7 +320,9 @@ export function renderDownloaderLines(options: DownloaderRenderOptions): string[
 
   if (state.phase === "downloading") {
     const status = state.download?.statusText ?? "Downloading...";
-    rows.push(lineWithSplitFooter("[Esc] Cancel", fitRight(status, innerWidth - 14), innerWidth));
+    const left = state.cancelConfirmOpen ? "[Enter] Yes  [Esc] No" : "[Esc] Cancel";
+    const statusWidth = Math.max(1, innerWidth - Array.from(left).length - 1);
+    rows.push(lineWithSplitFooter(left, fitRight(status, statusWidth), innerWidth));
   } else {
     const footer =
       state.view === "models"

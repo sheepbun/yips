@@ -11,6 +11,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - `install.sh` automated local runtime setup:
   - installs missing system prerequisites via supported package managers
   - supports optional CUDA toolkit install via `./install.sh --cuda`
+  - on Arch, uses full-upgrade `pacman -Syu` installs to avoid partial-upgrade breakage
+  - adds Arch node-runtime self-heal (`nodejs npm simdjson`) when shared-library linkage is broken
   - clones/updates and builds `llama.cpp` (`llama-server`) with CUDA-first + CPU fallback
   - writes `~/.yips/env.sh` (`LLAMA_SERVER_PATH`, `YIPS_LLAMA_SERVER_PATH`, `YIPS_LLAMA_MODELS_DIR`)
   - creates/patches `.yips_config.json` lifecycle defaults without clobbering existing user values

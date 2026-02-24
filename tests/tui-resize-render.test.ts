@@ -6,7 +6,8 @@ import { buildPromptComposerLayout, PromptComposer } from "../src/prompt-compose
 import {
   buildAutocompleteOverlayLines,
   buildPromptRenderLines,
-  computeVisibleLayoutSlices
+  computeVisibleLayoutSlices,
+  shouldConsumeSubmitForAutocomplete
 } from "../src/tui";
 import { stripMarkup } from "../src/title-box";
 
@@ -180,5 +181,31 @@ describe("buildAutocompleteOverlayLines", () => {
     expect(plain).not.toContain("... ");
     expect(plain).not.toContain("more");
     expect(plain).not.toContain("above");
+  });
+});
+
+describe("shouldConsumeSubmitForAutocomplete", () => {
+  it("returns false when selected option already equals the typed token", () => {
+    expect(
+      shouldConsumeSubmitForAutocomplete({
+        token: "/help",
+        options: ["/help"],
+        selectedIndex: 0
+      })
+    ).toBe(false);
+  });
+
+  it("returns true when submit should first accept a different suggestion", () => {
+    expect(
+      shouldConsumeSubmitForAutocomplete({
+        token: "/he",
+        options: ["/help", "/hello"],
+        selectedIndex: 1
+      })
+    ).toBe(true);
+  });
+
+  it("returns false with no menu state", () => {
+    expect(shouldConsumeSubmitForAutocomplete(null)).toBe(false);
   });
 });

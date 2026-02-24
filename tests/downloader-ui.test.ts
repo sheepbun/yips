@@ -192,12 +192,21 @@ describe("downloader-ui", () => {
     const plain = lines.map((line) => stripAnsi(line));
 
     expect(plain.some((line) => line.includes("Files for org/model"))).toBe(true);
+    const filesHeaderLine = plain.find(
+      (line) => line.includes("File") && line.includes("Quant") && line.includes("Size") && line.includes("Fit")
+    );
+    expect(filesHeaderLine).toBeDefined();
+    const fileRowLine = plain.find((line) => line.includes("model-q4.gguf"));
+    expect(fileRowLine).toBeDefined();
+    expect(pipeIndexes(stripFrame(filesHeaderLine ?? ""))).toEqual(pipeIndexes(stripFrame(fileRowLine ?? "")));
     expect(plain.some((line) => line.includes("model-q4.gguf"))).toBe(true);
     expect(plain.some((line) => line.includes("model-q8.gguf"))).toBe(true);
+    expect(plain.some((line) => line.includes("Fits on GPU"))).toBe(true);
+    expect(plain.some((line) => line.includes("Model too large"))).toBe(true);
     expect(plain.some((line) => line.includes("[Enter] Download"))).toBe(true);
     const fileFooterLine = lines.find((line) => stripAnsi(line).includes("[Enter] Download")) ?? "";
     const fileFooterColorRuns = Math.max(0, fileFooterLine.split("38;2;").length - 1);
-    expect(fileFooterColorRuns).toBe(2);
+    expect(fileFooterColorRuns).toBeGreaterThan(4);
     expect(lines.some((line) => line.includes("\u001b[38;2;255;68;68m"))).toBe(true);
   });
 
@@ -256,6 +265,12 @@ describe("downloader-ui", () => {
     expect(plain.some((line) => line.includes("ETA 00:01"))).toBe(true);
     expect(plain.some((line) => line.includes("Most Downloaded"))).toBe(false);
     expect(plain.some((line) => line.includes("[Esc] Cancel"))).toBe(true);
+    const footerLine =
+      renderDownloaderLines({ width: 100, state: progressed }).find((line) =>
+        stripAnsi(line).includes("[Esc] Cancel")
+      ) ?? "";
+    const footerColorRuns = Math.max(0, footerLine.split("38;2;").length - 1);
+    expect(footerColorRuns).toBeGreaterThan(4);
     const progressLine = plain.find((line) => line.includes("[") && line.includes("%")) ?? "";
     expect(progressLine.endsWith("%│")).toBe(true);
     const emptyLines = plain.filter((line) => /^│\s*│$/u.test(line));
@@ -284,6 +299,11 @@ describe("downloader-ui", () => {
 
     expect(plain.some((line) => line.includes("Cancel download and delete partial file?"))).toBe(true);
     expect(plain.some((line) => line.includes("[Enter] Yes  [Esc] No"))).toBe(true);
+    const footerLine = renderDownloaderLines({ width: 100, state: confirming }).find((line) =>
+      stripAnsi(line).includes("[Enter] Yes  [Esc] No")
+    );
+    const footerColorRuns = Math.max(0, (footerLine ?? "").split("38;2;").length - 1);
+    expect(footerColorRuns).toBeGreaterThan(4);
     expect(plain).toHaveLength(5);
   });
 

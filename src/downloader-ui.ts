@@ -109,18 +109,16 @@ function lineWithBorders(inner: string, innerWidth: number): string {
   return `${colorText("│", GRADIENT_PINK)}${fitted}${padding}${colorText("│", GRADIENT_YELLOW)}`;
 }
 
-function lineWithSplitFooter(left: string, right: string, innerWidth: number): string {
-  const plainLeft = stripAnsi(left);
-  const plainRight = stripAnsi(right);
-  const leftLen = charLength(plainLeft);
-  const rightLen = charLength(plainRight);
+function composeSplitFooter(left: string, right: string, innerWidth: number): string {
+  const leftLen = charLength(left);
+  const rightLen = charLength(right);
 
   if (leftLen + rightLen + 1 > innerWidth) {
-    return lineWithBorders(`${left} ${fitRight(plainRight, Math.max(1, innerWidth - leftLen - 1))}`, innerWidth);
+    return `${left} ${fitRight(right, Math.max(1, innerWidth - leftLen - 1))}`;
   }
 
   const gap = " ".repeat(Math.max(1, innerWidth - leftLen - rightLen));
-  return lineWithBorders(`${left}${gap}${right}`, innerWidth);
+  return `${left}${gap}${right}`;
 }
 
 function highlightedRow(row: string): string {
@@ -172,6 +170,23 @@ function buildModelRows(state: DownloaderState, contentWidth: number, rowCount: 
   return rows;
 }
 
+function toFileFitLabel(state: DownloaderState, file: DownloaderState["files"][number]): string {
+  if (!file.canRun) {
+    return file.reason;
+  }
+
+  if (file.sizeBytes === null || file.sizeBytes <= 0) {
+    return file.reason;
+  }
+
+  if (!Number.isFinite(state.vramGb) || state.vramGb <= 0) {
+    return file.reason;
+  }
+
+  const vramBytes = state.vramGb * 1024 ** 3;
+  return file.sizeBytes <= vramBytes ? "Fits on GPU" : "Fits on GPU+CPU";
+}
+
 function buildFileRows(state: DownloaderState, contentWidth: number, rowCount: number): string[] {
   const rows: string[] = [];
   if (state.files.length === 0) {
@@ -179,8 +194,17 @@ function buildFileRows(state: DownloaderState, contentWidth: number, rowCount: n
     return rows;
   }
 
+  const quantWidth = 21;
+  const sizeWidth = 5;
+  const fitWidth = 16;
+  const staticWidth = 2 + 3 + quantWidth + 3 + sizeWidth + 3 + fitWidth;
+  const fileWidth = Math.max(8, contentWidth - staticWidth);
+  const header = `  ${"File".padEnd(fileWidth, " ")} | ${"Quant".padEnd(quantWidth, " ")} | ${"Size".padStart(sizeWidth, " ")} | ${"Fit".padEnd(fitWidth, " ")}`;
+  rows.push(horizontalGradient(header, GRADIENT_PINK, GRADIENT_YELLOW));
+
+  const visibleRowCount = Math.max(0, rowCount - 1);
   const start = state.fileScrollOffset;
-  const end = Math.min(state.files.length, start + rowCount);
+  const end = Math.min(state.files.length, start + visibleRowCount);
   for (let index = start; index < end; index++) {
     const file = state.files[index];
     if (!file) continue;
@@ -189,10 +213,11 @@ function buildFileRows(state: DownloaderState, contentWidth: number, rowCount: n
     const basename = file.path.includes("/")
       ? (file.path.split("/").pop() ?? file.path)
       : file.path;
-    const leftWidth = Math.max(8, contentWidth - 34);
-    const left = fitLeft(basename, leftWidth);
-    const detail = `${file.quant} ${formatSize(file.sizeBytes)} ${file.reason}`;
-    const row = `${prefix} ${left.padEnd(leftWidth, " ")} | ${fitRight(detail, 29)}`;
+    const fileCell = fitLeft(basename, fileWidth).padEnd(fileWidth, " ");
+    const quantCell = fitLeft(file.quant, quantWidth).padEnd(quantWidth, " ");
+    const sizeCell = formatSize(file.sizeBytes).padStart(sizeWidth, " ");
+    const fitCell = fitLeft(toFileFitLabel(state, file), fitWidth).padEnd(fitWidth, " ");
+    const row = `${prefix} ${fileCell} | ${quantCell} | ${sizeCell} | ${fitCell}`;
     if (index === state.selectedFileIndex) {
       rows.push(highlightedRow(row));
       continue;
@@ -322,20 +347,14 @@ export function renderDownloaderLines(options: DownloaderRenderOptions): string[
     const status = state.download?.statusText ?? "Downloading...";
     const left = state.cancelConfirmOpen ? "[Enter] Yes  [Esc] No" : "[Esc] Cancel";
     const statusWidth = Math.max(1, innerWidth - Array.from(left).length - 1);
-    rows.push(lineWithSplitFooter(left, fitRight(status, statusWidth), innerWidth));
+    const footer = composeSplitFooter(left, fitRight(status, statusWidth), innerWidth);
+    rows.push(lineWithBorders(horizontalGradient(footer, GRADIENT_PINK, GRADIENT_YELLOW), innerWidth));
   } else {
     const footer =
       state.view === "models"
         ? "[Enter] Select  [↑/↓] Move  [←/→] Sort  [Esc] Close"
         : "[Enter] Download  [↑/↓] Move  [Esc] Back";
-    rows.push(
-      lineWithBorders(
-        state.view === "models"
-          ? horizontalGradient(footer, GRADIENT_PINK, GRADIENT_YELLOW)
-          : footer,
-        innerWidth
-      )
-    );
+    rows.push(lineWithBorders(horizontalGradient(footer, GRADIENT_PINK, GRADIENT_YELLOW), innerWidth));
   }
   rows.push(makeBorderBottom(width));
 

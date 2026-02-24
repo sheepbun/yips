@@ -20,6 +20,7 @@ export const SUCCESS_GREEN: Rgb = { r: 0x44, g: 0xff, b: 0x44 };
 export const DIM_GRAY: Rgb = { r: 0x88, g: 0x88, b: 0x88 };
 
 const ANSI_RESET_FOREGROUND = "\u001b[39m";
+const ANSI_RESET_ALL = "\u001b[0m";
 
 // --- Color utilities ---
 
@@ -55,6 +56,13 @@ function toAnsiColor(color: Rgb): string {
   return `\u001b[38;2;${r};${g};${b}m`;
 }
 
+function toAnsiBackground(color: Rgb): string {
+  const r = Math.round(Math.max(0, Math.min(255, color.r)));
+  const g = Math.round(Math.max(0, Math.min(255, color.g)));
+  const b = Math.round(Math.max(0, Math.min(255, color.b)));
+  return `\u001b[48;2;${r};${g};${b}m`;
+}
+
 export function stripAnsi(text: string): string {
   let output = "";
 
@@ -84,6 +92,13 @@ export function colorText(text: string, color: Rgb): string {
   return `${toAnsiColor(color)}${text}${ANSI_RESET_FOREGROUND}`;
 }
 
+/** Apply background (+ optional foreground) color to a string. */
+export function bgColorText(text: string, bgColor: Rgb, fgColor?: Rgb): string {
+  if (text.length === 0) return "";
+  const fg = fgColor ? toAnsiColor(fgColor) : "";
+  return `${toAnsiBackground(bgColor)}${fg}${text}${ANSI_RESET_ALL}`;
+}
+
 /**
  * Apply a horizontal gradient across a string.
  * Each visible character gets its own color interpolated between start and end.
@@ -103,6 +118,31 @@ export function horizontalGradient(text: string, startColor: Rgb, endColor: Rgb)
   }
 
   gradientChars.push(ANSI_RESET_FOREGROUND);
+  return gradientChars.join("");
+}
+
+/** Apply a left-to-right background gradient across a string. */
+export function horizontalGradientBackground(
+  text: string,
+  startColor: Rgb,
+  endColor: Rgb,
+  fgColor?: Rgb
+): string {
+  const chars = Array.from(text);
+  if (chars.length === 0) return "";
+  const fg = fgColor ? toAnsiColor(fgColor) : "";
+  if (chars.length === 1) {
+    return `${toAnsiBackground(startColor)}${fg}${chars[0] ?? ""}${ANSI_RESET_ALL}`;
+  }
+
+  const gradientChars: string[] = [];
+  for (let i = 0; i < chars.length; i++) {
+    const t = i / (chars.length - 1);
+    const color = interpolateColor(startColor, endColor, t);
+    gradientChars.push(`${toAnsiBackground(color)}${fg}${chars[i] ?? ""}`);
+  }
+
+  gradientChars.push(ANSI_RESET_ALL);
   return gradientChars.join("");
 }
 

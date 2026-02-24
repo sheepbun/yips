@@ -70,7 +70,7 @@ For reference, the Python CLI's stack:
 | Language | Python 3 | TypeScript |
 | Runtime | CPython | Node.js |
 | TUI | Rich (Live, Panel, Tree) | Ink |
-| LLM backend | llama.cpp + LM Studio + Claude CLI | llama.cpp + Claude CLI |
+| LLM backend | llama.cpp + Claude CLI | llama.cpp + Claude CLI |
 | Config | `.yips_config.json` (JSON) | `.yips_config.json` (JSON) |
 | Skills | Python scripts (subprocess) | TypeScript modules |
 | Package manager | pip + requirements.txt | npm |
@@ -78,4 +78,4 @@ For reference, the Python CLI's stack:
 
 ---
 
-> Last updated: 2026-02-23
+> Last updated: 2026-02-24

@@ -5,6 +5,13 @@ export interface AppConfig {
   verbose: boolean;
   backend: Backend;
   llamaBaseUrl: string;
+  llamaServerPath: string;
+  llamaModelsDir: string;
+  llamaHost: string;
+  llamaPort: number;
+  llamaContextSize: number;
+  llamaGpuLayers: number;
+  llamaAutoStart: boolean;
   model: string;
   nicknames: Record<string, string>;
 }

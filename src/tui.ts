@@ -16,6 +16,7 @@ import {
   INPUT_PINK
 } from "./colors";
 import { LlamaClient } from "./llama-client";
+import { ensureLlamaReady, formatLlamaStartupFailure, stopLlamaServer } from "./llama-server";
 import {
   formatAssistantMessage,
   formatDimMessage,
@@ -679,8 +680,40 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
         downloaderProgressBufferRef.current = null;
         downloaderAbortControllerRef.current?.abort();
         downloaderAbortControllerRef.current = null;
+        void stopLlamaServer().catch(() => undefined);
       };
     }, []);
+
+    useEffect(() => {
+      let canceled = false;
+      void (async () => {
+        const currentState = stateRef.current;
+        if (!currentState || currentState.config.backend !== "llamacpp") {
+          return;
+        }
+        const result = await ensureLlamaReady(currentState.config);
+        if (canceled || result.ready) {
+          return;
+        }
+        if (result.failure) {
+          appendOutput(
+            currentState,
+            formatWarningMessage(
+              `llama.cpp startup check failed:\n${formatLlamaStartupFailure(
+                result.failure,
+                currentState.config
+              )}`
+            )
+          );
+          appendOutput(currentState, "");
+          forceRender();
+        }
+      })();
+
+      return () => {
+        canceled = true;
+      };
+    }, [forceRender]);
 
     useEffect(() => {
       const tick = setInterval(() => {
@@ -758,6 +791,15 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
       const llamaClient = llamaClientRef.current;
       if (!currentState || !llamaClient) {
         throw new Error("Chat runtime is not initialized.");
+      }
+
+      const readiness = await ensureLlamaReady(currentState.config);
+      if (!readiness.ready) {
+        throw new Error(
+          readiness.failure
+            ? formatLlamaStartupFailure(readiness.failure, currentState.config)
+            : "llama.cpp is unavailable."
+        );
       }
 
       llamaClient.setModel(currentState.config.model);

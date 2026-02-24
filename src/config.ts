@@ -1,5 +1,6 @@
 import { constants as fsConstants } from "node:fs";
 import { access, readFile, writeFile } from "node:fs/promises";
+import { homedir } from "node:os";
 import { resolve } from "node:path";
 
 import type { AppConfig, Backend } from "./types";
@@ -17,11 +18,20 @@ const SUPPORTED_BACKENDS: ReadonlySet<Backend> = new Set(["llamacpp", "claude"])
 export const DEFAULT_CONFIG_PATH = ".yips_config.json";
 
 export function getDefaultConfig(): AppConfig {
+  const llamaHost = "127.0.0.1";
+  const llamaPort = 8080;
   return {
     streaming: true,
     verbose: false,
     backend: "llamacpp",
-    llamaBaseUrl: "http://127.0.0.1:8080",
+    llamaBaseUrl: buildBaseUrl(llamaHost, llamaPort),
+    llamaServerPath: "",
+    llamaModelsDir: resolve(homedir(), ".yips", "models"),
+    llamaHost,
+    llamaPort,
+    llamaContextSize: 8192,
+    llamaGpuLayers: 999,
+    llamaAutoStart: true,
     model: "default",
     nicknames: {}
   };
@@ -78,6 +88,81 @@ function normalizeBaseUrl(value: unknown, fallback: string): string {
   }
 }
 
+function parseBoolean(value: string | undefined, fallback: boolean): boolean {
+  if (value === undefined) {
+    return fallback;
+  }
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "1" || normalized === "true" || normalized === "yes" || normalized === "on") {
+    return true;
+  }
+  if (normalized === "0" || normalized === "false" || normalized === "no" || normalized === "off") {
+    return false;
+  }
+  return fallback;
+}
+
+function normalizeString(value: unknown, fallback: string): string {
+  if (typeof value !== "string") {
+    return fallback;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : fallback;
+}
+
+function normalizeHost(value: unknown, fallback: string): string {
+  return normalizeString(value, fallback);
+}
+
+function normalizePort(value: unknown, fallback: number): number {
+  if (typeof value === "number" && Number.isInteger(value) && value > 0 && value <= 65535) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number(value.trim());
+    if (Number.isInteger(parsed) && parsed > 0 && parsed <= 65535) {
+      return parsed;
+    }
+  }
+  return fallback;
+}
+
+function normalizePositiveInt(value: unknown, fallback: number): number {
+  if (typeof value === "number" && Number.isInteger(value) && value > 0) {
+    return value;
+  }
+  if (typeof value === "string") {
+    const parsed = Number(value.trim());
+    if (Number.isInteger(parsed) && parsed > 0) {
+      return parsed;
+    }
+  }
+  return fallback;
+}
+
+function buildBaseUrl(host: string, port: number): string {
+  return `http://${host}:${port}`;
+}
+
+function parseBaseUrlHostPort(baseUrl: string): { host: string; port: number } | null {
+  try {
+    const parsed = new URL(baseUrl);
+    if (!parsed.hostname || !parsed.port) {
+      return null;
+    }
+    const port = Number(parsed.port);
+    if (!Number.isInteger(port) || port <= 0 || port > 65535) {
+      return null;
+    }
+    return {
+      host: parsed.hostname,
+      port
+    };
+  } catch {
+    return null;
+  }
+}
+
 function normalizeNicknames(
   value: unknown,
   fallback: Record<string, string>
@@ -103,9 +188,27 @@ function normalizeNicknames(
 }
 
 function applyEnvOverrides(config: AppConfig): AppConfig {
+  const envHost = normalizeHost(process.env["YIPS_LLAMA_HOST"], config.llamaHost);
+  const envPort = normalizePort(process.env["YIPS_LLAMA_PORT"], config.llamaPort);
+  const envBaseUrl = normalizeBaseUrl(
+    process.env["YIPS_LLAMA_BASE_URL"],
+    buildBaseUrl(envHost, envPort)
+  );
+  const envBaseUrlHostPort = parseBaseUrlHostPort(envBaseUrl);
+
   return {
     ...config,
-    llamaBaseUrl: normalizeBaseUrl(process.env["YIPS_LLAMA_BASE_URL"], config.llamaBaseUrl),
+    llamaHost: envBaseUrlHostPort?.host ?? envHost,
+    llamaPort: envBaseUrlHostPort?.port ?? envPort,
+    llamaBaseUrl: envBaseUrl,
+    llamaServerPath: normalizeString(process.env["YIPS_LLAMA_SERVER_PATH"], config.llamaServerPath),
+    llamaModelsDir: normalizeString(process.env["YIPS_LLAMA_MODELS_DIR"], config.llamaModelsDir),
+    llamaContextSize: normalizePositiveInt(
+      process.env["YIPS_LLAMA_CONTEXT_SIZE"],
+      config.llamaContextSize
+    ),
+    llamaGpuLayers: normalizePositiveInt(process.env["YIPS_LLAMA_GPU_LAYERS"], config.llamaGpuLayers),
+    llamaAutoStart: parseBoolean(process.env["YIPS_LLAMA_AUTO_START"], config.llamaAutoStart),
     model: normalizeModel(process.env["YIPS_MODEL"], config.model)
   };
 }
@@ -115,11 +218,23 @@ export function mergeConfig(defaults: AppConfig, candidate: unknown): AppConfig 
     return defaults;
   }
 
+  const llamaHost = normalizeHost(candidate.llamaHost, defaults.llamaHost);
+  const llamaPort = normalizePort(candidate.llamaPort, defaults.llamaPort);
+  const llamaBaseUrl = normalizeBaseUrl(candidate.llamaBaseUrl, buildBaseUrl(llamaHost, llamaPort));
+  const baseUrlHostPort = parseBaseUrlHostPort(llamaBaseUrl);
+
   return {
     streaming: normalizeBoolean(candidate.streaming, defaults.streaming),
     verbose: normalizeBoolean(candidate.verbose, defaults.verbose),
     backend: normalizeBackend(candidate.backend, defaults.backend),
-    llamaBaseUrl: normalizeBaseUrl(candidate.llamaBaseUrl, defaults.llamaBaseUrl),
+    llamaBaseUrl,
+    llamaServerPath: normalizeString(candidate.llamaServerPath, defaults.llamaServerPath),
+    llamaModelsDir: normalizeString(candidate.llamaModelsDir, defaults.llamaModelsDir),
+    llamaHost: baseUrlHostPort?.host ?? llamaHost,
+    llamaPort: baseUrlHostPort?.port ?? llamaPort,
+    llamaContextSize: normalizePositiveInt(candidate.llamaContextSize, defaults.llamaContextSize),
+    llamaGpuLayers: normalizePositiveInt(candidate.llamaGpuLayers, defaults.llamaGpuLayers),
+    llamaAutoStart: normalizeBoolean(candidate.llamaAutoStart, defaults.llamaAutoStart),
     model: normalizeModel(candidate.model, defaults.model),
     nicknames: normalizeNicknames(candidate.nicknames, defaults.nicknames)
   };

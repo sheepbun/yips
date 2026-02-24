@@ -1,0 +1,8 @@
+{
+  "streaming": true,
+  "verbose": false,
+  "backend": "llamacpp",
+  "llamaBaseUrl": "http://127.0.0.1:8080",
+  "model": "unsloth/Qwen3-VL-2B-Instruct-GGUF/Qwen3-VL-2B-Instruct-Q8_0.gguf",
+  "nicknames": {}
+}

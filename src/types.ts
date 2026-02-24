@@ -34,6 +34,7 @@ export interface ReplOptions {
 export type ReplAction =
   | { type: "help" }
   | { type: "exit" }
+  | { type: "restart" }
   | { type: "echo"; text: string }
   | { type: "unknown"; command: string };
 

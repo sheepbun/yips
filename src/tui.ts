@@ -661,13 +661,13 @@ function applyInputAction(
 interface InkAppProps {
   options: TuiOptions;
   version: string;
-  ink: InkModule;
+  onRestartRequested: () => void;
 }
 
-function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
+function createInkApp(ink: InkModule): React.FC<InkAppProps> {
   const { Box, Text, useApp, useStdin, useStdout } = ink;
 
-  return function InkApp({ options, version }) {
+  return function InkApp({ options, version, onRestartRequested }) {
     const { exit } = useApp();
     const { stdin, isRawModeSupported, setRawMode } = useStdin();
     const { stdout } = useStdout();
@@ -1547,6 +1547,13 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
             exit();
           }
 
+          if (result.action === "restart") {
+            await persistSessionSnapshot();
+            currentState.running = false;
+            onRestartRequested();
+            exit();
+          }
+
           return;
         }
 
@@ -1560,7 +1567,8 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
         persistSessionSnapshot,
         refreshSessionActivity,
         refreshModelManagerModels,
-        scheduleDownloaderSearch
+        scheduleDownloaderSearch,
+        onRestartRequested
       ]
     );
 
@@ -2100,13 +2108,24 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
   };
 }
 
-export async function startTui(options: TuiOptions): Promise<void> {
+export async function startTui(options: TuiOptions): Promise<"exit" | "restart"> {
+  let restartRequested = false;
   const version = await getVersion();
   const ink = (await import("ink")) as unknown as InkModule;
   const App = createInkApp(ink);
-  const instance = ink.render(React.createElement(App, { options, version }), {
-    exitOnCtrlC: false
-  });
+  const instance = ink.render(
+    React.createElement(App, {
+      options,
+      version,
+      onRestartRequested: () => {
+        restartRequested = true;
+      }
+    }),
+    {
+      exitOnCtrlC: false
+    }
+  );
 
   await instance.waitUntilExit();
+  return restartRequested ? "restart" : "exit";
 }

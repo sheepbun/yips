@@ -14,7 +14,7 @@ import type { AppConfig } from "./types";
 
 export interface CommandResult {
   output?: string;
-  action: "continue" | "exit" | "clear";
+  action: "continue" | "exit" | "clear" | "restart";
   uiAction?:
     | { type: "open-downloader" }
     | { type: "open-model-manager" }
@@ -254,6 +254,12 @@ export function createDefaultRegistry(): CommandRegistry {
   registry.register("exit", () => ({ output: "Goodbye.", action: "exit" }), "Exit Yips");
 
   registry.register("quit", () => ({ output: "Goodbye.", action: "exit" }), "Exit Yips");
+
+  registry.register(
+    "restart",
+    () => ({ output: "Restarting Yips.", action: "restart" }),
+    "Restart Yips"
+  );
 
   registry.register("clear", () => ({ action: "clear" }), "Clear the screen");
 

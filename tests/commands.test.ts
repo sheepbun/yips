@@ -105,6 +105,7 @@ describe("createDefaultRegistry", () => {
     expect(registry.has("help")).toBe(true);
     expect(registry.has("exit")).toBe(true);
     expect(registry.has("quit")).toBe(true);
+    expect(registry.has("restart")).toBe(true);
     expect(registry.has("clear")).toBe(true);
     expect(registry.has("new")).toBe(true);
     expect(registry.has("model")).toBe(true);
@@ -140,6 +141,13 @@ describe("createDefaultRegistry", () => {
     const registry = createDefaultRegistry();
     const result = await registry.dispatch("exit", "", createContext());
     expect(result.action).toBe("exit");
+  });
+
+  it("/restart returns restart action", async () => {
+    const registry = createDefaultRegistry();
+    const result = await registry.dispatch("restart", "", createContext());
+    expect(result.action).toBe("restart");
+    expect(result.output).toContain("Restarting");
   });
 
   it("/clear returns clear action", async () => {

@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Added
 
+- `install.sh` automated local runtime setup:
+  - installs missing system prerequisites via supported package managers
+  - clones/updates and builds `llama.cpp` (`llama-server`) with CUDA-first + CPU fallback
+  - writes `~/.yips/env.sh` (`LLAMA_SERVER_PATH`, `YIPS_LLAMA_SERVER_PATH`, `YIPS_LLAMA_MODELS_DIR`)
+  - creates/patches `.yips_config.json` lifecycle defaults without clobbering existing user values
+  - guides users to `/download` or `/model` when no local GGUF model is present
 - Milestone 0 TypeScript scaffold (`package.json`, `tsconfig`, `src/`, `tests/`)
 - Bootstrap REPL loop with `/help`, `/exit`, and `/quit`
 - JSON config loader with safe defaults and malformed-config fallback handling

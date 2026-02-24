@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { GRADIENT_BLUE, GRADIENT_PINK, stripAnsi } from "../src/colors";
 import {
   createDownloaderState,
+  openCancelConfirm,
   setFiles,
   setLoadingFiles,
   setLoadingModels,
@@ -259,6 +260,31 @@ describe("downloader-ui", () => {
     expect(progressLine.endsWith("%│")).toBe(true);
     const emptyLines = plain.filter((line) => /^│\s*│$/u.test(line));
     expect(emptyLines).toHaveLength(0);
+  });
+
+  it("renders cancel confirmation popup while download is active", () => {
+    const base = setFiles(
+      createDownloaderState({ ramGb: 16, vramGb: 8, totalMemoryGb: 24 }),
+      "org/model",
+      [
+        {
+          path: "model-q4.gguf",
+          sizeBytes: 2_000_000_000,
+          quant: "Q4_K_M (Balanced)",
+          canRun: true,
+          reason: "Fits RAM+VRAM"
+        }
+      ]
+    );
+    const downloading = startDownload(base, "org/model", "model-q4.gguf", "Downloading...");
+    const confirming = openCancelConfirm(downloading);
+    const plain = renderDownloaderLines({ width: 100, state: confirming }).map((line) =>
+      stripAnsi(line)
+    );
+
+    expect(plain.some((line) => line.includes("Cancel download and delete partial file?"))).toBe(true);
+    expect(plain.some((line) => line.includes("[Enter] Yes  [Esc] No"))).toBe(true);
+    expect(plain).toHaveLength(5);
   });
 
   it("renders bordered blank body rows while loading", () => {

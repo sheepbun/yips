@@ -1757,3 +1757,41 @@ Validation:
 - `npm run lint` — clean
 Next:
 - Optional visual pass in `npm run dev` to confirm all column headers now sit exactly where you want.
+
+## 2026-02-24 20:12 UTC — Exchange 47
+Summary: Added downloader cancel confirmation UX and automatic partial-file cleanup for canceled/failed downloads.
+Changed:
+- Updated `src/downloader-state.ts`:
+  - added `cancelConfirmOpen` state flag.
+  - added `openCancelConfirm(...)` and `closeCancelConfirm(...)` helpers.
+  - ensured phase transitions (`finishDownload`, errors, loading/view transitions) clear cancel confirmation state.
+- Updated `src/downloader-ui.ts`:
+  - downloading mode now supports a confirm prompt view: `Cancel download and delete partial file?`.
+  - footer controls switch to `[Enter] Yes  [Esc] No` while confirm is open.
+- Updated `src/tui.ts`:
+  - pressing cancel during active download now opens confirm prompt instead of immediate abort.
+  - pressing `Esc` again dismisses confirm and resumes download.
+  - pressing `Enter` while confirm is open aborts and finalizes cancel flow.
+- Updated `src/model-downloader.ts`:
+  - `downloadModelFile(...)` now removes partial output file on any failed/incomplete download before re-throwing the original error.
+- Added/updated tests:
+  - `tests/downloader-state.test.ts` for cancel-confirm state transitions.
+  - `tests/downloader-ui.test.ts` for cancel-confirm rendering.
+  - `tests/model-downloader.test.ts` for partial-file cleanup on stream failure.
+Validation:
+- `npm test -- tests/downloader-state.test.ts tests/downloader-ui.test.ts tests/model-downloader.test.ts` — clean (28 passing)
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+Next:
+- Optional interactive check in `npm run dev`: start a large model download, press `Esc` to open confirm, `Esc` to resume, then `Esc` + `Enter` to cancel and verify no partial `.gguf` remains.
+
+## 2026-02-24 20:14 UTC — Exchange 48
+Summary: Removed duplicate cancel-confirm options text in downloader popup.
+Changed:
+- Updated `src/downloader-ui.ts`:
+  - cancel-confirm body now renders only the confirmation message (plus a blank spacer row), leaving controls only in the footer.
+  - this removes duplicate `[Enter] Yes  [Esc] No` display while preserving downloader frame height.
+Validation:
+- `npm test -- tests/downloader-ui.test.ts tests/downloader-state.test.ts` — clean (20 passing)
+Next:
+- Optional visual check in `npm run dev` during an active download to confirm confirm-mode text appears exactly once.

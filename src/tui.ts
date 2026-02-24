@@ -35,6 +35,7 @@ import {
 import { InputEngine, type InputAction } from "./input-engine";
 import { renderDownloaderLines } from "./downloader-ui";
 import {
+  closeCancelConfirm,
   DOWNLOADER_TABS,
   closeFileView,
   createDownloaderState,
@@ -43,6 +44,7 @@ import {
   getCachedModels,
   moveFileSelection,
   moveModelSelection,
+  openCancelConfirm,
   resetModelCache,
   setCachedModels,
   setDownloaderError,
@@ -1835,13 +1837,11 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
           for (const action of actions) {
             if (action.type === "cancel") {
               if (currentState.downloader?.phase === "downloading") {
-                downloaderAbortControllerRef.current?.abort();
-                downloaderAbortControllerRef.current = null;
-                currentState.downloader = finishDownload(currentState.downloader);
-                downloaderProgressDirtyRef.current = false;
-                downloaderProgressBufferRef.current = null;
-                appendOutput(currentState, formatDimMessage("Download canceled."));
-                appendOutput(currentState, "");
+                if (currentState.downloader.cancelConfirmOpen) {
+                  currentState.downloader = closeCancelConfirm(currentState.downloader);
+                } else {
+                  currentState.downloader = openCancelConfirm(currentState.downloader);
+                }
                 forceRender();
                 return;
               }
@@ -1860,6 +1860,24 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
             }
 
             if (!currentState.downloader) {
+              continue;
+            }
+
+            if (
+              currentState.downloader.phase === "downloading" &&
+              currentState.downloader.cancelConfirmOpen
+            ) {
+              if (action.type === "submit") {
+                downloaderAbortControllerRef.current?.abort();
+                downloaderAbortControllerRef.current = null;
+                currentState.downloader = finishDownload(currentState.downloader);
+                downloaderProgressDirtyRef.current = false;
+                downloaderProgressBufferRef.current = null;
+                appendOutput(currentState, formatDimMessage("Download canceled."));
+                appendOutput(currentState, "");
+                forceRender();
+                return;
+              }
               continue;
             }
 

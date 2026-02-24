@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -191,6 +191,39 @@ describe("model-downloader", () => {
         | undefined;
       expect(lastEvent?.bytesDownloaded).toBe(payload.byteLength);
       expect(lastEvent?.totalBytes).toBeNull();
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("deletes partial file when download stream fails", async () => {
+    const tempRoot = await mkdtemp(join(tmpdir(), "yips-download-"));
+    const firstChunk = new TextEncoder().encode("partial-data");
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller): void {
+        controller.enqueue(firstChunk);
+        controller.error(new Error("stream failure"));
+      }
+    });
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(stream, {
+        status: 200,
+        headers: { "content-type": "application/octet-stream" }
+      })
+    );
+    const outputPath = join(tempRoot, "repo", "a", "model-q4.gguf");
+
+    try {
+      await expect(
+        downloadModelFile({
+          repoId: "repo/a",
+          filename: "model-q4.gguf",
+          modelsDir: tempRoot,
+          fetchImpl: fetchMock as typeof fetch
+        })
+      ).rejects.toThrow();
+
+      await expect(stat(outputPath)).rejects.toThrow();
     } finally {
       await rm(tempRoot, { recursive: true, force: true });
     }

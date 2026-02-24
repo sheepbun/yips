@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  closeCancelConfirm,
   DOWNLOADER_TABS,
   closeFileView,
   createDownloaderState,
@@ -9,6 +10,7 @@ import {
   getCachedModels,
   moveFileSelection,
   moveModelSelection,
+  openCancelConfirm,
   resetModelCache,
   setCachedModels,
   setDownloaderError,
@@ -124,11 +126,13 @@ describe("downloader-state", () => {
     const downloading = startDownload(loadingFiles, "repo/a", "model.gguf", "Starting download...");
     expect(downloading.phase).toBe("downloading");
     expect(downloading.download?.filename).toBe("model.gguf");
+    expect(downloading.cancelConfirmOpen).toBe(false);
 
     const finished = finishDownload(downloading);
     expect(finished.phase).toBe("idle");
     expect(finished.loading).toBe(false);
     expect(finished.download).toBeNull();
+    expect(finished.cancelConfirmOpen).toBe(false);
   });
 
   it("moves to error phase from active states", () => {
@@ -152,5 +156,21 @@ describe("downloader-state", () => {
     expect(next.download?.bytesDownloaded).toBe(1024);
     expect(next.download?.totalBytes).toBe(2048);
     expect(next.loadingMessage).toContain("ETA");
+  });
+
+  it("opens and closes cancel confirmation while downloading", () => {
+    const base = createDownloaderState({ ramGb: 8, vramGb: 8, totalMemoryGb: 16 });
+    const downloading = startDownload(base, "repo/a", "model.gguf", "Downloading...");
+    const opened = openCancelConfirm(downloading);
+    expect(opened.cancelConfirmOpen).toBe(true);
+
+    const closed = closeCancelConfirm(opened);
+    expect(closed.cancelConfirmOpen).toBe(false);
+  });
+
+  it("does not open cancel confirmation outside downloading phase", () => {
+    const base = createDownloaderState({ ramGb: 8, vramGb: 8, totalMemoryGb: 16 });
+    const next = openCancelConfirm(base);
+    expect(next.cancelConfirmOpen).toBe(false);
   });
 });

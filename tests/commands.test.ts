@@ -1,7 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CommandRegistry, createDefaultRegistry, parseCommand } from "../src/commands";
 import type { SessionContext } from "../src/commands";
+import { loadConfig } from "../src/config";
 import { getDefaultConfig } from "../src/config";
 
 function createContext(): SessionContext {
@@ -10,6 +15,10 @@ function createContext(): SessionContext {
     messageCount: 0
   };
 }
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("parseCommand", () => {
   it("returns null for non-command input", () => {
@@ -39,27 +48,27 @@ describe("parseCommand", () => {
 });
 
 describe("CommandRegistry", () => {
-  it("registers and dispatches a command", () => {
+  it("registers and dispatches a command", async () => {
     const registry = new CommandRegistry();
     registry.register("test", () => ({ output: "ok", action: "continue" }), "A test");
 
-    const result = registry.dispatch("test", "", createContext());
+    const result = await registry.dispatch("test", "", createContext());
     expect(result).toEqual({ output: "ok", action: "continue" });
   });
 
-  it("returns unknown command for unregistered names", () => {
+  it("returns unknown command for unregistered names", async () => {
     const registry = new CommandRegistry();
-    const result = registry.dispatch("nope", "", createContext());
+    const result = await registry.dispatch("nope", "", createContext());
     expect(result.output).toContain("Unknown command");
     expect(result.action).toBe("continue");
   });
 
-  it("returns recognized-not-implemented for known catalog commands without handlers", () => {
+  it("returns recognized-not-implemented for known catalog commands without handlers", async () => {
     const registry = new CommandRegistry([
       { name: "backend", description: "Switch backend", kind: "builtin", implemented: false }
     ]);
 
-    const result = registry.dispatch("backend", "", createContext());
+    const result = await registry.dispatch("backend", "", createContext());
     expect(result.output).toContain("recognized but not implemented");
     expect(result.action).toBe("continue");
   });
@@ -110,9 +119,9 @@ describe("createDefaultRegistry", () => {
     expect(registry.has("vt")).toBe(true);
   });
 
-  it("/help lists commands", () => {
+  it("/help lists commands", async () => {
     const registry = createDefaultRegistry();
-    const result = registry.dispatch("help", "", createContext());
+    const result = await registry.dispatch("help", "", createContext());
     expect(result.output).toContain("/help");
     expect(result.output).toContain("/exit");
     expect(result.output).toContain("/backend");
@@ -120,75 +129,171 @@ describe("createDefaultRegistry", () => {
     expect(result.action).toBe("continue");
   });
 
-  it("returns recognized-not-implemented output for restored metadata commands", () => {
+  it("returns recognized-not-implemented output for restored metadata commands", async () => {
     const registry = createDefaultRegistry();
-    const result = registry.dispatch("backend", "", createContext());
+    const result = await registry.dispatch("backend", "", createContext());
     expect(result.output).toContain("recognized but not implemented");
     expect(result.action).toBe("continue");
   });
 
-  it("/exit returns exit action", () => {
+  it("/exit returns exit action", async () => {
     const registry = createDefaultRegistry();
-    const result = registry.dispatch("exit", "", createContext());
+    const result = await registry.dispatch("exit", "", createContext());
     expect(result.action).toBe("exit");
   });
 
-  it("/clear returns clear action", () => {
+  it("/clear returns clear action", async () => {
     const registry = createDefaultRegistry();
-    const result = registry.dispatch("clear", "", createContext());
+    const result = await registry.dispatch("clear", "", createContext());
     expect(result.action).toBe("clear");
   });
 
-  it("/new returns clear action", () => {
+  it("/new returns clear action", async () => {
     const registry = createDefaultRegistry();
-    const result = registry.dispatch("new", "", createContext());
+    const result = await registry.dispatch("new", "", createContext());
     expect(result.action).toBe("clear");
   });
 
-  it("/stream toggles streaming", () => {
+  it("/stream toggles streaming", async () => {
     const registry = createDefaultRegistry();
     const context = createContext();
     expect(context.config.streaming).toBe(true);
 
-    const result = registry.dispatch("stream", "", context);
+    const result = await registry.dispatch("stream", "", context);
     expect(context.config.streaming).toBe(false);
     expect(result.output).toContain("disabled");
 
-    registry.dispatch("stream", "", context);
+    await registry.dispatch("stream", "", context);
     expect(context.config.streaming).toBe(true);
   });
 
-  it("/verbose toggles verbose mode", () => {
+  it("/verbose toggles verbose mode", async () => {
     const registry = createDefaultRegistry();
     const context = createContext();
     expect(context.config.verbose).toBe(false);
 
-    const result = registry.dispatch("verbose", "", context);
+    const result = await registry.dispatch("verbose", "", context);
     expect(context.config.verbose).toBe(true);
     expect(result.output).toContain("enabled");
   });
 
-  it("/model shows current model and usage without args", () => {
+  it("/model shows current model and usage without args", async () => {
     const registry = createDefaultRegistry();
-    const result = registry.dispatch("model", "", createContext());
-    expect(result.output).toContain("Current model");
-    expect(result.output).toContain("Usage");
+    const result = await registry.dispatch("model", "", createContext());
+    expect(result.output).toBeUndefined();
+    expect(result.uiAction).toEqual({ type: "open-model-manager" });
   });
 
-  it("/model sets model with args", () => {
+  it("/model sets model with args", async () => {
     const registry = createDefaultRegistry();
-    const result = registry.dispatch("model", "qwen3", createContext());
-    expect(result.output).toContain("qwen3");
+    const dir = await mkdtemp(join(tmpdir(), "yips-command-model-"));
+    process.env["YIPS_MODELS_DIR"] = dir;
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+
+    try {
+      const modelDir = join(dir, "org", "repo");
+      await mkdir(modelDir, { recursive: true });
+      await writeFile(join(modelDir, "qwen3.gguf"), "binary", "utf8");
+
+      const context = createContext();
+      const result = await registry.dispatch("model", "qwen3", context);
+      expect(result.output).toContain("org/repo/qwen3.gguf");
+      expect(context.config.model).toBe("org/repo/qwen3.gguf");
+    } finally {
+      process.chdir(originalCwd);
+      delete process.env["YIPS_MODELS_DIR"];
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
-  it("/keys shows diagnostics guidance", () => {
+  it("/models opens model manager and ignores args", async () => {
     const registry = createDefaultRegistry();
-    const result = registry.dispatch("keys", "", createContext());
+    const result = await registry.dispatch("models", "anything", createContext());
+    expect(result.action).toBe("continue");
+    expect(result.uiAction).toEqual({ type: "open-model-manager" });
+  });
+
+  it("/keys shows diagnostics guidance", async () => {
+    const registry = createDefaultRegistry();
+    const result = await registry.dispatch("keys", "", createContext());
     expect(result.action).toBe("continue");
     expect(result.output).toContain("YIPS_DEBUG_KEYS=1 npm run dev");
     expect(result.output).toContain("Ctrl+Enter");
     expect(result.output).toContain("\\u001b[13;5u");
     expect(result.output).toContain("\\u001b[13;5~");
+  });
+
+  it("/download opens the interactive downloader when called without args", async () => {
+    const registry = createDefaultRegistry();
+    const result = await registry.dispatch("download", "", createContext());
+    expect(result.action).toBe("continue");
+    expect(result.uiAction).toEqual({ type: "open-downloader" });
+  });
+
+  it("/download rejects non-HF URL arguments", async () => {
+    const registry = createDefaultRegistry();
+    const result = await registry.dispatch("download", "qwen", createContext());
+    expect(result.action).toBe("continue");
+    expect(result.output).toContain("Invalid /download argument");
+  });
+
+  it("/download supports direct HF URL downloads", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller): void {
+              controller.enqueue(new TextEncoder().encode("gguf-binary"));
+              controller.close();
+            }
+          }),
+          { status: 200 }
+        )
+      )
+    );
+
+    const root = await mkdtemp(join(tmpdir(), "yips-command-download-"));
+    process.env["YIPS_MODELS_DIR"] = root;
+    try {
+      const registry = createDefaultRegistry();
+      const result = await registry.dispatch(
+        "download",
+        "https://hf.co/org/model/resolve/main/model-q4.gguf",
+        createContext()
+      );
+      expect(result.action).toBe("continue");
+      expect(result.output).toContain("Downloaded model-q4.gguf from org/model");
+    } finally {
+      delete process.env["YIPS_MODELS_DIR"];
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("/dl is an alias for /download modal mode", async () => {
+    const registry = createDefaultRegistry();
+    const result = await registry.dispatch("dl", "", createContext());
+    expect(result.action).toBe("continue");
+    expect(result.uiAction).toEqual({ type: "open-downloader" });
+  });
+
+  it("/nick persists nickname to config", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "yips-command-nick-"));
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+
+    try {
+      const registry = createDefaultRegistry();
+      const result = await registry.dispatch("nick", 'qwen3 "qwen-fast"', createContext());
+      expect(result.output).toContain("Nickname set");
+
+      const loaded = await loadConfig();
+      expect(loaded.config.nicknames["qwen3"]).toBe("qwen-fast");
+    } finally {
+      process.chdir(originalCwd);
+      await rm(dir, { recursive: true, force: true });
+    }
   });
 
   it("provides slash-prefixed autocomplete command list", () => {

@@ -6,6 +6,7 @@ export interface AppConfig {
   backend: Backend;
   llamaBaseUrl: string;
   model: string;
+  nicknames: Record<string, string>;
 }
 
 export interface SessionState {

@@ -41,7 +41,7 @@ Autonomous tool use and multi-agent architecture.
 
 Features that make daily use productive.
 
-- [ ] Model Manager: list, switch, download models
+- [x] Model Manager: list, switch, download models
 - [ ] Hardware detection: GPU/VRAM-aware model selection
 - [ ] Session management: save, list, load, rename sessions
 - [ ] Memory system: save/read/list conversation memories
@@ -49,7 +49,7 @@ Features that make daily use productive.
 - [ ] MCP client: server registration, tool discovery, context injection
 - [ ] Skills: search, fetch, build, todos, virtual terminal
 - [ ] Tab autocompletion for slash commands
-- [ ] Configuration file support (format TBD)
+- [x] Configuration file support (format TBD)
 
 ## Milestone 4: Gateway _(planned)_
 
@@ -79,7 +79,7 @@ Packaging and installation.
 |----------|--------|--------|------------------------|-------|
 | Language | Decided | TypeScript (strict mode) | Rust, Go, Python | Type safety + ecosystem; Rust considered too slow for iteration |
 | Runtime | Decided | Node.js | Deno, Bun | Broadest ecosystem support; Bun may be revisited |
-| LLM backend | Decided | llama.cpp (primary) | Ollama, LM Studio | Direct control over model lifecycle; OpenAI-compatible API |
+| LLM backend | Decided | llama.cpp (primary) | Ollama | Direct control over model lifecycle; OpenAI-compatible API |
 | TUI framework | Decided | Ink | terminal-kit, blessed | React component model, portable input handling, and maintainable render lifecycle |
 | Config format | Decided | JSON (`.yips_config.json`) | TOML, YAML | Chosen for zero dependencies during bootstrap; comments may be revisited later |
 | Distribution | Open | — | npm, binary, Homebrew | See [Tech Stack](./stack.md) for evaluation criteria |
@@ -89,4 +89,4 @@ Packaging and installation.
 
 ---
 
-> Last updated: 2026-02-23
+> Last updated: 2026-02-24

@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { getDefaultConfig, loadConfig } from "../src/config";
+import { getDefaultConfig, loadConfig, saveConfig, updateConfig } from "../src/config";
 
 async function createTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "yips-config-test-"));
@@ -75,7 +75,8 @@ describe("loadConfig", () => {
       verbose: true,
       backend: "claude",
       llamaBaseUrl: "http://localhost:9000",
-      model: "qwen3"
+      model: "qwen3",
+      nicknames: {}
     });
   });
 
@@ -102,7 +103,8 @@ describe("loadConfig", () => {
       verbose: true,
       backend: "llamacpp",
       llamaBaseUrl: "http://127.0.0.1:8080",
-      model: "default"
+      model: "default",
+      nicknames: {}
     });
   });
 
@@ -125,5 +127,24 @@ describe("loadConfig", () => {
 
     expect(result.config.model).toBe("env-model");
     expect(result.config.llamaBaseUrl).toBe("http://localhost:8888");
+  });
+
+  it("persists config with saveConfig and updates with updateConfig", async () => {
+    const dir = await createTempDir();
+    const configPath = join(dir, "persist-config.json");
+
+    await saveConfig(
+      {
+        ...getDefaultConfig(),
+        model: "qwen3",
+        nicknames: { qwen3: "q3" }
+      },
+      configPath
+    );
+
+    const updated = await updateConfig({ backend: "claude" }, configPath);
+    expect(updated.backend).toBe("claude");
+    expect(updated.model).toBe("qwen3");
+    expect(updated.nicknames).toEqual({ qwen3: "q3" });
   });
 });

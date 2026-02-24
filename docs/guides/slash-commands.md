@@ -16,12 +16,22 @@ Slash commands are user-facing commands typed directly into the Yips TUI input. 
 
 | Command | Description |
 |---------|-------------|
-| `/model` | Open the Model Manager (list models, switch, view details) |
-| `/model <name>` | Switch to a model by name (partial match supported) |
-| `/download`, `/dl` | Open the model downloader (search and download from Hugging Face) |
+| `/model` | Open the Model Manager (list local models, switch, delete, jump to downloader) |
+| `/model <name>` | Switch to a model by local exact/partial match, with free-form fallback |
+| `/models` | Open the Model Manager (UI alias) |
+| `/download`, `/dl` | Open the interactive model downloader |
+| `/download <hf_url>` | Download a GGUF file from a direct `hf.co` / `huggingface.co` resolve URL |
 | `/backend` | Show current backend |
 | `/backend <name>` | Switch backend (`llamacpp` or `claude`) |
-| `/nick <model> <nickname>` | Set a display nickname for a model |
+| `/nick <model> <nickname>` | Set and persist a display nickname for a model |
+
+`/download` usage:
+
+```text
+/download
+/download <hf_url>
+/dl ...   # alias for /download
+```
 
 ### Display & Behavior
 
@@ -77,4 +87,4 @@ In a future milestone, Yips will support user-defined commands. Custom commands 
 
 ---
 
-> Last updated: 2026-02-22
+> Last updated: 2026-02-24

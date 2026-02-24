@@ -1,5 +1,5 @@
 import { constants as fsConstants } from "node:fs";
-import { access, readFile } from "node:fs/promises";
+import { access, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import type { AppConfig, Backend } from "./types";
@@ -22,7 +22,8 @@ export function getDefaultConfig(): AppConfig {
     verbose: false,
     backend: "llamacpp",
     llamaBaseUrl: "http://127.0.0.1:8080",
-    model: "default"
+    model: "default",
+    nicknames: {}
   };
 }
 
@@ -77,6 +78,30 @@ function normalizeBaseUrl(value: unknown, fallback: string): string {
   }
 }
 
+function normalizeNicknames(
+  value: unknown,
+  fallback: Record<string, string>
+): Record<string, string> {
+  if (!isRecord(value)) {
+    return { ...fallback };
+  }
+
+  const next: Record<string, string> = {};
+  for (const [key, nickname] of Object.entries(value)) {
+    if (typeof key !== "string" || typeof nickname !== "string") {
+      continue;
+    }
+    const trimmedKey = key.trim();
+    const trimmedNickname = nickname.trim();
+    if (trimmedKey.length === 0 || trimmedNickname.length === 0) {
+      continue;
+    }
+    next[trimmedKey] = trimmedNickname;
+  }
+
+  return next;
+}
+
 function applyEnvOverrides(config: AppConfig): AppConfig {
   return {
     ...config,
@@ -95,7 +120,8 @@ export function mergeConfig(defaults: AppConfig, candidate: unknown): AppConfig 
     verbose: normalizeBoolean(candidate.verbose, defaults.verbose),
     backend: normalizeBackend(candidate.backend, defaults.backend),
     llamaBaseUrl: normalizeBaseUrl(candidate.llamaBaseUrl, defaults.llamaBaseUrl),
-    model: normalizeModel(candidate.model, defaults.model)
+    model: normalizeModel(candidate.model, defaults.model),
+    nicknames: normalizeNicknames(candidate.nicknames, defaults.nicknames)
   };
 }
 
@@ -127,4 +153,23 @@ export async function loadConfig(configPath = DEFAULT_CONFIG_PATH): Promise<Load
       warning: `Failed to load config at ${path}: ${message}`
     };
   }
+}
+
+export async function saveConfig(
+  config: AppConfig,
+  configPath = DEFAULT_CONFIG_PATH
+): Promise<void> {
+  const path = resolveConfigPath(configPath);
+  const normalized = mergeConfig(getDefaultConfig(), config);
+  await writeFile(path, `${JSON.stringify(normalized, null, 2)}\n`, "utf8");
+}
+
+export async function updateConfig(
+  patch: Partial<AppConfig>,
+  configPath = DEFAULT_CONFIG_PATH
+): Promise<AppConfig> {
+  const loaded = await loadConfig(configPath);
+  const merged = mergeConfig(getDefaultConfig(), { ...loaded.config, ...patch });
+  await saveConfig(merged, configPath);
+  return merged;
 }

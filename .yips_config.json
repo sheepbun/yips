@@ -3,6 +3,14 @@
   "verbose": false,
   "backend": "llamacpp",
   "llamaBaseUrl": "http://127.0.0.1:8080",
-  "model": "unsloth/Qwen3-VL-2B-Instruct-GGUF/Qwen3-VL-2B-Instruct-Q8_0.gguf",
+  "llamaServerPath": "/home/katherine/llama.cpp/build/bin/llama-server",
+  "llamaModelsDir": "/home/katherine/.yips/models",
+  "llamaHost": "127.0.0.1",
+  "llamaPort": 8080,
+  "llamaContextSize": 8192,
+  "llamaGpuLayers": 999,
+  "llamaAutoStart": true,
+  "llamaPortConflictPolicy": "kill-user",
+  "model": "Qwen/Qwen3-VL-2B-Instruct-GGUF/Qwen3VL-2B-Instruct-Q4_K_M.gguf",
   "nicknames": {}
 }

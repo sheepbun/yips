@@ -314,7 +314,9 @@ if [[ ! -d "\${REPO_ROOT}" ]]; then
   exit 1
 fi
 cd "\${REPO_ROOT}"
-if [[ -f "dist/index.js" ]]; then
+# Default to source mode so launcher always reflects latest local commit.
+# Set YIPS_USE_DIST=1 to prefer compiled output when desired.
+if [[ "\${YIPS_USE_DIST:-0}" == "1" ]] && [[ -f "dist/index.js" ]]; then
   exec node dist/index.js "\$@"
 fi
 exec npm run dev -- "\$@"

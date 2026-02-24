@@ -15,7 +15,10 @@ import type { AppConfig } from "./types";
 export interface CommandResult {
   output?: string;
   action: "continue" | "exit" | "clear";
-  uiAction?: { type: "open-downloader" } | { type: "open-model-manager" };
+  uiAction?:
+    | { type: "open-downloader" }
+    | { type: "open-model-manager" }
+    | { type: "open-sessions" };
 }
 
 export interface SessionContext {
@@ -295,6 +298,14 @@ export function createDefaultRegistry(): CommandRegistry {
       return { action: "continue", uiAction: { type: "open-model-manager" } };
     },
     "Open the interactive Model Manager"
+  );
+
+  registry.register(
+    "sessions",
+    async () => {
+      return { action: "continue", uiAction: { type: "open-sessions" } };
+    },
+    "Interactively select and load a session"
   );
 
   registry.register(

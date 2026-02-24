@@ -1,15 +1,46 @@
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PassThrough } from "node:stream";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { getDefaultConfig } from "../src/config";
-import { ensureLlamaReady, formatLlamaStartupFailure, startLlamaServer } from "../src/llama-server";
+import {
+  ensureLlamaReady,
+  formatLlamaStartupFailure,
+  startLlamaServer,
+  stopLlamaServer
+} from "../src/llama-server";
 import type { AppConfig } from "../src/types";
 
 function withConfig(patch: Partial<AppConfig>): AppConfig {
   return { ...getDefaultConfig(), ...patch };
+}
+
+function createMockProcess(exitCode: number | null = null): {
+  process: {
+    exitCode: number | null;
+    stderr: PassThrough;
+    kill: ReturnType<typeof vi.fn>;
+  };
+  stderr: PassThrough;
+} {
+  const stderr = new PassThrough();
+  let currentExitCode = exitCode;
+  const process = {
+    get exitCode() {
+      return currentExitCode;
+    },
+    set exitCode(value: number | null) {
+      currentExitCode = value;
+    },
+    stderr,
+    kill: vi.fn().mockImplementation(() => {
+      currentExitCode = 0;
+    })
+  };
+  return { process, stderr };
 }
 
 const originalPath = process.env["PATH"];
@@ -17,6 +48,7 @@ const originalHome = process.env["HOME"];
 const originalLlamaServerPath = process.env["LLAMA_SERVER_PATH"];
 
 afterEach(async () => {
+  await stopLlamaServer();
   vi.unstubAllGlobals();
   if (originalPath === undefined) {
     delete process.env["PATH"];
@@ -95,11 +127,138 @@ describe("startLlamaServer", () => {
       withConfig({
         model: modelPath,
         llamaServerPath: "/bin/true"
-      })
+      }),
+      {
+        inspectPortOwner: vi.fn().mockResolvedValue(null)
+      }
     );
 
     expect(result.started).toBe(false);
     expect(result.failure?.kind).toBe("process-exited");
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("returns port-unavailable when policy is fail and port is occupied", async () => {
+    const root = await mkdtemp(join(tmpdir(), "yips-llama-model-"));
+    const modelPath = join(root, "model.gguf");
+    await writeFile(modelPath, "binary", "utf8");
+
+    const inspectPortOwner = vi.fn().mockResolvedValue({
+      pid: 444,
+      uid: 1000,
+      command: "python -m http.server"
+    });
+
+    const result = await startLlamaServer(
+      withConfig({
+        model: modelPath,
+        llamaServerPath: "/bin/true",
+        llamaPortConflictPolicy: "fail"
+      }),
+      {
+        inspectPortOwner
+      }
+    );
+
+    expect(result.started).toBe(false);
+    expect(result.failure?.kind).toBe("port-unavailable");
+    expect(result.failure?.conflictPid).toBe(444);
+    expect(result.failure?.conflictCommand).toContain("http.server");
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("kills user-owned process when policy is kill-user", async () => {
+    const root = await mkdtemp(join(tmpdir(), "yips-llama-model-"));
+    const modelPath = join(root, "model.gguf");
+    await writeFile(modelPath, "binary", "utf8");
+
+    const inspectPortOwner = vi
+      .fn()
+      .mockResolvedValueOnce({ pid: 555, uid: 1000, command: "python -m http.server" })
+      .mockResolvedValueOnce(null);
+    const sendSignal = vi.fn();
+    const checkHealth = vi.fn().mockResolvedValue(true);
+    const { process: child } = createMockProcess(null);
+
+    const result = await startLlamaServer(
+      withConfig({
+        model: modelPath,
+        llamaServerPath: "/bin/true",
+        llamaPortConflictPolicy: "kill-user"
+      }),
+      {
+        inspectPortOwner,
+        sendSignal,
+        currentUid: () => 1000,
+        isPidRunning: () => false,
+        checkHealth,
+        spawnProcess: vi.fn().mockReturnValue(child)
+      }
+    );
+
+    expect(result.started).toBe(true);
+    expect(sendSignal).toHaveBeenCalledWith(555, "SIGTERM");
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("does not kill non-user process when policy is kill-user", async () => {
+    const root = await mkdtemp(join(tmpdir(), "yips-llama-model-"));
+    const modelPath = join(root, "model.gguf");
+    await writeFile(modelPath, "binary", "utf8");
+
+    const sendSignal = vi.fn();
+    const result = await startLlamaServer(
+      withConfig({
+        model: modelPath,
+        llamaServerPath: "/bin/true",
+        llamaPortConflictPolicy: "kill-user"
+      }),
+      {
+        inspectPortOwner: vi.fn().mockResolvedValue({
+          pid: 666,
+          uid: 999,
+          command: "python -m http.server"
+        }),
+        sendSignal,
+        currentUid: () => 1000
+      }
+    );
+
+    expect(result.started).toBe(false);
+    expect(result.failure?.kind).toBe("port-unavailable");
+    expect(sendSignal).not.toHaveBeenCalled();
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("classifies bind stderr as port-unavailable", async () => {
+    const root = await mkdtemp(join(tmpdir(), "yips-llama-model-"));
+    const modelPath = join(root, "model.gguf");
+    await writeFile(modelPath, "binary", "utf8");
+
+    const { process: child, stderr } = createMockProcess(null);
+    const spawnProcess = vi.fn().mockImplementation(() => {
+      queueMicrotask(() => {
+        stderr.write("start: couldn't bind HTTP server socket\n");
+        child.exitCode = 1;
+      });
+      return child;
+    });
+
+    const result = await startLlamaServer(
+      withConfig({
+        model: modelPath,
+        llamaServerPath: "/bin/true"
+      }),
+      {
+        inspectPortOwner: vi.fn().mockResolvedValue(null),
+        spawnProcess,
+        checkHealth: vi.fn().mockResolvedValue(false)
+      }
+    );
+
+    expect(result.started).toBe(false);
+    expect(result.failure?.kind).toBe("port-unavailable");
+    expect(result.failure?.details.join("\n")).toContain("couldn't bind");
     await rm(root, { recursive: true, force: true });
   });
 });
@@ -110,7 +269,11 @@ describe("formatLlamaStartupFailure", () => {
       {
         kind: "model-not-found",
         message: "Could not resolve model.",
-        details: ["Checked: /tmp/models"]
+        details: ["Checked: /tmp/models"],
+        host: "127.0.0.1",
+        port: 8080,
+        conflictPid: 777,
+        conflictCommand: "python -m http.server"
       },
       withConfig({
         model: "qwen.gguf",
@@ -119,6 +282,8 @@ describe("formatLlamaStartupFailure", () => {
     );
 
     expect(formatted).toContain("Could not resolve model.");
+    expect(formatted).toContain("Endpoint: 127.0.0.1:8080");
+    expect(formatted).toContain("Conflict: PID 777");
     expect(formatted).toContain("which llama-server");
     expect(formatted).toContain("ls /tmp/models/qwen.gguf");
   });

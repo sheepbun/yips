@@ -23,6 +23,11 @@ export interface TitleBoxOptions {
   tokenUsage: string;
   cwd: string;
   sessionName: string;
+  recentActivity?: string[];
+  sessionSelection?: {
+    active: boolean;
+    selectedIndex: number;
+  };
 }
 
 type LayoutMode = "full" | "single" | "compact" | "minimal";
@@ -267,6 +272,18 @@ function styleLeftText(
   }
 }
 
+function styleHighlightedText(text: string, width: number): { markup: string; plain: string } {
+  const clipped = text.slice(0, Math.max(0, width));
+  const padded = fitText(clipped, width);
+  if (clipped.length === 0) return { markup: padded, plain: padded };
+  return {
+    markup: `\u001b[1m${colorText(clipped, INPUT_PINK)}\u001b[22m${" ".repeat(
+      Math.max(0, width - clipped.length)
+    )}`,
+    plain: padded
+  };
+}
+
 function styleLeftTextGlobalGradient(
   text: string,
   width: number,
@@ -381,7 +398,18 @@ function renderSingleColumn(
 }
 
 function renderFull(options: TitleBoxOptions): string[] {
-  const { width, version, username, backend, model, tokenUsage, cwd, sessionName } = options;
+  const {
+    width,
+    version,
+    username,
+    backend,
+    model,
+    tokenUsage,
+    cwd,
+    sessionName,
+    recentActivity = [],
+    sessionSelection
+  } = options;
   const lines: string[] = [];
   const modelInfo = buildModelInfo(backend, model, tokenUsage);
 
@@ -435,9 +463,33 @@ function renderFull(options: TitleBoxOptions): string[] {
       width,
       rightStartColumn
     ),
-    styleLeftText("Recent activity", rightWidth, "white"),
-    styleLeftText("No recent activity yet.", rightWidth, "dim")
+    styleLeftText("Recent activity", rightWidth, "white")
   ];
+
+  const activityItems = recentActivity.length > 0 ? recentActivity : ["No recent activity yet."];
+  if (sessionSelection?.active) {
+    const maxSlots = 5;
+    const safeSelected = Math.max(0, Math.min(sessionSelection.selectedIndex, activityItems.length - 1));
+    const start = Math.max(
+      0,
+      Math.min(safeSelected - Math.floor(maxSlots / 2), Math.max(0, activityItems.length - maxSlots))
+    );
+    const visible = activityItems.slice(start, start + maxSlots);
+
+    for (let i = 0; i < visible.length; i++) {
+      const actualIndex = start + i;
+      const item = visible[i] ?? "";
+      if (actualIndex === safeSelected) {
+        rightRows.push(styleHighlightedText(`> ${item}`, rightWidth));
+      } else {
+        rightRows.push(styleLeftText(`  ${item}`, rightWidth, "dim"));
+      }
+    }
+  } else {
+    for (const item of activityItems.slice(0, 5)) {
+      rightRows.push(styleLeftText(item, rightWidth, "dim"));
+    }
+  }
 
   while (rightRows.length < leftRows.length) {
     rightRows.push(styleLeftText("", rightWidth, "plain"));

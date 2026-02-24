@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
   - on Arch, uses full-upgrade `pacman -Syu` installs to avoid partial-upgrade breakage
   - adds Arch node-runtime self-heal (`nodejs npm simdjson`) when shared-library linkage is broken
   - installs a `~/.local/bin/yips` launcher and updates env so `yips` can be run from any directory
+  - launcher now defaults to source mode and only uses `dist` when `YIPS_USE_DIST=1`
   - clones/updates and builds `llama.cpp` (`llama-server`) with CUDA-first + CPU fallback
   - writes `~/.yips/env.sh` (`LLAMA_SERVER_PATH`, `YIPS_LLAMA_SERVER_PATH`, `YIPS_LLAMA_MODELS_DIR`)
   - creates/patches `.yips_config.json` lifecycle defaults without clobbering existing user values
@@ -48,6 +49,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - `/models` command implementation and `/nick` command implementation with config persistence
 - Config persistence APIs in `src/config.ts` (`saveConfig`, `updateConfig`) and `nicknames` support in `AppConfig`
 - Model Manager tests (`tests/model-manager.test.ts`, `tests/model-manager-state.test.ts`, `tests/model-manager-ui.test.ts`)
+- Session persistence module (`src/session-store.ts`) with save/list/load support for markdown session files in `~/.yips/memory`
+- `/sessions` command implementation in the TypeScript rewrite (interactive session browser mode in TUI)
 
 ### Changed
 
@@ -73,6 +76,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Downloader list row styling restored toward yips-cli parity with gradient-highlighted selected rows and compatibility status coloring
 - `/model` behavior now opens Model Manager with no args, and with args performs local exact/partial matching before free-form fallback
 - TUI now supports a dedicated `model-manager` UI mode with prompt-composer search input and persisted model selection
+- Title box right column now renders real recent session activity and highlights selection while browsing `/sessions`
+- TUI now auto-creates and updates session files after exchanges, derives session names from first user prompt, and restores history from selected sessions
 
 ## Legacy (yips-cli)
 

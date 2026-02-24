@@ -214,6 +214,13 @@ describe("createDefaultRegistry", () => {
     expect(result.uiAction).toEqual({ type: "open-model-manager" });
   });
 
+  it("/sessions opens interactive session picker", async () => {
+    const registry = createDefaultRegistry();
+    const result = await registry.dispatch("sessions", "", createContext());
+    expect(result.action).toBe("continue");
+    expect(result.uiAction).toEqual({ type: "open-sessions" });
+  });
+
   it("/keys shows diagnostics guidance", async () => {
     const registry = createDefaultRegistry();
     const result = await registry.dispatch("keys", "", createContext());

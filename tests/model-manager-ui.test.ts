@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { GRADIENT_BLUE } from "../src/colors";
 import { stripAnsi } from "../src/colors";
 import { renderModelManagerLines } from "../src/model-manager-ui";
 import type { ModelManagerState } from "../src/model-manager-state";
@@ -24,6 +25,8 @@ function makeState(overrides?: Partial<ModelManagerState>): ModelManagerState {
 }
 
 describe("model-manager-ui", () => {
+  const modelInfoBlue = `\u001b[38;2;${GRADIENT_BLUE.r};${GRADIENT_BLUE.g};${GRADIENT_BLUE.b}m`;
+
   it("renders bordered frame and footer", () => {
     const lines = renderModelManagerLines({
       width: 90,
@@ -33,6 +36,7 @@ describe("model-manager-ui", () => {
     const plain = lines.map((line) => stripAnsi(line));
 
     expect(plain[0]).toContain("Yips Model Manager");
+    expect(lines[0]).toContain(modelInfoBlue);
     expect(plain.at(-1)).toContain("╯");
     expect(plain.join("\n")).toContain("[Del] Delete Local");
   });

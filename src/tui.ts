@@ -14,6 +14,7 @@ import {
   GRADIENT_PINK,
   GRADIENT_YELLOW,
   horizontalGradient,
+  horizontalGradientAtOffset,
   INPUT_PINK
 } from "./colors";
 import { LlamaClient } from "./llama-client";
@@ -557,10 +558,16 @@ export function buildPromptRenderLines(
 
   const clippedStatus = clipPromptStatusText(statusText, frame.innerWidth);
   const fill = "─".repeat(Math.max(0, frame.innerWidth - charLength(clippedStatus)));
-  const leftBottom = colorText("╰", GRADIENT_PINK);
-  const fillBottom = horizontalGradient(fill, GRADIENT_PINK, GRADIENT_YELLOW);
+  const leftBottom = horizontalGradientAtOffset("╰", GRADIENT_PINK, GRADIENT_YELLOW, 0, width);
+  const fillBottom = horizontalGradientAtOffset(fill, GRADIENT_PINK, GRADIENT_YELLOW, 1, width);
   const statusBottom = colorText(clippedStatus, GRADIENT_BLUE);
-  const rightBottom = colorText("╯", GRADIENT_YELLOW);
+  const rightBottom = horizontalGradientAtOffset(
+    "╯",
+    GRADIENT_PINK,
+    GRADIENT_YELLOW,
+    width - 1,
+    width
+  );
   lines.push(`${leftBottom}${fillBottom}${statusBottom}${rightBottom}`);
   return lines;
 }
@@ -1926,11 +1933,11 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
                 return;
               }
               if (action.type === "move-up") {
-                currentState.downloader = moveModelSelection(currentState.downloader, -1, 10);
+                currentState.downloader = moveModelSelection(currentState.downloader, -1, 9);
                 continue;
               }
               if (action.type === "move-down") {
-                currentState.downloader = moveModelSelection(currentState.downloader, 1, 10);
+                currentState.downloader = moveModelSelection(currentState.downloader, 1, 9);
                 continue;
               }
               if (action.type === "submit") {

@@ -553,31 +553,31 @@ export function computeVisibleLayoutSlices(
     };
   }
 
-  const stackedUpper = [...titleLines, ...outputLines];
-  if (stackedUpper.length <= upperRowCount) {
-    const outputPadding = new Array<string>(upperRowCount - stackedUpper.length).fill("");
+  // Output should first consume only the empty space between title and prompt.
+  // Once that gap is exhausted, additional output lines start pushing the title up.
+  const baseHiddenTitle = Math.max(0, titleLines.length - upperRowCount);
+  const initiallyVisibleTitleCount = titleLines.length - baseHiddenTitle;
+  const initialGap = Math.max(0, upperRowCount - initiallyVisibleTitleCount);
+  const outputCount = outputLines.length;
+
+  const outputConsumedByGap = Math.min(outputCount, initialGap);
+  const outputAfterGap = outputCount - outputConsumedByGap;
+
+  const outputConsumedByTitle = Math.min(outputAfterGap, initiallyVisibleTitleCount);
+  const totalHiddenTitle = baseHiddenTitle + outputConsumedByTitle;
+  const visibleTitle = titleLines.slice(totalHiddenTitle);
+
+  const hiddenOutput = Math.max(0, outputAfterGap - initiallyVisibleTitleCount);
+  const visibleOutput = outputLines.slice(hiddenOutput);
+
+  const outputRowsAvailable = Math.max(0, upperRowCount - visibleTitle.length);
+  if (visibleOutput.length < outputRowsAvailable) {
+    const outputPadding = new Array<string>(outputRowsAvailable - visibleOutput.length).fill("");
     return {
-      titleLines: [...titleLines],
-      outputLines: [...outputPadding, ...outputLines],
+      titleLines: visibleTitle,
+      outputLines: [...outputPadding, ...visibleOutput],
       promptLines: visiblePrompt
     };
-  }
-
-  const upperTail = stackedUpper.slice(-upperRowCount);
-  const titleBoundary = titleLines.length;
-  const firstVisibleStackIndex = stackedUpper.length - upperTail.length;
-
-  const visibleTitle: string[] = [];
-  const visibleOutput: string[] = [];
-
-  for (let offset = 0; offset < upperTail.length; offset++) {
-    const line = upperTail[offset] ?? "";
-    const stackIndex = firstVisibleStackIndex + offset;
-    if (stackIndex < titleBoundary) {
-      visibleTitle.push(line);
-    } else {
-      visibleOutput.push(line);
-    }
   }
 
   return {

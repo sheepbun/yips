@@ -36,6 +36,8 @@ import type { AppConfig, ChatMessage, TuiOptions } from "./types";
 const PROMPT_PREFIX = ">>> ";
 const CURSOR_MARKER = "▌";
 const KEY_DEBUG_ENABLED = process.env["YIPS_DEBUG_KEYS"] === "1";
+const ANSI_REVERSE_ON = "\u001b[7m";
+const ANSI_RESET_ALL = "\u001b[0m";
 
 interface AssistantReply {
   text: string;
@@ -221,6 +223,12 @@ interface VisibleLayoutSlices {
   promptLines: string[];
 }
 
+const MAX_AUTOCOMPLETE_PREVIEW = 8;
+
+function withReverseHighlight(text: string): string {
+  return `${ANSI_REVERSE_ON}${text}${ANSI_RESET_ALL}`;
+}
+
 export function computeVisibleLayoutSlices(
   rows: number,
   titleLines: string[],
@@ -272,6 +280,50 @@ export function computeVisibleLayoutSlices(
     outputLines: visibleOutput,
     promptLines: visiblePrompt
   };
+}
+
+export function buildAutocompleteOverlayLines(
+  composer: PromptComposer,
+  registry: CommandRegistry
+): string[] {
+  const menu = composer.getAutocompleteMenuState();
+  if (!menu) {
+    return [];
+  }
+
+  const descriptorBySlashName = new Map(
+    registry.listCommands().map((descriptor) => [`/${descriptor.name}`, descriptor])
+  );
+
+  const lines: string[] = [];
+
+  const windowSize = Math.min(MAX_AUTOCOMPLETE_PREVIEW, menu.options.length);
+  const startIndex = Math.max(
+    0,
+    Math.min(menu.selectedIndex - Math.floor(windowSize / 2), menu.options.length - windowSize)
+  );
+  const visibleOptions = menu.options.slice(startIndex, startIndex + windowSize);
+  const commandColumnWidth = Math.max(
+    10,
+    ...visibleOptions.map((option) => charLength(option))
+  );
+  // Align the command slash with the slash in the prompt row: "│>>> /..."
+  const leftPadding = " ".repeat(1 + charLength(PROMPT_PREFIX));
+
+  for (let rowIndex = 0; rowIndex < visibleOptions.length; rowIndex++) {
+    const option = visibleOptions[rowIndex] ?? "";
+    const descriptor = descriptorBySlashName.get(option);
+    const description = descriptor?.description ?? "Command";
+    const commandColor = descriptor?.kind === "skill" ? INPUT_PINK : GRADIENT_BLUE;
+    const selected = startIndex + rowIndex === menu.selectedIndex;
+    const paddedCommand = option.padEnd(commandColumnWidth, " ");
+    const styledCommand = colorText(paddedCommand, commandColor);
+    const styledDescription = horizontalGradient(description, GRADIENT_PINK, GRADIENT_YELLOW);
+    const rowText = `${leftPadding}${styledCommand}   ${styledDescription}`;
+    lines.push(selected ? withReverseHighlight(rowText) : rowText);
+  }
+
+  return lines;
 }
 
 export function buildPromptRenderLines(
@@ -472,7 +524,7 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
       return new PromptComposer({
         interiorWidth: Math.max(0, dimensionsRef.current.columns - 2),
         history: [...currentState.inputHistory],
-        autoComplete: registryRef.current.getNames().map((name) => `/${name}`),
+        autoComplete: registryRef.current.getAutocompleteCommands(),
         prefix: PROMPT_PREFIX
       });
     }, []);
@@ -777,6 +829,25 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
             continue;
           }
 
+          const menuState = composer.getAutocompleteMenuState();
+          if (menuState) {
+            if (action.type === "move-up") {
+              composer.moveAutocompleteSelection(-1);
+              shouldRender = true;
+              continue;
+            }
+            if (action.type === "move-down") {
+              composer.moveAutocompleteSelection(1);
+              shouldRender = true;
+              continue;
+            }
+            if (action.type === "submit") {
+              composer.acceptAutocompleteSelection();
+              shouldRender = true;
+              continue;
+            }
+          }
+
           const event = applyInputAction(composer, action);
           if (!event) {
             shouldRender = true;
@@ -811,10 +882,11 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
 
     const titleLines = renderTitleBox(buildTitleBoxOptions(state, version, dimensions.columns));
     const promptLines = buildPromptRenderLines(dimensions.columns, statusText, promptLayout, true);
+    const autocompleteOverlay = buildAutocompleteOverlayLines(composer, registryRef.current);
     const visible = computeVisibleLayoutSlices(
       dimensions.rows,
       titleLines,
-      state.outputLines,
+      [...state.outputLines, ...autocompleteOverlay],
       promptLines
     );
 

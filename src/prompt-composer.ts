@@ -33,6 +33,17 @@ export type PromptComposerEvent =
   | { type: "cancel" }
   | { type: "autocomplete-menu"; options: string[]; tokenStart: number; tokenEnd: number };
 
+export interface PromptAutocompleteSuggestions {
+  token: string;
+  tokenStart: number;
+  tokenEnd: number;
+  options: string[];
+}
+
+export interface AutocompleteMenuState extends PromptAutocompleteSuggestions {
+  selectedIndex: number;
+}
+
 const DEFAULT_PREFIX = ">>> ";
 
 function toChars(text: string): string[] {
@@ -51,23 +62,6 @@ function takeLeftChars(text: string, maxWidth: number): string {
   if (maxWidth <= 0) return "";
   const chars = toChars(text);
   return chars.slice(0, maxWidth).join("");
-}
-
-function commonPrefix(values: readonly string[]): string {
-  if (values.length === 0) return "";
-  if (values.length === 1) return values[0] ?? "";
-
-  let prefix = values[0] ?? "";
-  for (const value of values.slice(1)) {
-    const left = toChars(prefix);
-    const right = toChars(value);
-    const length = Math.min(left.length, right.length);
-    let i = 0;
-    while (i < length && left[i] === right[i]) i += 1;
-    prefix = left.slice(0, i).join("");
-    if (prefix.length === 0) break;
-  }
-  return prefix;
 }
 
 function rowCapacity(
@@ -189,6 +183,15 @@ function noneEvent(): PromptComposerEvent {
   return { type: "none" };
 }
 
+function menuStateKey(token: string, options: readonly string[]): string {
+  return `${token}\u0000${options.join("\u0001")}`;
+}
+
+interface StoredAutocompleteSelection {
+  key: string;
+  selectedIndex: number;
+}
+
 export class PromptComposer {
   private chars: string[];
   private cursor: number;
@@ -200,6 +203,8 @@ export class PromptComposer {
   private historyDraft: string;
   private preferredColumn: number | null;
   private layout: PromptComposerLayout;
+  private autocompleteSelection: StoredAutocompleteSelection | null;
+  private suppressAutocompleteMenu: boolean;
 
   constructor(options: PromptComposerOptions) {
     const initialText = options.text ?? "";
@@ -212,6 +217,8 @@ export class PromptComposer {
     this.historyIndex = this.history.length;
     this.historyDraft = initialText;
     this.preferredColumn = null;
+    this.autocompleteSelection = null;
+    this.suppressAutocompleteMenu = false;
     this.layout = buildPromptComposerLayout(
       textFromChars(this.chars),
       this.cursor,
@@ -239,6 +246,78 @@ export class PromptComposer {
 
   applyAutocompleteChoice(tokenStart: number, tokenEnd: number, selection: string): void {
     this.replaceRange(tokenStart, tokenEnd, selection);
+  }
+
+  clearAutocompleteSelection(): void {
+    this.autocompleteSelection = null;
+    this.suppressAutocompleteMenu = false;
+  }
+
+  moveAutocompleteSelection(direction: -1 | 1): PromptComposerEvent {
+    const menu = this.getAutocompleteMenuState();
+    if (!menu || menu.options.length === 0) {
+      return noneEvent();
+    }
+
+    const nextIndex = (menu.selectedIndex + direction + menu.options.length) % menu.options.length;
+    this.autocompleteSelection = {
+      key: menuStateKey(menu.token, menu.options),
+      selectedIndex: nextIndex
+    };
+    return noneEvent();
+  }
+
+  acceptAutocompleteSelection(): PromptComposerEvent {
+    const menu = this.getAutocompleteMenuState();
+    if (!menu) {
+      return noneEvent();
+    }
+
+    const selection = menu.options[menu.selectedIndex] ?? menu.token;
+    this.applyAutocompleteChoice(menu.tokenStart, menu.tokenEnd, selection);
+    this.autocompleteSelection = null;
+    this.suppressAutocompleteMenu = true;
+    return noneEvent();
+  }
+
+  getAutocompleteMenuState(): AutocompleteMenuState | null {
+    if (this.suppressAutocompleteMenu) {
+      return null;
+    }
+
+    const suggestions = this.computeAutocompleteSuggestions();
+    if (!suggestions) {
+      this.autocompleteSelection = null;
+      return null;
+    }
+
+    const key = menuStateKey(suggestions.token, suggestions.options);
+    if (!this.autocompleteSelection || this.autocompleteSelection.key !== key) {
+      this.autocompleteSelection = { key, selectedIndex: 0 };
+    }
+
+    const maxIndex = Math.max(0, suggestions.options.length - 1);
+    const selectedIndex = clamp(this.autocompleteSelection.selectedIndex, 0, maxIndex);
+    this.autocompleteSelection = { key, selectedIndex };
+
+    return {
+      ...suggestions,
+      selectedIndex
+    };
+  }
+
+  getAutocompleteSuggestions(): PromptAutocompleteSuggestions | null {
+    const menu = this.getAutocompleteMenuState();
+    if (!menu) {
+      return null;
+    }
+
+    return {
+      token: menu.token,
+      tokenStart: menu.tokenStart,
+      tokenEnd: menu.tokenEnd,
+      options: [...menu.options]
+    };
   }
 
   handleKey(key: string, data?: PromptComposerKeyData): PromptComposerEvent {
@@ -320,6 +399,7 @@ export class PromptComposer {
   private insertText(text: string): void {
     const insert = toChars(text);
     if (insert.length === 0) return;
+    this.markAutocompleteDirty();
     this.chars.splice(this.cursor, 0, ...insert);
     this.cursor += insert.length;
     this.recomputeLayout();
@@ -331,6 +411,7 @@ export class PromptComposer {
     const replacementChars = toChars(replacement);
 
     this.detachFromHistory();
+    this.markAutocompleteDirty();
     this.preferredColumn = null;
     this.chars.splice(safeStart, safeEnd - safeStart, ...replacementChars);
     this.cursor = safeStart + replacementChars.length;
@@ -339,6 +420,7 @@ export class PromptComposer {
 
   private backspace(): void {
     if (this.cursor <= 0) return;
+    this.markAutocompleteDirty();
     this.chars.splice(this.cursor - 1, 1);
     this.cursor -= 1;
     this.recomputeLayout();
@@ -346,16 +428,19 @@ export class PromptComposer {
 
   private deleteForward(): void {
     if (this.cursor >= this.chars.length) return;
+    this.markAutocompleteDirty();
     this.chars.splice(this.cursor, 1);
     this.recomputeLayout();
   }
 
   private moveCursor(delta: number): void {
+    this.markAutocompleteDirty();
     this.cursor = clamp(this.cursor + delta, 0, this.chars.length);
     this.recomputeLayout();
   }
 
   private moveToLineBoundary(target: "start" | "end"): void {
+    this.markAutocompleteDirty();
     const row = this.layout.cursorRow;
     if (target === "start") {
       this.cursor = this.layout.rowStarts[row] ?? this.cursor;
@@ -371,6 +456,7 @@ export class PromptComposer {
       return false;
     }
 
+    this.markAutocompleteDirty();
     const preferred = this.preferredColumn ?? this.layout.cursorCol;
     const targetRowLen = charLength(this.layout.rows[targetRow] ?? "");
     const targetCol = Math.min(preferred, targetRowLen);
@@ -405,10 +491,16 @@ export class PromptComposer {
   }
 
   private loadHistoryValue(value: string): void {
+    this.markAutocompleteDirty();
     this.chars = toChars(value);
     this.cursor = this.chars.length;
     this.preferredColumn = null;
     this.recomputeLayout();
+  }
+
+  private markAutocompleteDirty(): void {
+    this.autocompleteSelection = null;
+    this.suppressAutocompleteMenu = false;
   }
 
   private tokenBounds(): {
@@ -434,31 +526,26 @@ export class PromptComposer {
     return { start, end, token };
   }
 
-  private handleAutoComplete(): PromptComposerEvent {
+  private computeAutocompleteSuggestions(): PromptAutocompleteSuggestions | null {
     const bounds = this.tokenBounds();
     if (!bounds || !bounds.token.startsWith("/")) {
-      return noneEvent();
+      return null;
     }
 
     const options = this.autoComplete.filter((candidate) => candidate.startsWith(bounds.token));
-    if (options.length === 0) return noneEvent();
-
-    if (options.length === 1) {
-      this.replaceRange(bounds.start, bounds.end, options[0] ?? bounds.token);
-      return noneEvent();
-    }
-
-    const shared = commonPrefix(options);
-    if (shared.length > bounds.token.length) {
-      this.replaceRange(bounds.start, bounds.end, shared);
-      return noneEvent();
+    if (options.length === 0) {
+      return null;
     }
 
     return {
-      type: "autocomplete-menu",
-      options: [...options],
+      token: bounds.token,
       tokenStart: bounds.start,
-      tokenEnd: bounds.end
+      tokenEnd: bounds.end,
+      options: [...options]
     };
+  }
+
+  private handleAutoComplete(): PromptComposerEvent {
+    return noneEvent();
   }
 }

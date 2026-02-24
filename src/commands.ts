@@ -1,5 +1,7 @@
 /** Slash command registry and dispatch system. */
 
+import { loadCommandCatalog } from "./command-catalog";
+import type { CommandDescriptor, CommandKind } from "./command-catalog";
 import type { AppConfig } from "./types";
 
 export interface CommandResult {
@@ -20,38 +22,104 @@ interface RegisteredCommand {
   handler: CommandHandler;
 }
 
+function isGenericDescription(description: string): boolean {
+  const trimmed = description.trim();
+  return trimmed.length === 0 || trimmed === "Command";
+}
+
 export class CommandRegistry {
   private commands: Map<string, RegisteredCommand> = new Map();
+  private descriptors: Map<string, CommandDescriptor> = new Map();
 
-  register(name: string, handler: CommandHandler, description: string): void {
-    this.commands.set(name.toLowerCase(), { name, description, handler });
+  constructor(initialDescriptors: readonly CommandDescriptor[] = []) {
+    for (const descriptor of initialDescriptors) {
+      const name = descriptor.name.toLowerCase();
+      this.descriptors.set(name, { ...descriptor, name });
+    }
+  }
+
+  register(
+    name: string,
+    handler: CommandHandler,
+    description: string,
+    kind: CommandKind = "builtin"
+  ): void {
+    const normalizedName = name.toLowerCase();
+    const existing = this.descriptors.get(normalizedName);
+    const mergedDescription =
+      existing && !isGenericDescription(existing.description) ? existing.description : description;
+
+    this.commands.set(normalizedName, {
+      name: normalizedName,
+      description: mergedDescription,
+      handler
+    });
+    this.descriptors.set(normalizedName, {
+      name: normalizedName,
+      description: mergedDescription,
+      kind: existing?.kind ?? kind,
+      implemented: true
+    });
   }
 
   dispatch(name: string, args: string, context: SessionContext): CommandResult {
     const command = this.commands.get(name.toLowerCase());
-    if (!command) {
+    if (command) {
+      return command.handler(args, context);
+    }
+
+    if (this.descriptors.has(name.toLowerCase())) {
       return {
-        output: `Unknown command: /${name}. Type /help for help.`,
+        output:
+          `Command /${name} is recognized but not implemented in this TypeScript rewrite yet. ` +
+          "Type /help to see implemented commands.",
         action: "continue"
       };
     }
-    return command.handler(args, context);
+
+    return {
+      output: `Unknown command: /${name}. Type /help for help.`,
+      action: "continue"
+    };
   }
 
   getHelp(): string {
+    const commands = this.listCommands();
+    const implemented = commands.filter((command) => command.implemented);
+    const planned = commands.filter((command) => !command.implemented);
+
     const lines = ["Available commands:"];
-    for (const cmd of this.commands.values()) {
+
+    lines.push("Implemented:");
+    for (const cmd of implemented) {
       lines.push(`  /${cmd.name}  - ${cmd.description}`);
     }
+
+    if (planned.length > 0) {
+      lines.push("");
+      lines.push("Recognized (not implemented in this rewrite yet):");
+      for (const cmd of planned) {
+        lines.push(`  /${cmd.name}  - ${cmd.description}`);
+      }
+    }
+
     return lines.join("\n");
   }
 
   has(name: string): boolean {
-    return this.commands.has(name.toLowerCase());
+    return this.descriptors.has(name.toLowerCase());
   }
 
   getNames(): string[] {
-    return [...this.commands.keys()];
+    return this.listCommands().map((command) => command.name);
+  }
+
+  listCommands(): CommandDescriptor[] {
+    return [...this.descriptors.values()].sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  getAutocompleteCommands(): string[] {
+    return this.getNames().map((name) => `/${name}`);
   }
 }
 
@@ -86,7 +154,7 @@ export function parseCommand(input: string): ParsedCommand | null {
 }
 
 export function createDefaultRegistry(): CommandRegistry {
-  const registry = new CommandRegistry();
+  const registry = new CommandRegistry(loadCommandCatalog());
 
   registry.register(
     "help",
@@ -147,7 +215,8 @@ export function createDefaultRegistry(): CommandRegistry {
       output: KEY_DIAGNOSTICS_TEXT,
       action: "continue"
     }),
-    "Show key input diagnostics for Enter/Ctrl+Enter"
+    "Show key input diagnostics for Enter/Ctrl+Enter",
+    "builtin"
   );
 
   return registry;

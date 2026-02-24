@@ -54,6 +54,16 @@ describe("CommandRegistry", () => {
     expect(result.action).toBe("continue");
   });
 
+  it("returns recognized-not-implemented for known catalog commands without handlers", () => {
+    const registry = new CommandRegistry([
+      { name: "backend", description: "Switch backend", kind: "builtin", implemented: false }
+    ]);
+
+    const result = registry.dispatch("backend", "", createContext());
+    expect(result.output).toContain("recognized but not implemented");
+    expect(result.action).toBe("continue");
+  });
+
   it("has() checks command existence", () => {
     const registry = new CommandRegistry();
     registry.register("foo", () => ({ action: "continue" }), "Foo");
@@ -81,7 +91,7 @@ describe("CommandRegistry", () => {
 });
 
 describe("createDefaultRegistry", () => {
-  it("includes expected built-in commands", () => {
+  it("includes expected implemented and restored commands", () => {
     const registry = createDefaultRegistry();
     expect(registry.has("help")).toBe(true);
     expect(registry.has("exit")).toBe(true);
@@ -92,6 +102,12 @@ describe("createDefaultRegistry", () => {
     expect(registry.has("stream")).toBe(true);
     expect(registry.has("verbose")).toBe(true);
     expect(registry.has("keys")).toBe(true);
+    expect(registry.has("backend")).toBe(true);
+    expect(registry.has("sessions")).toBe(true);
+    expect(registry.has("download")).toBe(true);
+    expect(registry.has("models")).toBe(true);
+    expect(registry.has("search")).toBe(true);
+    expect(registry.has("vt")).toBe(true);
   });
 
   it("/help lists commands", () => {
@@ -99,6 +115,15 @@ describe("createDefaultRegistry", () => {
     const result = registry.dispatch("help", "", createContext());
     expect(result.output).toContain("/help");
     expect(result.output).toContain("/exit");
+    expect(result.output).toContain("/backend");
+    expect(result.output).toContain("Recognized (not implemented in this rewrite yet)");
+    expect(result.action).toBe("continue");
+  });
+
+  it("returns recognized-not-implemented output for restored metadata commands", () => {
+    const registry = createDefaultRegistry();
+    const result = registry.dispatch("backend", "", createContext());
+    expect(result.output).toContain("recognized but not implemented");
     expect(result.action).toBe("continue");
   });
 
@@ -164,5 +189,14 @@ describe("createDefaultRegistry", () => {
     expect(result.output).toContain("Ctrl+Enter");
     expect(result.output).toContain("\\u001b[13;5u");
     expect(result.output).toContain("\\u001b[13;5~");
+  });
+
+  it("provides slash-prefixed autocomplete command list", () => {
+    const registry = createDefaultRegistry();
+    const autocomplete = registry.getAutocompleteCommands();
+
+    expect(autocomplete).toContain("/help");
+    expect(autocomplete).toContain("/backend");
+    expect(autocomplete).toContain("/search");
   });
 });

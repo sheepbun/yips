@@ -1703,3 +1703,57 @@ Validation:
 - `npm run lint` — clean
 Next:
 - Optional visual check in `npm run dev` to confirm the title split looks exactly as intended in your terminal font/theme.
+
+## 2026-02-24 20:02 UTC — Exchange 43
+Summary: Changed the Model Downloader model-table header row to a pink/yellow gradient style.
+Changed:
+- Updated `src/downloader-ui.ts`:
+  - model-list header row (`Model | DL | Likes | Size | Updated`) now uses `horizontalGradient(..., GRADIENT_PINK, GRADIENT_YELLOW)` instead of solid blue.
+- Updated `tests/downloader-ui.test.ts`:
+  - added assertion that the model-list header row emits multiple truecolor foreground runs, confirming gradient styling.
+Validation:
+- `npm test -- tests/downloader-ui.test.ts` — clean (7 passing)
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+Next:
+- Optional visual check with `npm run dev` to confirm header contrast/readability in your terminal theme.
+
+## 2026-02-24 20:03 UTC — Exchange 44
+Summary: Renamed downloader model-table `DL` header to `Downloads` while keeping column alignment intact.
+Changed:
+- Updated `src/downloader-ui.ts`:
+  - changed model-list header label from `DL` to `Downloads`.
+  - increased downloads column width from `8` to `10` so the longer header text does not break alignment.
+- Updated `tests/downloader-ui.test.ts`:
+  - header detection assertions now look for `Downloads` instead of `DL`.
+Validation:
+- `npm test -- tests/downloader-ui.test.ts` — clean (7 passing)
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+Next:
+- Optional visual pass in `npm run dev` to verify column spacing looks ideal at your normal terminal width.
+
+## 2026-02-24 20:05 UTC — Exchange 45
+Summary: Tightened downloader `Downloads` column width by one character to remove extra left padding.
+Changed:
+- Updated `src/downloader-ui.ts`:
+  - changed downloads column width from `10` to `9` so the header/value alignment no longer appears one character too wide on the left.
+Validation:
+- `npm test -- tests/downloader-ui.test.ts` — clean (7 passing)
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+Next:
+- Optional visual confirmation in `npm run dev` for your terminal width.
+
+## 2026-02-24 20:05 UTC — Exchange 46
+Summary: Tightened downloader `Likes` and `Size` column widths by one character each to reduce extra left padding.
+Changed:
+- Updated `src/downloader-ui.ts`:
+  - changed likes column width from `7` to `6`.
+  - changed size column width from `6` to `5`.
+Validation:
+- `npm test -- tests/downloader-ui.test.ts` — clean (7 passing)
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+Next:
+- Optional visual pass in `npm run dev` to confirm all column headers now sit exactly where you want.

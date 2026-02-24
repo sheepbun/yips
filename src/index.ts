@@ -13,16 +13,21 @@ function hasFlag(flag: string): boolean {
 }
 
 export async function main(): Promise<void> {
-  const configResult = await loadConfig();
+  for (;;) {
+    const configResult = await loadConfig();
 
-  if (configResult.warning) {
-    console.error(`[warning] ${configResult.warning}`);
-  }
+    if (configResult.warning) {
+      console.error(`[warning] ${configResult.warning}`);
+    }
 
-  if (hasFlag("--no-tui") || !isTTY()) {
-    await startRepl({ config: configResult.config });
-  } else {
-    await startTui({ config: configResult.config });
+    const result =
+      hasFlag("--no-tui") || !isTTY()
+        ? await startRepl({ config: configResult.config })
+        : await startTui({ config: configResult.config });
+
+    if (result !== "restart") {
+      break;
+    }
   }
 }
 

@@ -37,6 +37,11 @@ describe("handleInput", () => {
 
     expect(handleInput("/model", state)).toEqual({ type: "unknown", command: "model" });
   });
+
+  it("returns restart action for /restart", () => {
+    const state = createState();
+    expect(handleInput("/restart", state)).toEqual({ type: "restart" });
+  });
 });
 
 describe("renderHelpText", () => {
@@ -45,5 +50,6 @@ describe("renderHelpText", () => {
 
     expect(helpText).toContain("/help");
     expect(helpText).toContain("/exit");
+    expect(helpText).toContain("/restart");
   });
 });

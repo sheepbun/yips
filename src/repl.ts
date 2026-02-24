@@ -8,6 +8,7 @@ export function renderHelpText(): string {
     "Available commands:",
     "  /help  - Show this help",
     "  /exit  - Exit the REPL",
+    "  /restart  - Restart Yips",
     "  /quit  - Exit the REPL"
   ].join("\n");
 }
@@ -29,6 +30,10 @@ export function handleInput(input: string, state: SessionState): ReplAction {
 
     if (normalizedCommand === "/exit" || normalizedCommand === "/quit") {
       return { type: "exit" };
+    }
+
+    if (normalizedCommand === "/restart") {
+      return { type: "restart" };
     }
 
     return { type: "unknown", command: normalizedCommand.slice(1) };
@@ -66,6 +71,10 @@ export function applyAction(
       state.running = false;
       writeLine(output, "Goodbye.");
       return;
+    case "restart":
+      state.running = false;
+      writeLine(output, "Restarting Yips.");
+      return;
     case "echo":
       if (action.text.trim().length > 0) {
         state.messageCount += 1;
@@ -80,7 +89,7 @@ export function applyAction(
   }
 }
 
-export async function startRepl(options: ReplOptions): Promise<void> {
+export async function startRepl(options: ReplOptions): Promise<"exit" | "restart"> {
   const input = options.input ?? stdin;
   const output = options.output ?? stdout;
   const prompt = options.prompt ?? "> ";
@@ -96,14 +105,20 @@ export async function startRepl(options: ReplOptions): Promise<void> {
   writeLine(output, "Type /help for commands.");
 
   const readline = createInterface({ input, output, terminal });
+  let restartRequested = false;
 
   try {
     while (state.running) {
       const inputLine = await readline.question(prompt);
       const action = handleInput(inputLine, state);
+      if (action.type === "restart") {
+        restartRequested = true;
+      }
       applyAction(action, state, output);
     }
   } finally {
     readline.close();
   }
+
+  return restartRequested ? "restart" : "exit";
 }

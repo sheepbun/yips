@@ -3,7 +3,7 @@ import { access, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 
-import type { AppConfig, Backend } from "./types";
+import type { AppConfig, Backend, LlamaPortConflictPolicy } from "./types";
 
 type ConfigSource = "default" | "file";
 
@@ -15,6 +15,11 @@ export interface LoadConfigResult {
 }
 
 const SUPPORTED_BACKENDS: ReadonlySet<Backend> = new Set(["llamacpp", "claude"]);
+const PORT_CONFLICT_POLICIES: ReadonlySet<LlamaPortConflictPolicy> = new Set([
+  "fail",
+  "kill-llama",
+  "kill-user"
+]);
 export const DEFAULT_CONFIG_PATH = ".yips_config.json";
 
 export function getDefaultConfig(): AppConfig {
@@ -32,6 +37,7 @@ export function getDefaultConfig(): AppConfig {
     llamaContextSize: 8192,
     llamaGpuLayers: 999,
     llamaAutoStart: true,
+    llamaPortConflictPolicy: "kill-user",
     model: "default",
     nicknames: {}
   };
@@ -140,6 +146,16 @@ function normalizePositiveInt(value: unknown, fallback: number): number {
   return fallback;
 }
 
+function normalizePortConflictPolicy(
+  value: unknown,
+  fallback: LlamaPortConflictPolicy
+): LlamaPortConflictPolicy {
+  if (typeof value === "string" && PORT_CONFLICT_POLICIES.has(value as LlamaPortConflictPolicy)) {
+    return value as LlamaPortConflictPolicy;
+  }
+  return fallback;
+}
+
 function buildBaseUrl(host: string, port: number): string {
   return `http://${host}:${port}`;
 }
@@ -209,6 +225,10 @@ function applyEnvOverrides(config: AppConfig): AppConfig {
     ),
     llamaGpuLayers: normalizePositiveInt(process.env["YIPS_LLAMA_GPU_LAYERS"], config.llamaGpuLayers),
     llamaAutoStart: parseBoolean(process.env["YIPS_LLAMA_AUTO_START"], config.llamaAutoStart),
+    llamaPortConflictPolicy: normalizePortConflictPolicy(
+      process.env["YIPS_LLAMA_PORT_CONFLICT_POLICY"],
+      config.llamaPortConflictPolicy
+    ),
     model: normalizeModel(process.env["YIPS_MODEL"], config.model)
   };
 }
@@ -235,6 +255,10 @@ export function mergeConfig(defaults: AppConfig, candidate: unknown): AppConfig 
     llamaContextSize: normalizePositiveInt(candidate.llamaContextSize, defaults.llamaContextSize),
     llamaGpuLayers: normalizePositiveInt(candidate.llamaGpuLayers, defaults.llamaGpuLayers),
     llamaAutoStart: normalizeBoolean(candidate.llamaAutoStart, defaults.llamaAutoStart),
+    llamaPortConflictPolicy: normalizePortConflictPolicy(
+      candidate.llamaPortConflictPolicy,
+      defaults.llamaPortConflictPolicy
+    ),
     model: normalizeModel(candidate.model, defaults.model),
     nicknames: normalizeNicknames(candidate.nicknames, defaults.nicknames)
   };

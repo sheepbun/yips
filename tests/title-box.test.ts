@@ -202,6 +202,32 @@ describe("renderTitleBox", () => {
     );
   });
 
+  it("renders provided recent activity rows in full layout", () => {
+    const lines = renderTitleBox(
+      makeOptions({
+        width: 80,
+        recentActivity: ["2026-2-24 @  3:12 AM: Added Sessions"]
+      })
+    );
+    const fullText = lines.map(stripMarkup).join("\n");
+    expect(fullText).toContain("Added Sessions");
+    expect(fullText).not.toContain("No recent activity yet.");
+  });
+
+  it("highlights selected session row when session selection is active", () => {
+    const lines = renderTitleBox(
+      makeOptions({
+        width: 80,
+        recentActivity: ["One", "Two", "Three"],
+        sessionSelection: { active: true, selectedIndex: 1 }
+      })
+    );
+    const fullText = lines.map(stripMarkup).join("\n");
+    expect(fullText).toContain("> Two");
+    expect(fullText).toContain("  One");
+    expect(fullText).toContain("  Three");
+  });
+
   it("applies row-major gradient endpoints to the full logo", () => {
     const lines = renderTitleBox(makeOptions({ width: 80 }));
     const plain = lines.map(stripMarkup);

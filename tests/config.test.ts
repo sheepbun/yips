@@ -19,6 +19,7 @@ const originalLlamaModelsDir = process.env["YIPS_LLAMA_MODELS_DIR"];
 const originalLlamaContextSize = process.env["YIPS_LLAMA_CONTEXT_SIZE"];
 const originalLlamaGpuLayers = process.env["YIPS_LLAMA_GPU_LAYERS"];
 const originalLlamaAutoStart = process.env["YIPS_LLAMA_AUTO_START"];
+const originalLlamaPortConflictPolicy = process.env["YIPS_LLAMA_PORT_CONFLICT_POLICY"];
 
 afterEach(() => {
   if (originalLlamaBaseUrl === undefined) {
@@ -73,6 +74,12 @@ afterEach(() => {
     delete process.env["YIPS_LLAMA_AUTO_START"];
   } else {
     process.env["YIPS_LLAMA_AUTO_START"] = originalLlamaAutoStart;
+  }
+
+  if (originalLlamaPortConflictPolicy === undefined) {
+    delete process.env["YIPS_LLAMA_PORT_CONFLICT_POLICY"];
+  } else {
+    process.env["YIPS_LLAMA_PORT_CONFLICT_POLICY"] = originalLlamaPortConflictPolicy;
   }
 });
 
@@ -197,6 +204,7 @@ describe("loadConfig", () => {
     process.env["YIPS_LLAMA_CONTEXT_SIZE"] = "4096";
     process.env["YIPS_LLAMA_GPU_LAYERS"] = "77";
     process.env["YIPS_LLAMA_AUTO_START"] = "false";
+    process.env["YIPS_LLAMA_PORT_CONFLICT_POLICY"] = "fail";
 
     const result = await loadConfig(configPath);
 
@@ -208,6 +216,7 @@ describe("loadConfig", () => {
     expect(result.config.llamaContextSize).toBe(4096);
     expect(result.config.llamaGpuLayers).toBe(77);
     expect(result.config.llamaAutoStart).toBe(false);
+    expect(result.config.llamaPortConflictPolicy).toBe("fail");
   });
 
   it("persists config with saveConfig and updates with updateConfig", async () => {

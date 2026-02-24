@@ -1,4 +1,5 @@
 export type Backend = "llamacpp" | "claude";
+export type LlamaPortConflictPolicy = "fail" | "kill-llama" | "kill-user";
 
 export interface AppConfig {
   streaming: boolean;
@@ -12,6 +13,7 @@ export interface AppConfig {
   llamaContextSize: number;
   llamaGpuLayers: number;
   llamaAutoStart: boolean;
+  llamaPortConflictPolicy: LlamaPortConflictPolicy;
   model: string;
   nicknames: Record<string, string>;
 }

@@ -76,6 +76,13 @@ import {
 } from "./model-downloader";
 import { renderTitleBox } from "./title-box";
 import type { TitleBoxOptions } from "./title-box";
+import {
+  createSessionFileFromHistory,
+  listSessions,
+  loadSession,
+  writeSessionFile,
+  type SessionListItem
+} from "./session-store";
 import type { AppConfig, ChatMessage, TuiOptions } from "./types";
 
 const PROMPT_PREFIX = ">>> ";
@@ -103,9 +110,14 @@ interface RuntimeState {
   history: ChatMessage[];
   busy: boolean;
   busyLabel: string;
-  uiMode: "chat" | "downloader" | "model-manager";
+  uiMode: "chat" | "downloader" | "model-manager" | "sessions";
   downloader: DownloaderState | null;
   modelManager: ModelManagerState | null;
+  sessionFilePath: string | null;
+  sessionCreated: boolean;
+  recentActivity: string[];
+  sessionList: SessionListItem[];
+  sessionSelectionIndex: number;
 }
 
 interface InkModule {
@@ -236,11 +248,22 @@ function buildTitleBoxOptions(
     model: loadedModel ?? "",
     tokenUsage: loadedModel ? "0/8192" : "",
     cwd: process.cwd(),
-    sessionName: state.sessionName
+    sessionName: state.sessionName,
+    recentActivity: state.recentActivity,
+    sessionSelection:
+      state.uiMode === "sessions"
+        ? {
+            active: true,
+            selectedIndex: state.sessionSelectionIndex
+          }
+        : undefined
   };
 }
 
 function buildPromptStatusText(state: RuntimeState): string {
+  if (state.uiMode === "sessions") {
+    return "sessions · browse";
+  }
   if (state.uiMode === "model-manager") {
     return "model-manager · search";
   }
@@ -281,6 +304,28 @@ function resetSession(state: RuntimeState): void {
   state.outputLines = [];
   state.messageCount = 0;
   state.history = [];
+  state.sessionFilePath = null;
+  state.sessionCreated = false;
+  state.sessionName = "";
+}
+
+function replayOutputFromHistory(state: RuntimeState): void {
+  state.outputLines = [];
+  let userCount = 0;
+  for (const entry of state.history) {
+    if (entry.role === "user") {
+      userCount += 1;
+      appendOutput(state, formatUserMessage(entry.content));
+      continue;
+    }
+    if (entry.role === "assistant") {
+      appendOutput(state, formatAssistantMessage(entry.content));
+      appendOutput(state, "");
+      continue;
+    }
+    appendOutput(state, formatDimMessage(`[system] ${entry.content}`));
+  }
+  state.messageCount = userCount;
 }
 
 function createRuntimeState(options: TuiOptions): RuntimeState {
@@ -303,7 +348,12 @@ function createRuntimeState(options: TuiOptions): RuntimeState {
     busyLabel: "",
     uiMode: "chat",
     downloader: null,
-    modelManager: null
+    modelManager: null,
+    sessionFilePath: null,
+    sessionCreated: false,
+    recentActivity: [],
+    sessionList: [],
+    sessionSelectionIndex: 0
   };
 }
 
@@ -668,6 +718,85 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
       composerRef.current = createComposer();
     }
 
+    const refreshSessionActivity = useCallback(async (): Promise<void> => {
+      const currentState = stateRef.current;
+      if (!currentState) {
+        return;
+      }
+      const sessions = await listSessions();
+      const state = stateRef.current;
+      if (!state) {
+        return;
+      }
+      state.sessionList = sessions;
+      state.recentActivity = sessions.slice(0, 5).map((session) => session.display);
+      if (state.sessionList.length === 0) {
+        state.sessionSelectionIndex = 0;
+      } else {
+        state.sessionSelectionIndex = Math.max(
+          0,
+          Math.min(state.sessionSelectionIndex, state.sessionList.length - 1)
+        );
+      }
+      forceRender();
+    }, [forceRender]);
+
+    const persistSessionSnapshot = useCallback(async (): Promise<void> => {
+      const currentState = stateRef.current;
+      if (!currentState || currentState.history.length === 0) {
+        return;
+      }
+      try {
+        if (!currentState.sessionCreated || !currentState.sessionFilePath) {
+          const created = await createSessionFileFromHistory(currentState.history);
+          currentState.sessionFilePath = created.path;
+          currentState.sessionName = created.sessionName;
+          currentState.sessionCreated = true;
+        }
+        await writeSessionFile({
+          path: currentState.sessionFilePath,
+          username: currentState.username,
+          history: currentState.history
+        });
+        await refreshSessionActivity();
+      } catch (error) {
+        appendOutput(
+          currentState,
+          formatWarningMessage(`Session save failed: ${formatError(error)}`)
+        );
+        appendOutput(currentState, "");
+        forceRender();
+      }
+    }, [forceRender, refreshSessionActivity]);
+
+    const loadSessionIntoState = useCallback(
+      async (path: string): Promise<void> => {
+        const currentState = stateRef.current;
+        if (!currentState) {
+          return;
+        }
+        try {
+          const loaded = await loadSession(path);
+          currentState.history = loaded.history;
+          currentState.sessionName = loaded.sessionName;
+          currentState.sessionFilePath = loaded.path;
+          currentState.sessionCreated = true;
+          replayOutputFromHistory(currentState);
+          currentState.uiMode = "chat";
+          composerRef.current = createComposer();
+          await refreshSessionActivity();
+          forceRender();
+        } catch (error) {
+          appendOutput(currentState, formatErrorMessage(`Load session failed: ${formatError(error)}`));
+          appendOutput(currentState, "");
+          currentState.uiMode = "chat";
+          composerRef.current = createComposer();
+          forceRender();
+        }
+      },
+      [createComposer, forceRender, refreshSessionActivity]
+    );
+
     useEffect(() => {
       return () => {
         inputEngineRef.current.reset();
@@ -680,9 +809,14 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
         downloaderProgressBufferRef.current = null;
         downloaderAbortControllerRef.current?.abort();
         downloaderAbortControllerRef.current = null;
+        void persistSessionSnapshot().catch(() => undefined);
         void stopLlamaServer().catch(() => undefined);
       };
-    }, []);
+    }, [persistSessionSnapshot]);
+
+    useEffect(() => {
+      void refreshSessionActivity();
+    }, [refreshSessionActivity]);
 
     useEffect(() => {
       let canceled = false;
@@ -1293,6 +1427,7 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
           appendOutput(currentState, formatAssistantMessage(echo));
           appendOutput(currentState, "");
           currentState.history.push({ role: "assistant", content: echo });
+          await persistSessionSnapshot();
           forceRender();
           return;
         }
@@ -1309,9 +1444,10 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
           appendOutput(currentState, "");
         }
 
+        await persistSessionSnapshot();
         forceRender();
       },
-      [forceRender, requestAssistantFromLlama]
+      [forceRender, persistSessionSnapshot, requestAssistantFromLlama]
     );
 
     const processSubmittedInput = useCallback(
@@ -1345,6 +1481,7 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
 
           if (result.action === "clear") {
             resetSession(currentState);
+            await refreshSessionActivity();
           }
 
           if (result.uiAction?.type === "open-downloader") {
@@ -1371,9 +1508,25 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
             return;
           }
 
+          if (result.uiAction?.type === "open-sessions") {
+            await refreshSessionActivity();
+            if (currentState.sessionList.length === 0) {
+              appendOutput(currentState, formatDimMessage("No session history found."));
+              appendOutput(currentState, "");
+              forceRender();
+              return;
+            }
+            currentState.uiMode = "sessions";
+            currentState.sessionSelectionIndex = 0;
+            composerRef.current = createComposer();
+            forceRender();
+            return;
+          }
+
           forceRender();
 
           if (result.action === "exit") {
+            await persistSessionSnapshot();
             currentState.running = false;
             exit();
           }
@@ -1388,6 +1541,8 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
         exit,
         forceRender,
         handleUserMessage,
+        persistSessionSnapshot,
+        refreshSessionActivity,
         refreshModelManagerModels,
         scheduleDownloaderSearch
       ]
@@ -1403,11 +1558,13 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
         }
 
         if (event.type === "cancel") {
-          const currentState = stateRef.current;
-          if (currentState) {
-            currentState.running = false;
-          }
-          exit();
+          void persistSessionSnapshot().finally(() => {
+            const currentState = stateRef.current;
+            if (currentState) {
+              currentState.running = false;
+            }
+            exit();
+          });
           return;
         }
 
@@ -1420,7 +1577,7 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
 
         forceRender();
       },
-      [exit, forceRender, processSubmittedInput]
+      [exit, forceRender, persistSessionSnapshot, processSubmittedInput]
     );
 
     useEffect(() => {
@@ -1454,6 +1611,49 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
         }
 
         if (actions.length === 0) {
+          return;
+        }
+
+        if (currentState.uiMode === "sessions") {
+          if (currentState.sessionList.length === 0) {
+            currentState.uiMode = "chat";
+            forceRender();
+            return;
+          }
+
+          for (const action of actions) {
+            if (action.type === "cancel") {
+              currentState.uiMode = "chat";
+              forceRender();
+              return;
+            }
+
+            if (action.type === "move-up") {
+              const total = currentState.sessionList.length;
+              currentState.sessionSelectionIndex =
+                (currentState.sessionSelectionIndex - 1 + total) % total;
+              continue;
+            }
+
+            if (action.type === "move-down") {
+              const total = currentState.sessionList.length;
+              currentState.sessionSelectionIndex = (currentState.sessionSelectionIndex + 1) % total;
+              continue;
+            }
+
+            if (action.type === "submit") {
+              const selected = currentState.sessionList[currentState.sessionSelectionIndex];
+              if (selected) {
+                void loadSessionIntoState(selected.path);
+              } else {
+                currentState.uiMode = "chat";
+                forceRender();
+              }
+              return;
+            }
+          }
+
+          forceRender();
           return;
         }
 
@@ -1746,8 +1946,10 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
 
         for (const action of actions) {
           if (action.type === "cancel") {
-            currentState.running = false;
-            exit();
+            void persistSessionSnapshot().finally(() => {
+              currentState.running = false;
+              exit();
+            });
             return;
           }
 
@@ -1806,9 +2008,11 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
       downloadFromDownloaderSelection,
       exit,
       forceRender,
+      loadSessionIntoState,
       loadDownloaderFiles,
       loadDownloaderModels,
       normalizeDownloaderQuery,
+      persistSessionSnapshot,
       preloadDownloaderTabs,
       syncModelManagerSearchFromComposer,
       syncDownloaderSearchFromComposer,
@@ -1826,7 +2030,7 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
     const titleLines = renderTitleBox(buildTitleBoxOptions(state, version, dimensions.columns));
     const promptLines = buildPromptRenderLines(dimensions.columns, statusText, promptLayout, true);
     const autocompleteOverlay =
-      state.uiMode === "downloader" || state.uiMode === "model-manager"
+      state.uiMode === "downloader" || state.uiMode === "model-manager" || state.uiMode === "sessions"
         ? []
         : buildAutocompleteOverlayLines(composer, registryRef.current);
 

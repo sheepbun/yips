@@ -2019,3 +2019,37 @@ Validation:
 - `npm run lint` — clean
 Next:
 - Optional manual visual check with `npm run dev` to verify no timestamp/header appears before first streaming token and color pulsing looks right in your terminal.
+
+## 2026-02-24 22:11 UTC — Exchange 59
+Summary: Added latest assistant output throughput to chat prompt footer so status now renders `provider/model/x.x tk/s` after a response completes.
+Changed:
+- Updated `src/tui.ts`:
+  - added runtime state field `latestOutputTokensPerSecond` with initialization and session-reset clearing.
+  - added exported helpers `computeTokensPerSecond(...)` and `formatTokensPerSecond(...)`.
+  - updated chat-mode prompt status builder to render slash-delimited status and append throughput when available.
+  - instrumented llama request paths (streaming, non-streaming, and non-stream fallback after stream failure) to capture completion token count + generation duration and return metrics from `requestAssistantFromLlama(...)`.
+  - updated assistant reply handling to persist latest throughput from the most recent successful response.
+- Updated `tests/tui-busy-indicator.test.ts`:
+  - added footer regression tests for throughput suffix and unresolved-model provider-only behavior.
+  - added helper tests for throughput computation and `x.x tk/s` formatting.
+Validation:
+- `npm test -- tests/tui-busy-indicator.test.ts tests/tui-resize-render.test.ts tests/prompt-box.test.ts` — clean
+- `npm test` — clean (24 files, 247 tests)
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+Next:
+- Optional interactive check with `npm run dev` to confirm the displayed `tk/s` value feels accurate against real model output cadence.
+
+## 2026-02-24 22:14 UTC — Exchange 60
+Summary: Restored middle-dot separators in chat prompt footer status while keeping latest `tk/s` throughput suffix.
+Changed:
+- Updated `src/tui.ts`:
+  - changed chat-mode prompt status joiner from `" / "` back to `" · "`.
+- Updated `tests/tui-busy-indicator.test.ts`:
+  - adjusted throughput footer expectation to `llama.cpp · example · 37.3 tk/s`.
+  - updated status-format assertion to expect ` · ` separator.
+Validation:
+- `npm test -- tests/tui-busy-indicator.test.ts` — clean (8 passing)
+- `npm run typecheck` — clean
+Next:
+- Optional interactive check with `npm run dev` to verify footer visual spacing with the restored middle-dot separators.

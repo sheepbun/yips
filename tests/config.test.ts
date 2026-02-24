@@ -22,6 +22,7 @@ const originalLlamaAutoStart = process.env["YIPS_LLAMA_AUTO_START"];
 const originalLlamaPortConflictPolicy = process.env["YIPS_LLAMA_PORT_CONFLICT_POLICY"];
 const originalTokensMode = process.env["YIPS_TOKENS_MODE"];
 const originalTokensManualMax = process.env["YIPS_TOKENS_MANUAL_MAX"];
+const originalConfigPath = process.env["YIPS_CONFIG_PATH"];
 
 afterEach(() => {
   if (originalLlamaBaseUrl === undefined) {
@@ -94,6 +95,12 @@ afterEach(() => {
     delete process.env["YIPS_TOKENS_MANUAL_MAX"];
   } else {
     process.env["YIPS_TOKENS_MANUAL_MAX"] = originalTokensManualMax;
+  }
+
+  if (originalConfigPath === undefined) {
+    delete process.env["YIPS_CONFIG_PATH"];
+  } else {
+    process.env["YIPS_CONFIG_PATH"] = originalConfigPath;
   }
 });
 
@@ -254,5 +261,48 @@ describe("loadConfig", () => {
     expect(updated.backend).toBe("claude");
     expect(updated.model).toBe("qwen3");
     expect(updated.nicknames).toEqual({ qwen3: "q3" });
+  });
+
+  it("uses YIPS_CONFIG_PATH for default config location", async () => {
+    const dir = await createTempDir();
+    const envConfigPath = join(dir, "env-config.json");
+    process.env["YIPS_CONFIG_PATH"] = envConfigPath;
+
+    await saveConfig({
+      ...getDefaultConfig(),
+      model: "env-model",
+      nicknames: { "env-model": "env-nick" }
+    });
+
+    const loaded = await loadConfig();
+    expect(loaded.path).toBe(envConfigPath);
+    expect(loaded.config.model).toBe("env-model");
+    expect(loaded.config.nicknames["env-model"]).toBe("env-nick");
+  });
+
+  it("falls back to legacy .yips_config.json when YIPS_CONFIG_PATH is missing", async () => {
+    const dir = await createTempDir();
+    const originalCwd = process.cwd();
+    process.chdir(dir);
+
+    try {
+      process.env["YIPS_CONFIG_PATH"] = join(dir, "missing-env-config.json");
+      const legacyConfigPath = join(dir, ".yips_config.json");
+      await writeFile(
+        legacyConfigPath,
+        JSON.stringify({
+          model: "legacy-model",
+          nicknames: { "legacy-model": "legacy-nick" }
+        }),
+        "utf8"
+      );
+
+      const loaded = await loadConfig();
+      expect(loaded.path).toBe(legacyConfigPath);
+      expect(loaded.config.model).toBe("legacy-model");
+      expect(loaded.config.nicknames["legacy-model"]).toBe("legacy-nick");
+    } finally {
+      process.chdir(originalCwd);
+    }
   });
 });

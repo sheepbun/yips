@@ -9,6 +9,8 @@ import type { SessionContext } from "../src/commands";
 import { loadConfig } from "../src/config";
 import { getDefaultConfig } from "../src/config";
 
+const originalConfigPath = process.env["YIPS_CONFIG_PATH"];
+
 function createContext(): SessionContext {
   return {
     config: getDefaultConfig(),
@@ -18,6 +20,11 @@ function createContext(): SessionContext {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  if (originalConfigPath === undefined) {
+    delete process.env["YIPS_CONFIG_PATH"];
+  } else {
+    process.env["YIPS_CONFIG_PATH"] = originalConfigPath;
+  }
 });
 
 describe("parseCommand", () => {
@@ -115,7 +122,7 @@ describe("createDefaultRegistry", () => {
     expect(registry.has("backend")).toBe(true);
     expect(registry.has("sessions")).toBe(true);
     expect(registry.has("download")).toBe(true);
-    expect(registry.has("models")).toBe(true);
+    expect(registry.has("models")).toBe(false);
     expect(registry.has("search")).toBe(true);
     expect(registry.has("vt")).toBe(true);
   });
@@ -261,13 +268,6 @@ describe("createDefaultRegistry", () => {
       delete process.env["YIPS_MODELS_DIR"];
       await rm(dir, { recursive: true, force: true });
     }
-  });
-
-  it("/models opens model manager and ignores args", async () => {
-    const registry = createDefaultRegistry();
-    const result = await registry.dispatch("models", "anything", createContext());
-    expect(result.action).toBe("continue");
-    expect(result.uiAction).toEqual({ type: "open-model-manager" });
   });
 
   it("/sessions opens interactive session picker", async () => {

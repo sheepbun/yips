@@ -2114,3 +2114,90 @@ Validation:
 - `npm run typecheck` — clean
 Next:
 - Optional interactive verification with `npm run dev` to confirm the gap-fill and title-bump behavior feels correct during live chat output.
+
+## 2026-02-24 22:59 UTC — Exchange 63
+Summary: Enforced fresh llama.cpp startup sessions by resetting local server/model residency before TUI launch and failing fast on reset/start errors.
+Changed:
+- Updated `src/llama-server.ts`:
+  - added localhost endpoint detection helpers (`isLocalLlamaEndpoint`, internal hostname normalization).
+  - added `resetLlamaForFreshSession(config, overrides?)`:
+    - no-op for non-local llama endpoints,
+    - stops managed llama-server state,
+    - starts a fresh llama-server process/model load for local endpoints.
+- Updated `src/tui.ts`:
+  - startup now calls `ensureFreshLlamaSessionOnStartup(...)` before rendering Ink UI.
+  - added exported `ensureFreshLlamaSessionOnStartup(...)` helper for testable startup preflight logic.
+  - startup now throws with formatted diagnostics when local reset/start fails (fail-fast).
+  - removed previous startup warning-only preflight effect that allowed continuing after failed startup checks.
+- Added tests:
+  - `tests/tui-startup-reset.test.ts` for startup preflight behavior (skip non-llama backend, call reset for llama backend, throw on failure).
+  - expanded `tests/llama-server.test.ts` for endpoint locality and fresh-session reset behavior.
+- Updated `docs/changelog.md` Unreleased `Changed` section with fresh-session startup reset behavior.
+Validation:
+- `npm test -- tests/llama-server.test.ts tests/tui-startup-reset.test.ts` — clean
+- `npm test` — clean (26 files, 262 tests)
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+Next:
+- Optional manual runtime check with `npm run dev` to verify expected startup fail-fast behavior when model/binary config is invalid and fresh local model reload behavior when valid.
+
+## 2026-02-24 23:02 UTC — Exchange 64
+Summary: Fixed startup regression so Yips no longer fatals when config model is `default` while preserving fresh-session fail-fast behavior for concrete llama models.
+Changed:
+- Updated `src/tui.ts`:
+  - `ensureFreshLlamaSessionOnStartup(...)` now skips startup reset when `config.model` is empty or `default`.
+  - keeps existing reset + fail-fast path for explicit configured llama models.
+- Updated `tests/tui-startup-reset.test.ts`:
+  - added regression test asserting reset is skipped when no concrete model is selected.
+  - adjusted reset-path test to use a concrete model id (`qwen.gguf`).
+Validation:
+- `npm test -- tests/tui-startup-reset.test.ts tests/llama-server.test.ts` — clean
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+Next:
+- Re-run `yips` and confirm startup succeeds with `model: "default"`; then select a model via `/model` or `/download` for fresh-session startup reload behavior.
+
+## 2026-02-24 23:07 UTC — Exchange 65
+Summary: Fixed model/nickname persistence drift by introducing a canonical config-path override (`YIPS_CONFIG_PATH`) with legacy fallback loading.
+Changed:
+- Updated `src/config.ts`:
+  - added `CONFIG_PATH_ENV_VAR` (`YIPS_CONFIG_PATH`).
+  - `resolveConfigPath()` now honors `YIPS_CONFIG_PATH` for default config resolution.
+  - `loadConfig()` now attempts canonical resolved path first, then legacy `./.yips_config.json` fallback when default path is env-driven and missing.
+  - preserves env overrides while avoiding silent path drift between sessions.
+- Updated installer wiring in `install.sh`:
+  - changed installer-managed config target to `~/.yips/config.json`.
+  - `~/.yips/env.sh` now exports `YIPS_CONFIG_PATH`.
+  - env-file rewrite filter now de-duplicates old `YIPS_CONFIG_PATH` entries.
+- Updated tests:
+  - `tests/config.test.ts` now restores `YIPS_CONFIG_PATH`, verifies env-path persistence behavior, and verifies legacy fallback loading.
+  - `tests/commands.test.ts` now restores `YIPS_CONFIG_PATH` to keep command persistence tests isolated.
+- Updated docs:
+  - `docs/guides/getting-started.md` now documents config loading via `YIPS_CONFIG_PATH` (with `.yips_config.json` fallback behavior).
+  - `docs/changelog.md` updated under Unreleased `Changed`.
+Validation:
+- `npm test -- tests/config.test.ts tests/commands.test.ts` — clean
+- `npm test` — clean (26 files, 265 tests)
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+Next:
+- Re-source `~/.yips/env.sh` in active shells (or open a new shell) so `YIPS_CONFIG_PATH` is active, then verify `/model` and `/nick` survive restart.
+
+## 2026-02-24 23:12 UTC — Exchange 66
+Summary: Removed redundant `/models` command so `/model` is the single Model Manager entrypoint.
+Changed:
+- Updated `src/commands.ts`:
+  - removed `/models` command registration and handler.
+- Updated `src/command-catalog.ts`:
+  - removed `/models` descriptor from restored command defaults.
+- Updated `tests/commands.test.ts`:
+  - adjusted command presence expectation to assert `/models` is absent.
+  - removed `/models` behavior test.
+- Updated docs:
+  - `docs/guides/slash-commands.md` command table and complete-list block now omit `/models`.
+Validation:
+- `npm test -- tests/commands.test.ts tests/command-catalog.test.ts` — clean
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+Next:
+- Optional: run `npm run dev` and verify `/model` still opens Model Manager with no args and `/models` now reports unknown command.

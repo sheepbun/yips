@@ -18,7 +18,6 @@ Slash commands are user-facing commands typed directly into the Yips TUI input. 
 |---------|-------------|
 | `/model` | Open the Model Manager (list local models, switch, delete, jump to downloader) |
 | `/model <name>` | Switch to a model by local exact/partial match, with free-form fallback |
-| `/models` | Open the Model Manager (UI alias) |
 | `/download`, `/dl` | Open the interactive model downloader |
 | `/download <hf_url>` | Download a GGUF file from a direct `hf.co` / `huggingface.co` resolve URL |
 | `/backend` | Show current backend |
@@ -63,7 +62,7 @@ All commands recognized by yips-cli, carried forward to the TypeScript rewrite:
 ```
 /backend    /clear      /dl         /download   /exit
 /fetch      /grab       /help       /memorize   /model
-/models     /new        /nick       /quit       /search
+/new        /nick       /quit       /search
 /sessions   /stream     /tokens     /verbose    /vt
 ```
 

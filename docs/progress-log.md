@@ -1606,3 +1606,100 @@ Validation:
 - `npm test` — clean (22 files, 219 tests)
 Next:
 - Optionally add a focused integration test for restart loop behavior in `src/index.ts` by mocking mode returns (`restart` then `exit`).
+
+## 2026-02-24 19:43 UTC — Exchange 38
+Summary: Polished Model Downloader UI with bold header/tab typography, separate RAM/VRAM display, aligned model-detail columns, and gradient-styled model footer commands.
+Changed:
+- Updated `src/downloader-ui.ts`:
+  - made top border title text (`Yips Model Downloader`) bold while preserving existing gradient border styling.
+  - made all downloader tab labels bold (active and inactive).
+  - changed hardware summary text from combined `RAM+VRAM` to separate `RAM`, `VRAM`, and `Disk` values.
+  - reworked model list body rendering into fixed aligned columns with a header row:
+    - `Model | DL | Likes | Size | Updated`
+  - kept frame height stable by using 1 header + 9 model rows in the same 10-row body area.
+  - applied pink→yellow gradient styling to the model-list footer command line (`[Enter] Select ... [Esc] Close`) only.
+- Updated `src/tui.ts`:
+  - adjusted downloader model selection window size from `10` to `9` rows to match the new visible model-row count below the header.
+- Updated `tests/downloader-ui.test.ts`:
+  - added coverage for bold title/tabs, separate RAM/VRAM rendering, column alignment consistency, and gradient footer behavior in models view.
+  - added assertion that file-view footer remains non-gradient.
+Validation:
+- `npm test -- tests/downloader-ui.test.ts` — clean (6 passing)
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+Next:
+- Optionally run a full interactive visual check with `npm run dev` to confirm column readability and footer gradient appearance in your terminal theme.
+
+## 2026-02-24 19:48 UTC — Exchange 39
+Summary: Adjusted downloader model metric glyph placement so DL and Likes icons trail values while keeping aligned columns.
+Changed:
+- Updated `src/downloader-ui.ts`:
+  - changed DL cell formatting from `↓value` to `value↓`.
+  - changed Likes cell formatting from `♥value` to `value♥`.
+- Updated `tests/downloader-ui.test.ts`:
+  - revised aligned-row assertions to expect `12.3k↓` and `540♥`.
+Validation:
+- `npm test -- tests/downloader-ui.test.ts` — clean (6 passing)
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+Next:
+- Optional visual check in `npm run dev` to confirm terminal font renders trailing glyph alignment as expected.
+
+## 2026-02-24 19:55 UTC — Exchange 40
+Summary: Fixed segmented-border gradient restarts so downloader top border and prompt bottom border now render as continuous left-to-right gradients.
+Changed:
+- Updated `src/colors.ts`:
+  - added `horizontalGradientAtOffset(...)` helper to render gradients using absolute column offsets for segmented strings.
+- Updated `src/downloader-ui.ts`:
+  - rewired `makeBorderTop(...)` to color prefix/title/tail/fill/right-corner with absolute-offset gradient coloring.
+  - preserved bold title styling while removing gradient restart around title segment.
+- Updated `src/tui.ts`:
+  - rewired prompt bottom border rendering in `buildPromptRenderLines(...)`:
+    - left corner, fill, and right corner now use absolute-offset gradient coloring.
+    - status text remains blue, but border gradient no longer restarts at fill.
+- Updated tests:
+  - `tests/downloader-ui.test.ts` added top-border continuity assertion ensuring title segment does not reset to start-pink.
+  - `tests/tui-resize-render.test.ts` added bottom-border continuity assertion ensuring fill column does not reset to start-pink.
+Validation:
+- `npm test -- tests/downloader-ui.test.ts tests/tui-resize-render.test.ts` — clean (23 passing)
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+Next:
+- Optional visual check via `npm run dev` in your terminal to confirm continuity looks correct under your font/ANSI renderer.
+
+## 2026-02-24 19:57 UTC — Exchange 41
+Summary: Restored standalone title gradient for downloader header text while keeping continuous border gradient behavior outside the title segment.
+Changed:
+- Updated `src/downloader-ui.ts`:
+  - `makeBorderTop(...)` now renders `Yips Model Downloader` with its own local pink→yellow gradient again.
+  - retained offset-based border gradient coloring for prefix/tail/fill/right-corner so non-title border segments do not restart.
+- Updated `tests/downloader-ui.test.ts`:
+  - revised top-border gradient assertion to require title-start pink (standalone title gradient) and non-pink continuation after the title segment.
+Validation:
+- `npm test -- tests/downloader-ui.test.ts tests/tui-resize-render.test.ts` — clean (23 passing)
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+Next:
+- Optional visual pass in `npm run dev` to confirm this exactly matches your intended title-vs-border gradient behavior.
+
+## 2026-02-24 19:59 UTC — Exchange 42
+Summary: Updated downloader and model-manager title styling so `Yips` stays pink/yellow gradient and the feature label is light blue, matching title-box style intent.
+Changed:
+- Updated `src/downloader-ui.ts`:
+  - `makeBorderTop(...)` now renders title in two parts:
+    - `Yips` with pink→yellow gradient
+    - ` Model Downloader` in `GRADIENT_BLUE`
+  - kept bold title styling and existing offset-based border gradient for non-title segments.
+- Updated `src/model-manager-ui.ts`:
+  - `makeBorderTop(...)` now renders:
+    - `Yips` with pink→yellow gradient
+    - ` Model Manager ` in `GRADIENT_BLUE`
+- Updated tests:
+  - `tests/downloader-ui.test.ts` now asserts downloader top line includes light-blue title segment coloring.
+  - `tests/model-manager-ui.test.ts` now asserts model-manager top line includes light-blue title segment coloring.
+Validation:
+- `npm test -- tests/downloader-ui.test.ts tests/model-manager-ui.test.ts tests/tui-resize-render.test.ts` — clean (26 passing)
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+Next:
+- Optional visual check in `npm run dev` to confirm the title split looks exactly as intended in your terminal font/theme.

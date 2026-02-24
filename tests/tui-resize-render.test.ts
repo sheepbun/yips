@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { GRADIENT_PINK } from "../src/colors";
 import { createDefaultRegistry } from "../src/commands";
 import { buildPromptBoxFrame } from "../src/prompt-box";
 import { buildPromptComposerLayout, PromptComposer } from "../src/prompt-composer";
@@ -16,6 +17,36 @@ const INPUT_PINK_ANSI = "\u001b[38;2;255;204;255m";
 const MODEL_INFO_BLUE_ANSI = "\u001b[38;2;137;207;240m";
 const MENU_SELECTION_REVERSE_ANSI = "\u001b[7m";
 const OLD_MENU_SELECTION_BG_ANSI = "\u001b[48;2;35;35;35m";
+
+function colorCodeBeforeColumn(markupLine: string, plainColumn: number): string {
+  let plainCount = 0;
+  let activeColor = "";
+
+  for (let i = 0; i < markupLine.length; i++) {
+    const char = markupLine[i] ?? "";
+    if (char === "\u001b" && markupLine[i + 1] === "[") {
+      const endIndex = markupLine.indexOf("m", i);
+      if (endIndex >= 0) {
+        if (markupLine.startsWith("\u001b[38;2;", i)) {
+          activeColor = markupLine.slice(i, endIndex + 1);
+        }
+        i = endIndex;
+      }
+      continue;
+    }
+
+    if (plainCount === plainColumn) {
+      return activeColor;
+    }
+    plainCount += 1;
+  }
+
+  return activeColor;
+}
+
+function toAnsiForeground(color: { r: number; g: number; b: number }): string {
+  return `\u001b[38;2;${Math.round(color.r)};${Math.round(color.g)};${Math.round(color.b)}m`;
+}
 
 describe("buildPromptRenderLines", () => {
   it("renders rounded prompt frame with prefix, content, and cursor", () => {
@@ -68,6 +99,15 @@ describe("buildPromptRenderLines", () => {
     expect(Array.from(lines[lines.length - 1] ?? "").length).toBe(16);
     expect(lines[lines.length - 1]?.startsWith("╰")).toBe(true);
     expect(lines[lines.length - 1]?.endsWith("╯")).toBe(true);
+  });
+
+  it("keeps bottom border gradient continuous before status text", () => {
+    const layout = buildPromptComposerLayout("hello", 5, 20, ">>> ");
+    const lines = buildPromptRenderLines(40, "llama.cpp · qwen3", layout, false);
+    const bottomLine = lines[lines.length - 1] ?? "";
+
+    expect(colorCodeBeforeColumn(bottomLine, 0)).toBe(toAnsiForeground(GRADIENT_PINK));
+    expect(colorCodeBeforeColumn(bottomLine, 1)).not.toBe(toAnsiForeground(GRADIENT_PINK));
   });
 });
 

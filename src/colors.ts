@@ -121,6 +121,35 @@ export function horizontalGradient(text: string, startColor: Rgb, endColor: Rgb)
   return gradientChars.join("");
 }
 
+/**
+ * Apply a horizontal gradient to a string using an absolute offset in a larger line.
+ * Useful when rendering segmented strings that should share one continuous gradient.
+ */
+export function horizontalGradientAtOffset(
+  text: string,
+  startColor: Rgb,
+  endColor: Rgb,
+  offset: number,
+  totalWidth: number
+): string {
+  const chars = Array.from(text);
+  if (chars.length === 0) return "";
+
+  const safeTotalWidth = Math.max(1, totalWidth);
+  const denominator = Math.max(1, safeTotalWidth - 1);
+  const baseOffset = Math.max(0, offset);
+
+  const gradientChars: string[] = [];
+  for (let i = 0; i < chars.length; i++) {
+    const t = Math.max(0, Math.min(1, (baseOffset + i) / denominator));
+    const color = interpolateColor(startColor, endColor, t);
+    gradientChars.push(colorChar(chars[i] ?? "", color));
+  }
+
+  gradientChars.push(ANSI_RESET_FOREGROUND);
+  return gradientChars.join("");
+}
+
 /** Apply a left-to-right background gradient across a string. */
 export function horizontalGradientBackground(
   text: string,

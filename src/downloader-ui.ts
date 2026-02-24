@@ -6,6 +6,7 @@ import {
   GRADIENT_PINK,
   GRADIENT_YELLOW,
   horizontalGradient,
+  horizontalGradientAtOffset,
   horizontalGradientBackground,
   stripAnsi,
   SUCCESS_GREEN,
@@ -18,6 +19,8 @@ const BLACK: Rgb = { r: 0x00, g: 0x00, b: 0x00 };
 const FOCUS_ACCENT_BG: Rgb = { r: 0xff, g: 0xcc, b: 0xff };
 const DOWNLOADER_MODEL_BODY_ROWS = 10;
 const DOWNLOADER_FILE_BODY_ROWS = 10;
+const ANSI_BOLD_ON = "\u001b[1m";
+const ANSI_BOLD_OFF = "\u001b[22m";
 
 interface DownloaderRenderOptions {
   width: number;
@@ -68,18 +71,27 @@ function formatSize(bytes: number | null): string {
 function tabText(tab: DownloaderTab, activeTab: DownloaderTab): string {
   const label = ` ${tab} `;
   if (tab === activeTab) {
-    return horizontalGradientBackground(label, GRADIENT_PINK, GRADIENT_YELLOW, BLACK);
+    return `${ANSI_BOLD_ON}${horizontalGradientBackground(label, GRADIENT_PINK, GRADIENT_YELLOW, BLACK)}${ANSI_BOLD_OFF}`;
   }
-  return colorText(label, TAB_INACTIVE);
+  return `${ANSI_BOLD_ON}${colorText(label, TAB_INACTIVE)}${ANSI_BOLD_OFF}`;
 }
 
 function makeBorderTop(width: number): string {
   if (width <= 1) return "╭";
 
-  const title = "╭─── Yips Model Downloader ";
-  const plainTitleLen = charLength(title);
+  const prefix = "╭─── ";
+  const titleBrand = "Yips";
+  const titleDetail = " Model Downloader";
+  const titleTail = " ";
+  const prefixLen = charLength(prefix);
+  const titleBrandLen = charLength(titleBrand);
+  const titleDetailLen = charLength(titleDetail);
+  const titleTailLen = charLength(titleTail);
+  const plainTitleLen = prefixLen + titleBrandLen + titleDetailLen + titleTailLen;
   const fill = "─".repeat(Math.max(0, width - plainTitleLen - 1));
-  return `${horizontalGradient(title, GRADIENT_PINK, GRADIENT_YELLOW)}${horizontalGradient(fill, GRADIENT_PINK, GRADIENT_YELLOW)}${colorText("╮", GRADIENT_YELLOW)}`;
+  const fillOffset = prefixLen + titleBrandLen + titleDetailLen + titleTailLen;
+  const cornerOffset = width - 1;
+  return `${horizontalGradientAtOffset(prefix, GRADIENT_PINK, GRADIENT_YELLOW, 0, width)}${ANSI_BOLD_ON}${horizontalGradient(titleBrand, GRADIENT_PINK, GRADIENT_YELLOW)}${colorText(titleDetail, GRADIENT_BLUE)}${ANSI_BOLD_OFF}${horizontalGradientAtOffset(titleTail, GRADIENT_PINK, GRADIENT_YELLOW, prefixLen + titleBrandLen + titleDetailLen, width)}${horizontalGradientAtOffset(fill, GRADIENT_PINK, GRADIENT_YELLOW, fillOffset, width)}${horizontalGradientAtOffset("╮", GRADIENT_PINK, GRADIENT_YELLOW, cornerOffset, width)}`;
 }
 
 function makeBorderBottom(width: number): string {
@@ -130,17 +142,30 @@ function buildModelRows(state: DownloaderState, contentWidth: number, rowCount: 
     return rows;
   }
 
+  const dlWidth = 8;
+  const likesWidth = 7;
+  const sizeWidth = 6;
+  const dateWidth = 10;
+  const staticWidth = 2 + 3 + dlWidth + 3 + likesWidth + 3 + sizeWidth + 3 + dateWidth;
+  const modelWidth = Math.max(8, contentWidth - staticWidth);
+
+  const header = `  ${"Model".padEnd(modelWidth, " ")} | ${"DL".padStart(dlWidth, " ")} | ${"Likes".padStart(likesWidth, " ")} | ${"Size".padStart(sizeWidth, " ")} | ${"Updated".padStart(dateWidth, " ")}`;
+  rows.push(colorText(header, GRADIENT_BLUE));
+
+  const visibleRowCount = Math.max(0, rowCount - 1);
   const start = state.modelScrollOffset;
-  const end = Math.min(state.models.length, start + rowCount);
+  const end = Math.min(state.models.length, start + visibleRowCount);
   for (let index = start; index < end; index++) {
     const model = state.models[index];
     if (!model) continue;
 
     const prefix = index === state.selectedModelIndex ? ">" : " ";
-    const leftWidth = Math.max(10, contentWidth - 35);
-    const left = fitLeft(model.id, leftWidth);
-    const stats = `↓${formatCount(model.downloads)} ♥${formatCount(model.likes)} ${formatSize(model.sizeBytes)} ${model.lastModified.slice(0, 10)}`;
-    const row = `${prefix} ${left.padEnd(leftWidth, " ")} | ${fitRight(stats, 30)}`;
+    const modelCell = fitLeft(model.id, modelWidth).padEnd(modelWidth, " ");
+    const downloadsCell = `${formatCount(model.downloads)}↓`.padStart(dlWidth, " ");
+    const likesCell = `${formatCount(model.likes)}♥`.padStart(likesWidth, " ");
+    const sizeCell = formatSize(model.sizeBytes).padStart(sizeWidth, " ");
+    const dateCell = model.lastModified.slice(0, 10).padStart(dateWidth, " ");
+    const row = `${prefix} ${modelCell} | ${downloadsCell} | ${likesCell} | ${sizeCell} | ${dateCell}`;
     rows.push(index === state.selectedModelIndex ? highlightedRow(row) : row);
   }
 
@@ -244,14 +269,15 @@ export function renderDownloaderLines(options: DownloaderRenderOptions): string[
       tabText("Top Rated", state.tab),
       tabText("Newest", state.tab)
     ].join(" ");
-    const memText = `RAM+VRAM: ${state.totalMemoryGb.toFixed(1)}GB | Disk: ${state.diskFreeGb.toFixed(1)}GB`;
-    const tabsWidth = Math.max(1, innerWidth - 32);
+    const memText = `RAM: ${state.ramGb.toFixed(1)}GB | VRAM: ${state.vramGb.toFixed(1)}GB | Disk: ${state.diskFreeGb.toFixed(1)}GB`;
+    const memWidth = Math.min(charLength(memText), Math.max(24, innerWidth - 10));
+    const tabsWidth = Math.max(1, innerWidth - memWidth - 1);
     let tabsCell = tabs;
     if (charLength(tabsCell) > tabsWidth) {
       tabsCell = fitLeft(" Most Downloaded   Top Rated   Newest ", tabsWidth);
     }
     const tabsPadding = " ".repeat(Math.max(0, tabsWidth - charLength(tabsCell)));
-    rows.push(lineWithBorders(`${tabsCell}${tabsPadding} ${fitRight(memText, 31)}`, innerWidth));
+    rows.push(lineWithBorders(`${tabsCell}${tabsPadding} ${fitRight(memText, memWidth)}`, innerWidth));
   }
 
   let bodyRows: string[] = [];
@@ -293,7 +319,14 @@ export function renderDownloaderLines(options: DownloaderRenderOptions): string[
       state.view === "models"
         ? "[Enter] Select  [↑/↓] Move  [←/→] Sort  [Esc] Close"
         : "[Enter] Download  [↑/↓] Move  [Esc] Back";
-    rows.push(lineWithBorders(footer, innerWidth));
+    rows.push(
+      lineWithBorders(
+        state.view === "models"
+          ? horizontalGradient(footer, GRADIENT_PINK, GRADIENT_YELLOW)
+          : footer,
+        innerWidth
+      )
+    );
   }
   rows.push(makeBorderBottom(width));
 

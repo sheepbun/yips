@@ -1,6 +1,7 @@
 import {
   bgColorText,
   colorText,
+  GRADIENT_BLUE,
   GRADIENT_PINK,
   GRADIENT_YELLOW,
   horizontalGradient,
@@ -49,10 +50,12 @@ function fitRight(text: string, width: number): string {
 function makeBorderTop(width: number): string {
   if (width <= 1) return "╭";
 
-  const title = "╭─── Yips Model Manager ";
-  const plainTitleLen = charLength(title);
+  const prefix = "╭─── ";
+  const titleBrand = "Yips";
+  const titleDetail = " Model Manager ";
+  const plainTitleLen = charLength(`${prefix}${titleBrand}${titleDetail}`);
   const fill = "─".repeat(Math.max(0, width - plainTitleLen - 1));
-  return `${horizontalGradient(title, GRADIENT_PINK, GRADIENT_YELLOW)}${horizontalGradient(fill, GRADIENT_PINK, GRADIENT_YELLOW)}${colorText("╮", GRADIENT_YELLOW)}`;
+  return `${horizontalGradient(prefix, GRADIENT_PINK, GRADIENT_YELLOW)}${horizontalGradient(titleBrand, GRADIENT_PINK, GRADIENT_YELLOW)}${colorText(titleDetail, GRADIENT_BLUE)}${horizontalGradient(fill, GRADIENT_PINK, GRADIENT_YELLOW)}${colorText("╮", GRADIENT_YELLOW)}`;
 }
 
 function makeBorderBottom(width: number): string {

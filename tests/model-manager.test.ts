@@ -147,6 +147,14 @@ describe("model-manager", () => {
     expect(friendly).toBe("qwen-3");
   });
 
+  it("prefers exact model-id nickname when present", () => {
+    const friendly = getFriendlyModelName("org/repo/model-q4.gguf", {
+      "org/repo/model-q4.gguf": "q4-fast",
+      repo: "repo-nick"
+    });
+    expect(friendly).toBe("q4-fast");
+  });
+
   it("uses parent folder as the default name for nested model variants", () => {
     const friendly = getFriendlyModelName(
       "Qwen/Qwen3-VL-2B-Instruct-GGUF/Qwen3VL-2B-Instruct-Q4_K_M.gguf",

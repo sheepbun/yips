@@ -12,6 +12,13 @@ async function createTempDir(): Promise<string> {
 
 const originalLlamaBaseUrl = process.env["YIPS_LLAMA_BASE_URL"];
 const originalModel = process.env["YIPS_MODEL"];
+const originalLlamaHost = process.env["YIPS_LLAMA_HOST"];
+const originalLlamaPort = process.env["YIPS_LLAMA_PORT"];
+const originalLlamaServerPath = process.env["YIPS_LLAMA_SERVER_PATH"];
+const originalLlamaModelsDir = process.env["YIPS_LLAMA_MODELS_DIR"];
+const originalLlamaContextSize = process.env["YIPS_LLAMA_CONTEXT_SIZE"];
+const originalLlamaGpuLayers = process.env["YIPS_LLAMA_GPU_LAYERS"];
+const originalLlamaAutoStart = process.env["YIPS_LLAMA_AUTO_START"];
 
 afterEach(() => {
   if (originalLlamaBaseUrl === undefined) {
@@ -24,6 +31,48 @@ afterEach(() => {
     delete process.env["YIPS_MODEL"];
   } else {
     process.env["YIPS_MODEL"] = originalModel;
+  }
+
+  if (originalLlamaHost === undefined) {
+    delete process.env["YIPS_LLAMA_HOST"];
+  } else {
+    process.env["YIPS_LLAMA_HOST"] = originalLlamaHost;
+  }
+
+  if (originalLlamaPort === undefined) {
+    delete process.env["YIPS_LLAMA_PORT"];
+  } else {
+    process.env["YIPS_LLAMA_PORT"] = originalLlamaPort;
+  }
+
+  if (originalLlamaServerPath === undefined) {
+    delete process.env["YIPS_LLAMA_SERVER_PATH"];
+  } else {
+    process.env["YIPS_LLAMA_SERVER_PATH"] = originalLlamaServerPath;
+  }
+
+  if (originalLlamaModelsDir === undefined) {
+    delete process.env["YIPS_LLAMA_MODELS_DIR"];
+  } else {
+    process.env["YIPS_LLAMA_MODELS_DIR"] = originalLlamaModelsDir;
+  }
+
+  if (originalLlamaContextSize === undefined) {
+    delete process.env["YIPS_LLAMA_CONTEXT_SIZE"];
+  } else {
+    process.env["YIPS_LLAMA_CONTEXT_SIZE"] = originalLlamaContextSize;
+  }
+
+  if (originalLlamaGpuLayers === undefined) {
+    delete process.env["YIPS_LLAMA_GPU_LAYERS"];
+  } else {
+    process.env["YIPS_LLAMA_GPU_LAYERS"] = originalLlamaGpuLayers;
+  }
+
+  if (originalLlamaAutoStart === undefined) {
+    delete process.env["YIPS_LLAMA_AUTO_START"];
+  } else {
+    process.env["YIPS_LLAMA_AUTO_START"] = originalLlamaAutoStart;
   }
 });
 
@@ -71,10 +120,13 @@ describe("loadConfig", () => {
     expect(result.source).toBe("file");
     expect(result.warning).toBeUndefined();
     expect(result.config).toEqual({
+      ...getDefaultConfig(),
       streaming: false,
       verbose: true,
       backend: "claude",
       llamaBaseUrl: "http://localhost:9000",
+      llamaHost: "localhost",
+      llamaPort: 9000,
       model: "qwen3",
       nicknames: {}
     });
@@ -99,10 +151,13 @@ describe("loadConfig", () => {
 
     expect(result.source).toBe("file");
     expect(result.config).toEqual({
+      ...getDefaultConfig(),
       streaming: true,
       verbose: true,
       backend: "llamacpp",
       llamaBaseUrl: "http://127.0.0.1:8080",
+      llamaHost: "127.0.0.1",
+      llamaPort: 8080,
       model: "default",
       nicknames: {}
     });
@@ -127,6 +182,32 @@ describe("loadConfig", () => {
 
     expect(result.config.model).toBe("env-model");
     expect(result.config.llamaBaseUrl).toBe("http://localhost:8888");
+    expect(result.config.llamaHost).toBe("localhost");
+    expect(result.config.llamaPort).toBe(8888);
+  });
+
+  it("applies environment overrides for lifecycle fields", async () => {
+    const dir = await createTempDir();
+    const configPath = join(dir, "lifecycle-config.json");
+
+    process.env["YIPS_LLAMA_HOST"] = "0.0.0.0";
+    process.env["YIPS_LLAMA_PORT"] = "18080";
+    process.env["YIPS_LLAMA_SERVER_PATH"] = "/tmp/llama-server";
+    process.env["YIPS_LLAMA_MODELS_DIR"] = "/tmp/models";
+    process.env["YIPS_LLAMA_CONTEXT_SIZE"] = "4096";
+    process.env["YIPS_LLAMA_GPU_LAYERS"] = "77";
+    process.env["YIPS_LLAMA_AUTO_START"] = "false";
+
+    const result = await loadConfig(configPath);
+
+    expect(result.config.llamaHost).toBe("0.0.0.0");
+    expect(result.config.llamaPort).toBe(18080);
+    expect(result.config.llamaBaseUrl).toBe("http://0.0.0.0:18080");
+    expect(result.config.llamaServerPath).toBe("/tmp/llama-server");
+    expect(result.config.llamaModelsDir).toBe("/tmp/models");
+    expect(result.config.llamaContextSize).toBe(4096);
+    expect(result.config.llamaGpuLayers).toBe(77);
+    expect(result.config.llamaAutoStart).toBe(false);
   });
 
   it("persists config with saveConfig and updates with updateConfig", async () => {

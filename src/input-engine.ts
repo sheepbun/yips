@@ -259,6 +259,12 @@ export class InputEngine {
       index += 1;
     }
 
+    // Treat lone ESC as cancel (close modal/back) when it is not part of a CSI sequence.
+    if (index < this.pending.length && this.pending[index] === 0x1b && this.pending.length - index === 1) {
+      actions.push({ type: "cancel" });
+      index += 1;
+    }
+
     flushText(index);
     this.pending = this.pending.subarray(index);
     return actions;

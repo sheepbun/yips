@@ -82,4 +82,9 @@ describe("InputEngine", () => {
     const engine = new InputEngine();
     expect(engine.pushChunk(Buffer.from([0x03]))).toEqual([{ type: "cancel" }]);
   });
+
+  it("emits cancel for lone Esc", () => {
+    const engine = new InputEngine();
+    expect(engine.pushChunk(Buffer.from([0x1b]))).toEqual([{ type: "cancel" }]);
+  });
 });

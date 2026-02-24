@@ -175,16 +175,21 @@ describe("renderTitleBox", () => {
   it("renders welcome and tips headings in bold", () => {
     const lines = renderTitleBox(makeOptions({ width: 80 }));
     const plain = lines.map(stripMarkup);
+    const topText = "Yips 0.1.0";
     const welcomeText = "Welcome back katherine!";
     const tipsText = "Tips for getting started:";
+    const topIndex = plain.findIndex((line) => line.includes(topText));
     const welcomeIndex = plain.findIndex((line) => line.includes(welcomeText));
     const tipsIndex = plain.findIndex((line) => line.includes(tipsText));
 
+    expect(topIndex).toBeGreaterThan(-1);
     expect(welcomeIndex).toBeGreaterThan(-1);
     expect(tipsIndex).toBeGreaterThan(-1);
 
+    const topStart = (plain[topIndex] ?? "").indexOf(topText);
     const welcomeStart = (plain[welcomeIndex] ?? "").indexOf(welcomeText);
     const tipsStart = (plain[tipsIndex] ?? "").indexOf(tipsText);
+    expect(isBoldBeforeColumn(lines[topIndex] ?? "", topStart)).toBe(true);
     expect(isBoldBeforeColumn(lines[welcomeIndex] ?? "", welcomeStart)).toBe(true);
     expect(isBoldBeforeColumn(lines[tipsIndex] ?? "", tipsStart)).toBe(true);
   });
@@ -200,6 +205,7 @@ describe("renderTitleBox", () => {
     expect(colorCodeBeforeColumn(lines[recentIndex] ?? "", recentStart)).toBe(
       "\u001b[38;2;255;255;255m"
     );
+    expect(isBoldBeforeColumn(lines[recentIndex] ?? "", recentStart)).toBe(true);
   });
 
   it("renders provided recent activity rows in full layout", () => {

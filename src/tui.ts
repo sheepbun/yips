@@ -29,6 +29,36 @@ import {
   type PromptComposerLayout
 } from "./prompt-composer";
 import { InputEngine, type InputAction } from "./input-engine";
+import { renderDownloaderLines } from "./downloader-ui";
+import {
+  DOWNLOADER_TABS,
+  closeFileView,
+  createDownloaderState,
+  cycleTab,
+  finishDownload,
+  getCachedModels,
+  moveFileSelection,
+  moveModelSelection,
+  resetModelCache,
+  setCachedModels,
+  setDownloaderError,
+  setFiles,
+  setLoadingFiles,
+  setLoadingModels,
+  setPreloadingTabs,
+  setModels,
+  startDownload,
+  tabToSort,
+  updateDownloadProgress,
+  type DownloaderState
+} from "./downloader-state";
+import { getSystemSpecs } from "./hardware";
+import {
+  downloadModelFile,
+  listGgufModels,
+  listModelFiles,
+  type HfModelSummary
+} from "./model-downloader";
 import { renderTitleBox } from "./title-box";
 import type { TitleBoxOptions } from "./title-box";
 import type { AppConfig, ChatMessage, TuiOptions } from "./types";
@@ -38,6 +68,9 @@ const CURSOR_MARKER = "▌";
 const KEY_DEBUG_ENABLED = process.env["YIPS_DEBUG_KEYS"] === "1";
 const ANSI_REVERSE_ON = "\u001b[7m";
 const ANSI_RESET_ALL = "\u001b[0m";
+const DOWNLOADER_MIN_SEARCH_CHARS = 3;
+const DOWNLOADER_SEARCH_DEBOUNCE_MS = 400;
+const DOWNLOADER_PROGRESS_RENDER_INTERVAL_MS = 200;
 
 interface AssistantReply {
   text: string;
@@ -55,6 +88,8 @@ interface RuntimeState {
   history: ChatMessage[];
   busy: boolean;
   busyLabel: string;
+  uiMode: "chat" | "downloader";
+  downloader: DownloaderState | null;
 }
 
 interface InkModule {
@@ -107,6 +142,46 @@ function clipPromptStatusText(statusText: string, maxWidth: number): string {
   return chars.slice(chars.length - maxWidth).join("");
 }
 
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) {
+    return "0 B";
+  }
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let unitIndex = 0;
+  while (value >= 1024 && unitIndex < units.length - 1) {
+    value /= 1024;
+    unitIndex += 1;
+  }
+  const precision = unitIndex >= 2 ? 1 : 0;
+  return `${value.toFixed(precision)} ${units[unitIndex]}`;
+}
+
+function formatEta(totalSeconds: number): string {
+  const safeSeconds = Math.max(0, Math.floor(totalSeconds));
+  const minutes = Math.floor(safeSeconds / 60);
+  const seconds = safeSeconds % 60;
+  return `${minutes.toString().padStart(2, "0")}:${seconds.toString().padStart(2, "0")}`;
+}
+
+function formatDownloadStatus(options: {
+  bytesDownloaded: number;
+  totalBytes: number | null;
+  startedAtMs: number;
+}): string {
+  const elapsedSeconds = Math.max(0.001, (Date.now() - options.startedAtMs) / 1000);
+  const bytesPerSecond = options.bytesDownloaded / elapsedSeconds;
+  const speedText = `${formatBytes(bytesPerSecond)}/s`;
+
+  if (options.totalBytes === null || options.totalBytes <= 0) {
+    return `${formatBytes(options.bytesDownloaded)} downloaded | ${speedText}`;
+  }
+
+  const remainingBytes = Math.max(0, options.totalBytes - options.bytesDownloaded);
+  const etaSeconds = bytesPerSecond > 0 ? remainingBytes / bytesPerSecond : 0;
+  return `${formatBytes(options.bytesDownloaded)} / ${formatBytes(options.totalBytes)} | ${speedText} | ETA ${formatEta(etaSeconds)}`;
+}
+
 function toDebugText(input: string): string {
   return Array.from(input)
     .map((char) => {
@@ -150,6 +225,9 @@ function buildTitleBoxOptions(
 }
 
 function buildPromptStatusText(state: RuntimeState): string {
+  if (state.uiMode === "downloader") {
+    return "model-downloader · search";
+  }
   const provider = formatBackendName(state.config.backend);
   const loadedModel = resolveLoadedModel(state.config.model);
   const parts = [provider];
@@ -203,7 +281,9 @@ function createRuntimeState(options: TuiOptions): RuntimeState {
     inputHistory: [],
     history: [],
     busy: false,
-    busyLabel: ""
+    busyLabel: "",
+    uiMode: "chat",
+    downloader: null
   };
 }
 
@@ -229,11 +309,13 @@ function withReverseHighlight(text: string): string {
   return `${ANSI_REVERSE_ON}${text}${ANSI_RESET_ALL}`;
 }
 
-export function shouldConsumeSubmitForAutocomplete(menu: {
-  token: string;
-  options: string[];
-  selectedIndex: number;
-} | null): boolean {
+export function shouldConsumeSubmitForAutocomplete(
+  menu: {
+    token: string;
+    options: string[];
+    selectedIndex: number;
+  } | null
+): boolean {
   if (!menu) {
     return false;
   }
@@ -318,10 +400,7 @@ export function buildAutocompleteOverlayLines(
     Math.min(menu.selectedIndex - Math.floor(windowSize / 2), menu.options.length - windowSize)
   );
   const visibleOptions = menu.options.slice(startIndex, startIndex + windowSize);
-  const commandColumnWidth = Math.max(
-    10,
-    ...visibleOptions.map((option) => charLength(option))
-  );
+  const commandColumnWidth = Math.max(10, ...visibleOptions.map((option) => charLength(option)));
   // Align the command slash with the slash in the prompt row: "│>>> /..."
   const leftPadding = " ".repeat(1 + charLength(PROMPT_PREFIX));
 
@@ -402,6 +481,16 @@ export function buildPromptRenderLines(
 
 function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function isAbortError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  if (error.name === "AbortError") {
+    return true;
+  }
+  return error.message.toLowerCase().includes("aborted");
 }
 
 function formatInputAction(action: InputAction): string {
@@ -509,6 +598,16 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
     const llamaClientRef = useRef<LlamaClient | null>(null);
     const inputEngineRef = useRef<InputEngine>(new InputEngine());
     const dimensionsRef = useRef(dimensions);
+    const downloaderSearchTimerRef = useRef<NodeJS.Timeout | null>(null);
+    const downloaderPreloadJobRef = useRef(0);
+    const downloaderSearchInFlightRef = useRef(false);
+    const downloaderPendingQueryRef = useRef<string | null>(null);
+    const downloaderProgressDirtyRef = useRef(false);
+    const downloaderProgressBufferRef = useRef<{
+      bytesDownloaded: number;
+      totalBytes: number | null;
+    } | null>(null);
+    const downloaderAbortControllerRef = useRef<AbortController | null>(null);
 
     const forceRender = useCallback(() => {
       setRenderVersion((value) => value + 1);
@@ -530,7 +629,7 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
       });
     }
 
-    const createComposer = useCallback((): PromptComposer => {
+    const createComposer = useCallback((seedText?: string): PromptComposer => {
       const currentState = stateRef.current;
       if (!currentState) {
         throw new Error("Runtime state is not initialized.");
@@ -540,7 +639,8 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
         interiorWidth: Math.max(0, dimensionsRef.current.columns - 2),
         history: [...currentState.inputHistory],
         autoComplete: registryRef.current.getAutocompleteCommands(),
-        prefix: PROMPT_PREFIX
+        prefix: PROMPT_PREFIX,
+        text: seedText
       });
     }, []);
 
@@ -551,8 +651,55 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
     useEffect(() => {
       return () => {
         inputEngineRef.current.reset();
+        if (downloaderSearchTimerRef.current) {
+          clearTimeout(downloaderSearchTimerRef.current);
+          downloaderSearchTimerRef.current = null;
+        }
+        downloaderPendingQueryRef.current = null;
+        downloaderProgressDirtyRef.current = false;
+        downloaderProgressBufferRef.current = null;
+        downloaderAbortControllerRef.current?.abort();
+        downloaderAbortControllerRef.current = null;
       };
     }, []);
+
+    useEffect(() => {
+      const tick = setInterval(() => {
+        if (!downloaderProgressDirtyRef.current) {
+          return;
+        }
+        const currentState = stateRef.current;
+        if (
+          !currentState ||
+          currentState.uiMode !== "downloader" ||
+          !currentState.downloader ||
+          currentState.downloader.phase !== "downloading"
+        ) {
+          downloaderProgressDirtyRef.current = false;
+          downloaderProgressBufferRef.current = null;
+          return;
+        }
+        const pending = downloaderProgressBufferRef.current;
+        if (pending && currentState.downloader.download) {
+          currentState.downloader = updateDownloadProgress(currentState.downloader, {
+            bytesDownloaded: pending.bytesDownloaded,
+            totalBytes: pending.totalBytes,
+            statusText: formatDownloadStatus({
+              bytesDownloaded: pending.bytesDownloaded,
+              totalBytes: pending.totalBytes,
+              startedAtMs: currentState.downloader.download.startedAtMs
+            })
+          });
+          downloaderProgressBufferRef.current = null;
+        }
+        downloaderProgressDirtyRef.current = false;
+        forceRender();
+      }, DOWNLOADER_PROGRESS_RENDER_INTERVAL_MS);
+
+      return () => {
+        clearInterval(tick);
+      };
+    }, [forceRender]);
 
     useEffect(() => {
       const onResize = (): void => {
@@ -673,6 +820,346 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
       }
     }, [forceRender]);
 
+    const loadDownloaderModels = useCallback(
+      async (
+        tab: DownloaderState["tab"],
+        query: string,
+        options?: { showLoading?: boolean; useCache?: boolean }
+      ): Promise<HfModelSummary[] | null> => {
+        const currentState = stateRef.current;
+        if (!currentState || !currentState.downloader) {
+          return null;
+        }
+
+        const normalizedQuery = query.trim();
+        if (options?.useCache !== false) {
+          const cached = getCachedModels(currentState.downloader, tab, normalizedQuery);
+          if (cached) {
+            if (currentState.downloader.tab === tab) {
+              currentState.downloader = setModels(currentState.downloader, cached);
+              forceRender();
+            }
+            return cached;
+          }
+        }
+
+        if (options?.showLoading !== false && currentState.downloader.tab === tab) {
+          currentState.downloader = setLoadingModels(
+            currentState.downloader,
+            "Loading models from Hugging Face..."
+          );
+          forceRender();
+        }
+
+        try {
+          const models = await listGgufModels({
+            query: normalizedQuery,
+            sort: tabToSort(tab),
+            limit: 100,
+            totalMemoryGb: currentState.downloader.totalMemoryGb
+          });
+
+          const state = stateRef.current;
+          if (!state || !state.downloader) {
+            return null;
+          }
+          if (state.downloader.cacheQuery !== normalizedQuery) {
+            return null;
+          }
+
+          let next = setCachedModels(state.downloader, tab, normalizedQuery, models);
+          if (
+            state.downloader.tab === tab &&
+            state.downloader.searchQuery.trim() === normalizedQuery
+          ) {
+            next = setModels(next, models);
+          }
+          state.downloader = next;
+          forceRender();
+          return models;
+        } catch (error) {
+          const state = stateRef.current;
+          if (!state || !state.downloader) {
+            return null;
+          }
+          if (state.downloader.cacheQuery !== normalizedQuery) {
+            return null;
+          }
+          if (state.downloader.tab === tab) {
+            state.downloader = setDownloaderError(state.downloader, formatError(error));
+            forceRender();
+          }
+          return null;
+        }
+      },
+      [forceRender]
+    );
+
+    const preloadDownloaderTabs = useCallback(
+      async (query: string, activeTab: DownloaderState["tab"]): Promise<void> => {
+        const currentState = stateRef.current;
+        if (!currentState || !currentState.downloader) {
+          return;
+        }
+        const normalizedQuery = query.trim();
+        const jobId = ++downloaderPreloadJobRef.current;
+        currentState.downloader = setPreloadingTabs(currentState.downloader, true);
+        forceRender();
+
+        const otherTabs = DOWNLOADER_TABS.filter((tab) => tab !== activeTab);
+        await Promise.allSettled(
+          otherTabs.map((tab) =>
+            loadDownloaderModels(tab, normalizedQuery, { showLoading: false, useCache: true })
+          )
+        );
+
+        const state = stateRef.current;
+        if (!state || !state.downloader) {
+          return;
+        }
+        if (jobId !== downloaderPreloadJobRef.current) {
+          return;
+        }
+        if (state.downloader.cacheQuery !== normalizedQuery) {
+          return;
+        }
+        state.downloader = setPreloadingTabs(state.downloader, false);
+        forceRender();
+      },
+      [forceRender, loadDownloaderModels]
+    );
+
+    const normalizeDownloaderQuery = useCallback((query: string): string | null => {
+      const normalizedQuery = query.trim();
+      if (normalizedQuery.length === 0) {
+        return "";
+      }
+      if (charLength(normalizedQuery) < DOWNLOADER_MIN_SEARCH_CHARS) {
+        return null;
+      }
+      return normalizedQuery;
+    }, []);
+
+    const refreshDownloaderQuery = useCallback(
+      async (query: string, showLoading: boolean): Promise<void> => {
+        const state = stateRef.current;
+        if (!state || !state.downloader) {
+          return;
+        }
+        const normalizedQuery = query.trim();
+        state.downloader = resetModelCache(state.downloader, normalizedQuery);
+        if (showLoading) {
+          state.downloader = setLoadingModels(
+            state.downloader,
+            "Loading models from Hugging Face..."
+          );
+        }
+        forceRender();
+        await loadDownloaderModels(state.downloader.tab, normalizedQuery, {
+          showLoading: false,
+          useCache: false
+        });
+        void preloadDownloaderTabs(normalizedQuery, state.downloader.tab);
+      },
+      [forceRender, loadDownloaderModels, preloadDownloaderTabs]
+    );
+
+    const drainDownloaderSearchQueue = useCallback((): void => {
+      if (downloaderSearchInFlightRef.current) {
+        return;
+      }
+
+      const run = async (): Promise<void> => {
+        downloaderSearchInFlightRef.current = true;
+        try {
+          for (
+            let pendingQuery = downloaderPendingQueryRef.current;
+            pendingQuery !== null;
+            pendingQuery = downloaderPendingQueryRef.current
+          ) {
+            downloaderPendingQueryRef.current = null;
+            await refreshDownloaderQuery(pendingQuery, true);
+          }
+        } finally {
+          downloaderSearchInFlightRef.current = false;
+        }
+      };
+
+      void run();
+    }, [refreshDownloaderQuery]);
+
+    const scheduleDownloaderSearch = useCallback(
+      (query: string, immediate: boolean): void => {
+        const state = stateRef.current;
+        if (!state || !state.downloader) {
+          return;
+        }
+
+        if (downloaderSearchTimerRef.current) {
+          clearTimeout(downloaderSearchTimerRef.current);
+          downloaderSearchTimerRef.current = null;
+        }
+
+        const normalizedQuery = normalizeDownloaderQuery(query);
+        if (normalizedQuery === null) {
+          downloaderPendingQueryRef.current = null;
+          state.downloader = {
+            ...resetModelCache(state.downloader, query),
+            phase: "idle",
+            loading: false
+          };
+          forceRender();
+          return;
+        }
+
+        downloaderPendingQueryRef.current = normalizedQuery;
+        if (immediate) {
+          drainDownloaderSearchQueue();
+          return;
+        }
+
+        downloaderSearchTimerRef.current = setTimeout(() => {
+          drainDownloaderSearchQueue();
+        }, DOWNLOADER_SEARCH_DEBOUNCE_MS);
+      },
+      [drainDownloaderSearchQueue, forceRender, normalizeDownloaderQuery]
+    );
+
+    const syncDownloaderSearchFromComposer = useCallback(
+      (debounced: boolean): void => {
+        const currentState = stateRef.current;
+        const composer = composerRef.current;
+        if (!currentState || !currentState.downloader || !composer) {
+          return;
+        }
+
+        const searchQuery = composer.getText();
+        const previousQuery = currentState.downloader.searchQuery;
+        if (searchQuery === previousQuery) {
+          return;
+        }
+        currentState.downloader = {
+          ...currentState.downloader,
+          searchQuery
+        };
+
+        scheduleDownloaderSearch(searchQuery, !debounced);
+      },
+      [scheduleDownloaderSearch]
+    );
+
+    const loadDownloaderFiles = useCallback(
+      async (repoId: string): Promise<void> => {
+        const currentState = stateRef.current;
+        if (!currentState || !currentState.downloader) {
+          return;
+        }
+
+        currentState.downloader = setLoadingFiles(currentState.downloader, "Loading files...");
+        forceRender();
+
+        try {
+          const files = await listModelFiles(repoId, {
+            totalMemoryGb: currentState.downloader.totalMemoryGb
+          });
+          const state = stateRef.current;
+          if (!state || !state.downloader) {
+            return;
+          }
+          state.downloader = setFiles(state.downloader, repoId, files);
+        } catch (error) {
+          const state = stateRef.current;
+          if (!state || !state.downloader) {
+            return;
+          }
+          state.downloader = setDownloaderError(state.downloader, formatError(error));
+        }
+
+        forceRender();
+      },
+      [forceRender]
+    );
+
+    const downloadFromDownloaderSelection = useCallback(async (): Promise<void> => {
+      const currentState = stateRef.current;
+      if (!currentState || !currentState.downloader) {
+        return;
+      }
+      const file = currentState.downloader.files[currentState.downloader.selectedFileIndex];
+      const repoId = currentState.downloader.selectedRepoId;
+      if (!file || repoId.trim().length === 0) {
+        return;
+      }
+      if (!file.canRun) {
+        currentState.downloader = setDownloaderError(
+          currentState.downloader,
+          `Cannot download selected file: ${file.reason}`
+        );
+        forceRender();
+        return;
+      }
+
+      currentState.downloader = startDownload(
+        currentState.downloader,
+        repoId,
+        file.path,
+        `Downloading ${file.path} from ${repoId}...`
+      );
+      downloaderProgressDirtyRef.current = false;
+      downloaderProgressBufferRef.current = null;
+      const abortController = new AbortController();
+      downloaderAbortControllerRef.current = abortController;
+      forceRender();
+
+      try {
+        const result = await downloadModelFile({
+          repoId,
+          filename: file.path,
+          signal: abortController.signal,
+          onProgress: ({ bytesDownloaded, totalBytes }): void => {
+            const state = stateRef.current;
+            if (!state || !state.downloader || !state.downloader.download) {
+              return;
+            }
+            downloaderProgressBufferRef.current = {
+              bytesDownloaded,
+              totalBytes
+            };
+            downloaderProgressDirtyRef.current = true;
+          }
+        });
+
+        const state = stateRef.current;
+        if (!state || !state.downloader) {
+          return;
+        }
+        appendOutput(
+          state,
+          formatDimMessage(
+            `Downloaded ${file.path} from ${repoId}.\nSaved to: ${result.localPath}\nUse with: /model ${repoId}/${file.path}`
+          )
+        );
+        appendOutput(state, "");
+        state.downloader = finishDownload(state.downloader);
+        downloaderProgressDirtyRef.current = false;
+        downloaderProgressBufferRef.current = null;
+        downloaderAbortControllerRef.current = null;
+      } catch (error) {
+        const state = stateRef.current;
+        if (!state || !state.downloader) {
+          return;
+        }
+        if (!isAbortError(error)) {
+          state.downloader = setDownloaderError(state.downloader, formatError(error));
+        }
+        downloaderProgressDirtyRef.current = false;
+        downloaderProgressBufferRef.current = null;
+        downloaderAbortControllerRef.current = null;
+      }
+
+      forceRender();
+    }, [forceRender]);
+
     const handleUserMessage = useCallback(
       async (text: string): Promise<void> => {
         const currentState = stateRef.current;
@@ -739,7 +1226,7 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
             config: currentState.config,
             messageCount: currentState.messageCount
           };
-          const result = registryRef.current.dispatch(parsed.command, parsed.args, context);
+          const result = await registryRef.current.dispatch(parsed.command, parsed.args, context);
 
           if (result.output) {
             appendOutput(currentState, formatDimMessage(result.output));
@@ -748,6 +1235,18 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
 
           if (result.action === "clear") {
             resetSession(currentState);
+          }
+
+          if (result.uiAction?.type === "open-downloader") {
+            if (!currentState.downloader) {
+              const specs = getSystemSpecs();
+              currentState.downloader = createDownloaderState(specs);
+            }
+            currentState.uiMode = "downloader";
+            composerRef.current = createComposer(currentState.downloader.searchQuery);
+            forceRender();
+            scheduleDownloaderSearch(currentState.downloader.searchQuery, true);
+            return;
           }
 
           forceRender();
@@ -762,7 +1261,7 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
 
         await handleUserMessage(trimmed);
       },
-      [createComposer, exit, forceRender, handleUserMessage]
+      [createComposer, exit, forceRender, handleUserMessage, scheduleDownloaderSearch]
     );
 
     const dispatchComposerEvent = useCallback(
@@ -829,6 +1328,153 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
           return;
         }
 
+        if (currentState.uiMode === "downloader") {
+          const downloader = currentState.downloader;
+          if (!downloader) {
+            currentState.uiMode = "chat";
+            forceRender();
+            return;
+          }
+
+          for (const action of actions) {
+            if (action.type === "cancel") {
+              if (currentState.downloader?.phase === "downloading") {
+                downloaderAbortControllerRef.current?.abort();
+                downloaderAbortControllerRef.current = null;
+                currentState.downloader = finishDownload(currentState.downloader);
+                downloaderProgressDirtyRef.current = false;
+                downloaderProgressBufferRef.current = null;
+                appendOutput(currentState, formatDimMessage("Download canceled."));
+                appendOutput(currentState, "");
+                forceRender();
+                return;
+              }
+              if (currentState.downloader?.view === "files") {
+                currentState.downloader = closeFileView(currentState.downloader);
+              } else {
+                currentState.uiMode = "chat";
+                if (downloaderSearchTimerRef.current) {
+                  clearTimeout(downloaderSearchTimerRef.current);
+                  downloaderSearchTimerRef.current = null;
+                }
+                downloaderPendingQueryRef.current = null;
+              }
+              forceRender();
+              return;
+            }
+
+            if (!currentState.downloader) {
+              continue;
+            }
+
+            if (currentState.downloader.view === "models") {
+              if (
+                action.type === "insert" ||
+                action.type === "backspace" ||
+                action.type === "delete" ||
+                action.type === "home" ||
+                action.type === "end"
+              ) {
+                applyInputAction(composer, action);
+                syncDownloaderSearchFromComposer(true);
+                continue;
+              }
+
+              if (currentState.downloader.loading) {
+                continue;
+              }
+
+              if (action.type === "move-left") {
+                currentState.downloader = cycleTab(currentState.downloader, -1);
+                const query = currentState.downloader.searchQuery;
+                const normalizedQuery = normalizeDownloaderQuery(query);
+                if (normalizedQuery === null) {
+                  forceRender();
+                  return;
+                }
+                const cached = getCachedModels(
+                  currentState.downloader,
+                  currentState.downloader.tab,
+                  normalizedQuery
+                );
+                if (cached) {
+                  currentState.downloader = setModels(currentState.downloader, cached);
+                  forceRender();
+                  void preloadDownloaderTabs(normalizedQuery, currentState.downloader.tab);
+                  return;
+                }
+                forceRender();
+                void loadDownloaderModels(currentState.downloader.tab, normalizedQuery, {
+                  showLoading: true,
+                  useCache: false
+                });
+                return;
+              }
+              if (action.type === "move-right") {
+                currentState.downloader = cycleTab(currentState.downloader, 1);
+                const query = currentState.downloader.searchQuery;
+                const normalizedQuery = normalizeDownloaderQuery(query);
+                if (normalizedQuery === null) {
+                  forceRender();
+                  return;
+                }
+                const cached = getCachedModels(
+                  currentState.downloader,
+                  currentState.downloader.tab,
+                  normalizedQuery
+                );
+                if (cached) {
+                  currentState.downloader = setModels(currentState.downloader, cached);
+                  forceRender();
+                  void preloadDownloaderTabs(normalizedQuery, currentState.downloader.tab);
+                  return;
+                }
+                forceRender();
+                void loadDownloaderModels(currentState.downloader.tab, normalizedQuery, {
+                  showLoading: true,
+                  useCache: false
+                });
+                return;
+              }
+              if (action.type === "move-up") {
+                currentState.downloader = moveModelSelection(currentState.downloader, -1, 10);
+                continue;
+              }
+              if (action.type === "move-down") {
+                currentState.downloader = moveModelSelection(currentState.downloader, 1, 10);
+                continue;
+              }
+              if (action.type === "submit") {
+                const selected =
+                  currentState.downloader.models[currentState.downloader.selectedModelIndex];
+                if (selected) {
+                  void loadDownloaderFiles(selected.id);
+                }
+                return;
+              }
+            } else {
+              if (currentState.downloader.loading) {
+                continue;
+              }
+              if (action.type === "move-up") {
+                currentState.downloader = moveFileSelection(currentState.downloader, -1, 9);
+                continue;
+              }
+              if (action.type === "move-down") {
+                currentState.downloader = moveFileSelection(currentState.downloader, 1, 9);
+                continue;
+              }
+              if (action.type === "submit") {
+                void downloadFromDownloaderSelection();
+                return;
+              }
+            }
+          }
+
+          forceRender();
+          return;
+        }
+
         composer.setInteriorWidth(Math.max(0, dimensionsRef.current.columns - 2));
 
         let shouldRender = false;
@@ -889,33 +1535,61 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
       return () => {
         stdin.off("data", onData);
       };
-    }, [dispatchComposerEvent, exit, forceRender, stdin]);
+    }, [
+      dispatchComposerEvent,
+      downloadFromDownloaderSelection,
+      exit,
+      forceRender,
+      loadDownloaderFiles,
+      loadDownloaderModels,
+      normalizeDownloaderQuery,
+      preloadDownloaderTabs,
+      syncDownloaderSearchFromComposer,
+      stdin
+    ]);
 
     const composer = composerRef.current;
     composer.setInteriorWidth(Math.max(0, dimensions.columns - 2));
+    let titleNodes: React.ReactNode[] = [];
+    let outputNodes: React.ReactNode[] = [];
+    let promptNodes: React.ReactNode[] = [];
+
     const promptLayout = composer.getLayout();
-
     const statusText = buildPromptStatusText(state);
-
     const titleLines = renderTitleBox(buildTitleBoxOptions(state, version, dimensions.columns));
     const promptLines = buildPromptRenderLines(dimensions.columns, statusText, promptLayout, true);
-    const autocompleteOverlay = buildAutocompleteOverlayLines(composer, registryRef.current);
+    const autocompleteOverlay =
+      state.uiMode === "downloader"
+        ? []
+        : buildAutocompleteOverlayLines(composer, registryRef.current);
+
+    const outputLines = [...state.outputLines, ...autocompleteOverlay];
+    if (state.uiMode === "downloader" && state.downloader) {
+      outputLines.push("");
+      outputLines.push(
+        ...renderDownloaderLines({
+          width: dimensions.columns,
+          state: state.downloader
+        })
+      );
+    }
+
     const visible = computeVisibleLayoutSlices(
       dimensions.rows,
       titleLines,
-      [...state.outputLines, ...autocompleteOverlay],
+      outputLines,
       promptLines
     );
 
-    const titleNodes = visible.titleLines.map((line, index) =>
+    titleNodes = visible.titleLines.map((line, index) =>
       React.createElement(Text, { key: `title-${index}` }, line.length > 0 ? line : " ")
     );
 
-    const outputNodes = visible.outputLines.map((line, index) =>
+    outputNodes = visible.outputLines.map((line, index) =>
       React.createElement(Text, { key: `out-${index}` }, line.length > 0 ? line : " ")
     );
 
-    const promptNodes = visible.promptLines.map((line, index) =>
+    promptNodes = visible.promptLines.map((line, index) =>
       React.createElement(Text, { key: `prompt-${index}` }, line)
     );
 

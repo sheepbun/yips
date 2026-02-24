@@ -98,14 +98,6 @@ YIPS_DEBUG_KEYS=1 npm run dev
 
 Then press `Enter` and `Ctrl+Enter` in the prompt and compare the emitted `[debug stdin]` lines. If both look like plain carriage return (`<CR>` / `0d`) submit events, your terminal is not sending a distinct modified-enter sequence.
 
-You can also run:
-
-```text
-/keys
-```
-
-inside Yips for built-in diagnostics guidance.
-
 ### Alacritty Example Mapping
 
 If you use Alacritty, map `Ctrl+Enter` to CSI-u so Yips can detect newline input distinctly:

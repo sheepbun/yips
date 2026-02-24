@@ -111,7 +111,6 @@ describe("createDefaultRegistry", () => {
     expect(registry.has("model")).toBe(true);
     expect(registry.has("stream")).toBe(true);
     expect(registry.has("verbose")).toBe(true);
-    expect(registry.has("keys")).toBe(true);
     expect(registry.has("backend")).toBe(true);
     expect(registry.has("sessions")).toBe(true);
     expect(registry.has("download")).toBe(true);
@@ -227,16 +226,6 @@ describe("createDefaultRegistry", () => {
     const result = await registry.dispatch("sessions", "", createContext());
     expect(result.action).toBe("continue");
     expect(result.uiAction).toEqual({ type: "open-sessions" });
-  });
-
-  it("/keys shows diagnostics guidance", async () => {
-    const registry = createDefaultRegistry();
-    const result = await registry.dispatch("keys", "", createContext());
-    expect(result.action).toBe("continue");
-    expect(result.output).toContain("YIPS_DEBUG_KEYS=1 npm run dev");
-    expect(result.output).toContain("Ctrl+Enter");
-    expect(result.output).toContain("\\u001b[13;5u");
-    expect(result.output).toContain("\\u001b[13;5~");
   });
 
   it("/download opens the interactive downloader when called without args", async () => {

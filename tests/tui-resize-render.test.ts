@@ -191,9 +191,9 @@ describe("buildAutocompleteOverlayLines", () => {
     const composer = new PromptComposer({
       interiorWidth: 40,
       history: [],
-      autoComplete: ["/backend", "/build"]
+      autoComplete: ["/backend", "/download"]
     });
-    for (const char of "/b") {
+    for (const char of "/") {
       composer.handleKey(char, { isCharacter: true });
     }
     composer.moveAutocompleteSelection(1);

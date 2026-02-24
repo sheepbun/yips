@@ -113,7 +113,7 @@ describe("PromptComposer", () => {
     const composer = new PromptComposer({
       interiorWidth: 30,
       history: [],
-      autoComplete: ["/backend", "/build"]
+      autoComplete: ["/backend", "/download"]
     });
 
     typeText(composer, "/backend");
@@ -146,14 +146,14 @@ describe("PromptComposer", () => {
     const composer = new PromptComposer({
       interiorWidth: 30,
       history: [],
-      autoComplete: ["/help", "/backend", "/build"]
+      autoComplete: ["/help", "/download", "/dl"]
     });
 
-    typeText(composer, "/b");
+    typeText(composer, "/d");
     const suggestions = composer.getAutocompleteSuggestions();
     expect(suggestions).not.toBeNull();
-    expect(suggestions?.options).toEqual(["/backend", "/build"]);
-    expect(suggestions?.token).toBe("/b");
+    expect(suggestions?.options).toEqual(["/download", "/dl"]);
+    expect(suggestions?.token).toBe("/d");
   });
 
   it("closes autocomplete when the current token is no longer a slash command", () => {

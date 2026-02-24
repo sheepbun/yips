@@ -51,8 +51,6 @@ These commands invoke specialized capabilities. Some are agent-invocable (the ag
 | `/fetch <url>` | Retrieve and display content from a URL |
 | `/grab <file>` | Read a file's content into context |
 | `/memorize <fact>` | Save a fact to long-term memory |
-| `/todos` | List and manage project TODOs |
-| `/build` | Detect and run the project's build pipeline |
 | `/vt` | Toggle the Virtual Terminal |
 
 ### Complete List
@@ -60,11 +58,10 @@ These commands invoke specialized capabilities. Some are agent-invocable (the ag
 All commands recognized by yips-cli, carried forward to the TypeScript rewrite:
 
 ```
-/backend    /build      /clear      /dl         /download
-/exit       /fetch      /grab       /help       /memorize
-/model      /models     /new        /nick       /quit
-/search     /sessions   /stream     /todos      /verbose
-/vt
+/backend    /clear      /dl         /download   /exit
+/fetch      /grab       /help       /memorize   /model
+/models     /new        /nick       /quit       /search
+/sessions   /stream     /verbose    /vt
 ```
 
 ## Tab Autocompletion

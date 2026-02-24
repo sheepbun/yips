@@ -26,7 +26,6 @@ const RESTORED_COMMAND_DEFAULTS: ReadonlyArray<{
   kind: CommandKind;
 }> = [
   { name: "backend", description: "Switch AI backends (llamacpp, claude)", kind: "builtin" },
-  { name: "build", description: "Detect and run the project's build pipeline", kind: "tool" },
   { name: "clear", description: "Clear context and start a new session", kind: "builtin" },
   { name: "dl", description: "Alias for /download", kind: "builtin" },
   { name: "download", description: "Open the interactive model downloader", kind: "builtin" },
@@ -43,7 +42,6 @@ const RESTORED_COMMAND_DEFAULTS: ReadonlyArray<{
   { name: "search", description: "Search the web (DuckDuckGo)", kind: "tool" },
   { name: "sessions", description: "Interactively select and load a session", kind: "builtin" },
   { name: "stream", description: "Toggle streaming responses", kind: "builtin" },
-  { name: "todos", description: "List and manage project TODOs", kind: "tool" },
   { name: "verbose", description: "Toggle verbose output", kind: "builtin" },
   { name: "vt", description: "Toggle the Virtual Terminal", kind: "tool" }
 ];

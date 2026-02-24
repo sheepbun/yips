@@ -11,6 +11,8 @@
   "llamaGpuLayers": 999,
   "llamaAutoStart": true,
   "llamaPortConflictPolicy": "kill-user",
-  "model": "Qwen/Qwen3-VL-2B-Instruct-GGUF/Qwen3VL-2B-Instruct-Q4_K_M.gguf",
-  "nicknames": {}
+  "model": "Qwen/Qwen3-VL-8B-Thinking-GGUF/Qwen3VL-8B-Thinking-Q4_K_M.gguf",
+  "nicknames": {
+    "Qwen3-VL-2B-Instruct-GGUF": "qwen3-vl:2b"
+  }
 }

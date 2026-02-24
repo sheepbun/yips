@@ -8,6 +8,26 @@
 
 ## Installation
 
+### Automated local install (recommended)
+
+```sh
+git clone https://github.com/sheepbun/yips.git
+cd yips
+./install.sh
+source ~/.yips/env.sh
+npm run dev
+```
+
+What `install.sh` does:
+
+- Installs required system dependencies (`git`, `cmake`, build tools, `node`, `npm`, `curl`) using `apt`/`dnf`/`brew` when needed
+- Clones or updates `~/llama.cpp`, builds `llama-server` (CUDA when available, CPU fallback)
+- Creates `~/.yips/models` and writes runtime exports to `~/.yips/env.sh`
+- Installs Node dependencies for Yips (`npm install`)
+- Creates or patches `.yips_config.json` with llama lifecycle defaults without overwriting existing user settings
+
+If no GGUF model exists yet, open Yips and use `/download` or `/model` to fetch/select one.
+
 ### From source (development)
 
 ```sh
@@ -130,4 +150,4 @@ When you run Yips from a directory containing `CODE.md`, the file is loaded into
 
 ---
 
-> Last updated: 2026-02-23
+> Last updated: 2026-02-24

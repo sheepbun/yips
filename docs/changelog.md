@@ -24,6 +24,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - `src/llama-client.ts`: OpenAI-compatible llama.cpp client for non-streaming and SSE streaming chat completions
 - New backend tests in `tests/llama-client.test.ts` covering request payloads, streaming deltas, and failure paths
 - `/keys` slash command for in-app Enter/Ctrl+Enter diagnostics instructions
+- `src/model-downloader.ts`: Hugging Face GGUF model discovery, file listing, and downloader to local models directory
+- `/download` and `/dl` command handlers implemented in the TypeScript rewrite
+- `src/hardware.ts`: runtime RAM/VRAM detection for model suitability filtering
+- Interactive downloader modules: `src/downloader-state.ts` and `src/downloader-ui.ts`
+- New tests for downloader modal state/rendering (`tests/downloader-state.test.ts`, `tests/downloader-ui.test.ts`)
+- Downloader input now reuses the shared Prompt Box as live search in downloader mode, while keeping title/chat/prompt visible
+- Downloader telemetry now includes `RAM+VRAM` and disk-free availability
+- Input engine now treats lone `Esc` as cancel so downloader close/back works reliably
+- Downloader tabs and selected list rows now use highlighted gradient backgrounds for closer yips-cli visual parity
+- Downloader now preloads non-active tabs in the background and serves tab switches from in-memory cache when available
+- Interactive Model Manager restoration (`src/model-manager.ts`, `src/model-manager-state.ts`, `src/model-manager-ui.ts`) with local model list/search/select/delete and downloader jump
+- `/models` command implementation and `/nick` command implementation with config persistence
+- Config persistence APIs in `src/config.ts` (`saveConfig`, `updateConfig`) and `nicknames` support in `AppConfig`
+- Model Manager tests (`tests/model-manager.test.ts`, `tests/model-manager-state.test.ts`, `tests/model-manager-ui.test.ts`)
 
 ### Changed
 
@@ -39,6 +53,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - `src/tui.ts` now sends messages to llama.cpp, streams token output in-place, tracks in-memory conversation history, and retries failed streams once in non-stream mode
 - Config schema now includes `llamaBaseUrl` and `model`, with optional `YIPS_LLAMA_BASE_URL` and `YIPS_MODEL` overrides
 - Slash commands: `/model` now updates the active runtime model and `/new` aliases `/clear`
+- Command dispatch now supports async handlers so network-backed commands (like `/download`) can run directly in the TUI flow
+- `/download` is now modal-first in TUI: no-arg opens interactive downloader, while `/download <hf_url>` supports direct Hugging Face URL downloads
+- Downloader lists/files are filtered by combined `RAM + VRAM` suitability and render in a dedicated full-screen modal-style UI
+- Downloader parity pass: `Top Rated` now maps to HF `trendingScore`, compatibility uses `RAM+VRAM * 1.2`, oversized files remain visible with blocked download selection
+- Downloader is now rendered inline with existing chat output instead of replacing the full screen
+- Downloader tabs restored to yips-cli-like active gradient highlight style; border alignment fixed for ANSI-colored rows
+- Hugging Face model fetch now uses valid repeated `expand` params and retries without expand on HTTP 400/422
+- Downloader list row styling restored toward yips-cli parity with gradient-highlighted selected rows and compatibility status coloring
+- `/model` behavior now opens Model Manager with no args, and with args performs local exact/partial matching before free-form fallback
+- TUI now supports a dedicated `model-manager` UI mode with prompt-composer search input and persisted model selection
 
 ## Legacy (yips-cli)
 
@@ -58,7 +82,7 @@ Changes from the Python CLI predecessor. These entries are reformatted from `yip
 
 - llama.cpp integration with CUDA support as the primary backend
 - Summarized thinking blocks displayed in a bulleted UI box
-- `/backend` command for hot-switching between llama.cpp, LM Studio, and Claude CLI
+- `/backend` command for hot-switching between llama.cpp and Claude CLI
 - Diagonal (top-left to bottom-right) gradient scan on thinking block for a dynamic aesthetic
 
 #### Changed
@@ -78,7 +102,7 @@ Changes from the Python CLI predecessor. These entries are reformatted from `yip
 
 #### Fixed
 
-- LM Studio 400 Bad Request errors resolved with improved error handling
+- Backend 400 Bad Request errors resolved with improved error handling
 
 ### 2026-02-02
 
@@ -94,4 +118,4 @@ Changes from the Python CLI predecessor. These entries are reformatted from `yip
 
 ---
 
-> Last updated: 2026-02-23
+> Last updated: 2026-02-24

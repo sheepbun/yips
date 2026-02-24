@@ -2,11 +2,20 @@
 
 import { loadCommandCatalog } from "./command-catalog";
 import type { CommandDescriptor, CommandKind } from "./command-catalog";
+import { saveConfig } from "./config";
+import { listLocalModels, findMatchingModel } from "./model-manager";
+import {
+  downloadModelFile,
+  isHfDownloadUrl,
+  parseHfDownloadUrl,
+  resolveDefaultModelsDir
+} from "./model-downloader";
 import type { AppConfig } from "./types";
 
 export interface CommandResult {
   output?: string;
   action: "continue" | "exit" | "clear";
+  uiAction?: { type: "open-downloader" } | { type: "open-model-manager" };
 }
 
 export interface SessionContext {
@@ -14,7 +23,9 @@ export interface SessionContext {
   messageCount: number;
 }
 
-export type CommandHandler = (args: string, context: SessionContext) => CommandResult;
+type MaybePromise<T> = T | Promise<T>;
+
+export type CommandHandler = (args: string, context: SessionContext) => MaybePromise<CommandResult>;
 
 interface RegisteredCommand {
   name: string;
@@ -62,10 +73,10 @@ export class CommandRegistry {
     });
   }
 
-  dispatch(name: string, args: string, context: SessionContext): CommandResult {
+  async dispatch(name: string, args: string, context: SessionContext): Promise<CommandResult> {
     const command = this.commands.get(name.toLowerCase());
     if (command) {
-      return command.handler(args, context);
+      return await command.handler(args, context);
     }
 
     if (this.descriptors.has(name.toLowerCase())) {
@@ -115,7 +126,9 @@ export class CommandRegistry {
   }
 
   listCommands(): CommandDescriptor[] {
-    return [...this.descriptors.values()].sort((left, right) => left.name.localeCompare(right.name));
+    return [...this.descriptors.values()].sort((left, right) =>
+      left.name.localeCompare(right.name)
+    );
   }
 
   getAutocompleteCommands(): string[] {
@@ -126,6 +139,23 @@ export class CommandRegistry {
 export interface ParsedCommand {
   command: string;
   args: string;
+}
+
+function splitCommandArgs(input: string): string[] {
+  const matches = input.match(/"([^"\\]*(?:\\.[^"\\]*)*)"|'([^'\\]*(?:\\.[^'\\]*)*)'|[^\s]+/gu);
+  if (!matches) {
+    return [];
+  }
+
+  return matches.map((token) => {
+    if (
+      (token.startsWith('"') && token.endsWith('"')) ||
+      (token.startsWith("'") && token.endsWith("'"))
+    ) {
+      return token.slice(1, -1);
+    }
+    return token;
+  });
 }
 
 const KEY_DIAGNOSTICS_TEXT = [
@@ -156,6 +186,59 @@ export function parseCommand(input: string): ParsedCommand | null {
 export function createDefaultRegistry(): CommandRegistry {
   const registry = new CommandRegistry(loadCommandCatalog());
 
+  const downloadUsage = [
+    "Model downloader:",
+    "  /download                    Open interactive downloader",
+    "  /download <hf_url>           Download directly from hf.co/huggingface URL",
+    "  /dl ...                      Alias for /download"
+  ].join("\n");
+
+  const handleDownload = async (args: string): Promise<CommandResult> => {
+    const trimmed = args.trim();
+    const tokens = trimmed.length > 0 ? trimmed.split(/\s+/u) : [];
+
+    try {
+      if (tokens.length === 0) {
+        return {
+          action: "continue",
+          uiAction: { type: "open-downloader" }
+        };
+      }
+
+      const inputArg = tokens.join(" ");
+
+      if (inputArg.toLowerCase() === "help") {
+        return { output: downloadUsage, action: "continue" };
+      }
+
+      if (!isHfDownloadUrl(inputArg)) {
+        return {
+          output: `Invalid /download argument. Only direct Hugging Face URLs are supported.\n\n${downloadUsage}`,
+          action: "continue"
+        };
+      }
+
+      const parsed = parseHfDownloadUrl(inputArg);
+      const result = await downloadModelFile(parsed);
+      const modelsDir = resolveDefaultModelsDir();
+
+      return {
+        output:
+          `Downloaded ${parsed.filename} from ${parsed.repoId}.\n` +
+          `Saved to: ${result.localPath}\n` +
+          `Models dir: ${modelsDir}\n` +
+          `Use with: /model ${parsed.repoId}/${parsed.filename}`,
+        action: "continue"
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        output: `Download command failed: ${message}`,
+        action: "continue"
+      };
+    }
+  };
+
   registry.register(
     "help",
     () => ({
@@ -175,18 +258,43 @@ export function createDefaultRegistry(): CommandRegistry {
 
   registry.register(
     "model",
-    (args, context) => {
-      const trimmed = args.trim();
-      if (trimmed.length > 0) {
-        context.config.model = trimmed;
-        return { output: `Model set to: ${trimmed}`, action: "continue" };
+    async (args, context) => {
+      try {
+        const trimmed = args.trim();
+        if (trimmed.length === 0) {
+          return { action: "continue", uiAction: { type: "open-model-manager" } };
+        }
+
+        let selectedModel = trimmed;
+        const localModels = await listLocalModels({ nicknames: context.config.nicknames });
+        const matched = findMatchingModel(localModels, trimmed);
+        if (matched) {
+          selectedModel = matched.id;
+        }
+
+        context.config.backend = "llamacpp";
+        context.config.model = selectedModel;
+        await saveConfig(context.config);
+
+        const matchSuffix = matched ? ` (matched from '${trimmed}')` : " (free-form fallback)";
+        return { output: `Model set to: ${selectedModel}${matchSuffix}`, action: "continue" };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          output: `Model command failed: ${message}`,
+          action: "continue"
+        };
       }
-      return {
-        output: `Current model: ${context.config.model}\nUsage: /model <model_name>`,
-        action: "continue"
-      };
     },
     "View or set the current model"
+  );
+
+  registry.register(
+    "models",
+    async () => {
+      return { action: "continue", uiAction: { type: "open-model-manager" } };
+    },
+    "Open the interactive Model Manager"
   );
 
   registry.register(
@@ -217,6 +325,48 @@ export function createDefaultRegistry(): CommandRegistry {
     }),
     "Show key input diagnostics for Enter/Ctrl+Enter",
     "builtin"
+  );
+
+  registry.register("download", (args) => handleDownload(args), "Open the model downloader");
+
+  registry.register("dl", (args) => handleDownload(args), "Alias for /download");
+
+  registry.register(
+    "nick",
+    async (args, context) => {
+      try {
+        const tokens = splitCommandArgs(args.trim());
+        if (tokens.length < 2) {
+          return {
+            output: "Usage: /nick <model_name_or_filename> <nickname>",
+            action: "continue"
+          };
+        }
+
+        const [target, ...nicknameTokens] = tokens;
+        const nickname = nicknameTokens.join(" ").trim();
+        if (!target || nickname.length === 0) {
+          return {
+            output: "Usage: /nick <model_name_or_filename> <nickname>",
+            action: "continue"
+          };
+        }
+
+        context.config.nicknames[target] = nickname;
+        await saveConfig(context.config);
+        return {
+          output: `Nickname set: ${target} -> ${nickname}`,
+          action: "continue"
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return {
+          output: `Nick command failed: ${message}`,
+          action: "continue"
+        };
+      }
+    },
+    "Set a custom nickname for a model"
   );
 
   return registry;

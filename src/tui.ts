@@ -6,6 +6,7 @@ import { getVersion } from "./version";
 
 import { createDefaultRegistry, parseCommand } from "./commands";
 import type { CommandRegistry, SessionContext } from "./commands";
+import { saveConfig } from "./config";
 import {
   colorText,
   GRADIENT_BLUE,
@@ -53,6 +54,19 @@ import {
   type DownloaderState
 } from "./downloader-state";
 import { getSystemSpecs } from "./hardware";
+import { deleteLocalModel, listLocalModels } from "./model-manager";
+import { renderModelManagerLines } from "./model-manager-ui";
+import {
+  createModelManagerState,
+  getSelectedModel,
+  moveModelManagerSelection,
+  removeModelById,
+  setModelManagerError,
+  setModelManagerLoading,
+  setModelManagerModels,
+  setModelManagerSearchQuery,
+  type ModelManagerState
+} from "./model-manager-state";
 import {
   downloadModelFile,
   listGgufModels,
@@ -88,8 +102,9 @@ interface RuntimeState {
   history: ChatMessage[];
   busy: boolean;
   busyLabel: string;
-  uiMode: "chat" | "downloader";
+  uiMode: "chat" | "downloader" | "model-manager";
   downloader: DownloaderState | null;
+  modelManager: ModelManagerState | null;
 }
 
 interface InkModule {
@@ -225,6 +240,9 @@ function buildTitleBoxOptions(
 }
 
 function buildPromptStatusText(state: RuntimeState): string {
+  if (state.uiMode === "model-manager") {
+    return "model-manager · search";
+  }
   if (state.uiMode === "downloader") {
     return "model-downloader · search";
   }
@@ -283,7 +301,8 @@ function createRuntimeState(options: TuiOptions): RuntimeState {
     busy: false,
     busyLabel: "",
     uiMode: "chat",
-    downloader: null
+    downloader: null,
+    modelManager: null
   };
 }
 
@@ -1160,6 +1179,55 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
       forceRender();
     }, [forceRender]);
 
+    const refreshModelManagerModels = useCallback(async (): Promise<void> => {
+      const currentState = stateRef.current;
+      if (!currentState || !currentState.modelManager) {
+        return;
+      }
+
+      currentState.modelManager = setModelManagerLoading(
+        currentState.modelManager,
+        "Loading local models..."
+      );
+      forceRender();
+
+      try {
+        const models = await listLocalModels({
+          totalMemoryGb: currentState.modelManager.totalMemoryGb,
+          nicknames: currentState.config.nicknames
+        });
+        const state = stateRef.current;
+        if (!state || !state.modelManager) {
+          return;
+        }
+        state.modelManager = setModelManagerModels(state.modelManager, models);
+      } catch (error) {
+        const state = stateRef.current;
+        if (!state || !state.modelManager) {
+          return;
+        }
+        state.modelManager = setModelManagerError(state.modelManager, formatError(error));
+      }
+
+      forceRender();
+    }, [forceRender]);
+
+    const syncModelManagerSearchFromComposer = useCallback((): void => {
+      const currentState = stateRef.current;
+      const composer = composerRef.current;
+      if (!currentState || !currentState.modelManager || !composer) {
+        return;
+      }
+
+      const query = composer.getText();
+      if (query === currentState.modelManager.searchQuery) {
+        return;
+      }
+
+      currentState.modelManager = setModelManagerSearchQuery(currentState.modelManager, query);
+      forceRender();
+    }, [forceRender]);
+
     const handleUserMessage = useCallback(
       async (text: string): Promise<void> => {
         const currentState = stateRef.current;
@@ -1249,6 +1317,18 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
             return;
           }
 
+          if (result.uiAction?.type === "open-model-manager") {
+            if (!currentState.modelManager) {
+              const specs = getSystemSpecs();
+              currentState.modelManager = createModelManagerState(specs);
+            }
+            currentState.uiMode = "model-manager";
+            composerRef.current = createComposer(currentState.modelManager.searchQuery);
+            forceRender();
+            void refreshModelManagerModels();
+            return;
+          }
+
           forceRender();
 
           if (result.action === "exit") {
@@ -1261,7 +1341,14 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
 
         await handleUserMessage(trimmed);
       },
-      [createComposer, exit, forceRender, handleUserMessage, scheduleDownloaderSearch]
+      [
+        createComposer,
+        exit,
+        forceRender,
+        handleUserMessage,
+        refreshModelManagerModels,
+        scheduleDownloaderSearch
+      ]
     );
 
     const dispatchComposerEvent = useCallback(
@@ -1325,6 +1412,142 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
         }
 
         if (actions.length === 0) {
+          return;
+        }
+
+        if (currentState.uiMode === "model-manager") {
+          const modelManager = currentState.modelManager;
+          if (!modelManager) {
+            currentState.uiMode = "chat";
+            forceRender();
+            return;
+          }
+
+          for (const action of actions) {
+            if (action.type === "cancel") {
+              currentState.uiMode = "chat";
+              forceRender();
+              return;
+            }
+
+            if (!currentState.modelManager) {
+              continue;
+            }
+
+            if (action.type === "insert") {
+              if (action.text.toLowerCase() === "t" && composer.getText().trim().length === 0) {
+                if (!currentState.downloader) {
+                  const specs = getSystemSpecs();
+                  currentState.downloader = createDownloaderState(specs);
+                }
+                currentState.uiMode = "downloader";
+                composerRef.current = createComposer(currentState.downloader.searchQuery);
+                forceRender();
+                scheduleDownloaderSearch(currentState.downloader.searchQuery, true);
+                return;
+              }
+              applyInputAction(composer, action);
+              syncModelManagerSearchFromComposer();
+              continue;
+            }
+
+            if (
+              action.type === "backspace" ||
+              action.type === "home" ||
+              action.type === "end" ||
+              action.type === "move-left" ||
+              action.type === "move-right"
+            ) {
+              applyInputAction(composer, action);
+              syncModelManagerSearchFromComposer();
+              continue;
+            }
+
+            if (action.type === "delete") {
+              const selected = getSelectedModel(currentState.modelManager);
+              if (!selected) {
+                continue;
+              }
+              currentState.modelManager = setModelManagerLoading(
+                currentState.modelManager,
+                `Deleting ${selected.name}...`
+              );
+              forceRender();
+              void (async () => {
+                const state = stateRef.current;
+                if (!state || !state.modelManager) {
+                  return;
+                }
+                try {
+                  await deleteLocalModel(selected);
+                  state.modelManager = removeModelById(state.modelManager, selected.id);
+                  if (state.config.model === selected.id) {
+                    state.config.model = "default";
+                    await saveConfig(state.config);
+                  }
+                } catch (error) {
+                  state.modelManager = setModelManagerError(
+                    state.modelManager,
+                    `Delete failed: ${formatError(error)}`
+                  );
+                }
+                forceRender();
+              })();
+              return;
+            }
+
+            if (currentState.modelManager.loading) {
+              continue;
+            }
+
+            if (action.type === "move-up") {
+              currentState.modelManager = moveModelManagerSelection(
+                currentState.modelManager,
+                -1,
+                12
+              );
+              continue;
+            }
+
+            if (action.type === "move-down") {
+              currentState.modelManager = moveModelManagerSelection(
+                currentState.modelManager,
+                1,
+                12
+              );
+              continue;
+            }
+
+            if (action.type === "submit") {
+              const selected = getSelectedModel(currentState.modelManager);
+              if (!selected) {
+                continue;
+              }
+
+              currentState.config.backend = "llamacpp";
+              currentState.config.model = selected.id;
+              void saveConfig(currentState.config).catch((error: unknown) => {
+                const state = stateRef.current;
+                if (!state) {
+                  return;
+                }
+                appendOutput(
+                  state,
+                  formatWarningMessage(`Config save failed: ${formatError(error)}`)
+                );
+                forceRender();
+              });
+
+              appendOutput(currentState, formatDimMessage(`Model set to: ${selected.id}`));
+              appendOutput(currentState, "");
+              currentState.uiMode = "chat";
+              composerRef.current = createComposer();
+              forceRender();
+              return;
+            }
+          }
+
+          forceRender();
           return;
         }
 
@@ -1536,6 +1759,7 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
         stdin.off("data", onData);
       };
     }, [
+      createComposer,
       dispatchComposerEvent,
       downloadFromDownloaderSelection,
       exit,
@@ -1544,6 +1768,7 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
       loadDownloaderModels,
       normalizeDownloaderQuery,
       preloadDownloaderTabs,
+      syncModelManagerSearchFromComposer,
       syncDownloaderSearchFromComposer,
       stdin
     ]);
@@ -1559,7 +1784,7 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
     const titleLines = renderTitleBox(buildTitleBoxOptions(state, version, dimensions.columns));
     const promptLines = buildPromptRenderLines(dimensions.columns, statusText, promptLayout, true);
     const autocompleteOverlay =
-      state.uiMode === "downloader"
+      state.uiMode === "downloader" || state.uiMode === "model-manager"
         ? []
         : buildAutocompleteOverlayLines(composer, registryRef.current);
 
@@ -1570,6 +1795,16 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
         ...renderDownloaderLines({
           width: dimensions.columns,
           state: state.downloader
+        })
+      );
+    }
+    if (state.uiMode === "model-manager" && state.modelManager) {
+      outputLines.push("");
+      outputLines.push(
+        ...renderModelManagerLines({
+          width: dimensions.columns,
+          state: state.modelManager,
+          currentModel: state.config.model
         })
       );
     }

@@ -32,6 +32,7 @@ import { PulsingSpinner } from "./spinner";
 import { buildPromptBoxFrame } from "./prompt-box";
 import {
   PromptComposer,
+  type ModelAutocompleteCandidate,
   type PromptComposerEvent,
   type PromptComposerLayout
 } from "./prompt-composer";
@@ -141,6 +142,7 @@ interface RuntimeState {
   sessionSelectionIndex: number;
   usedTokensExact: number | null;
   latestOutputTokensPerSecond: number | null;
+  modelAutocompleteCandidates: ModelAutocompleteCandidate[];
 }
 
 interface InkModule {
@@ -446,8 +448,51 @@ function createRuntimeState(options: TuiOptions): RuntimeState {
     sessionList: [],
     sessionSelectionIndex: 0,
     usedTokensExact: null,
-    latestOutputTokensPerSecond: null
+    latestOutputTokensPerSecond: null,
+    modelAutocompleteCandidates: []
   };
+}
+
+export function buildModelAutocompleteCandidates(
+  modelIds: readonly string[]
+): ModelAutocompleteCandidate[] {
+  const candidates: ModelAutocompleteCandidate[] = [];
+  const seenValues = new Set<string>();
+
+  for (const rawModelId of modelIds) {
+    const value = rawModelId.trim();
+    if (value.length === 0 || seenValues.has(value)) {
+      continue;
+    }
+    seenValues.add(value);
+
+    const aliases: string[] = [];
+    const parentPath = value.includes("/") ? value.slice(0, value.lastIndexOf("/")) : "";
+    if (parentPath.length > 0) {
+      aliases.push(parentPath);
+    }
+
+    const segments = value.split("/").filter((segment) => segment.length > 0);
+    if (segments.length >= 2) {
+      aliases.push(`${segments[0]}/${segments[1]}`);
+    }
+
+    const filename = basename(value);
+    if (filename.length > 0) {
+      aliases.push(filename);
+      if (filename.toLowerCase().endsWith(".gguf")) {
+        aliases.push(filename.slice(0, -5));
+      }
+    }
+
+    const dedupedAliases = [...new Set(aliases.filter((alias) => alias.length > 0 && alias !== value))];
+    candidates.push({
+      value,
+      aliases: dedupedAliases
+    });
+  }
+
+  return candidates;
 }
 
 function withCursorAt(content: string, index: number): string {
@@ -570,7 +615,7 @@ export function buildAutocompleteOverlayLines(
   for (let rowIndex = 0; rowIndex < visibleOptions.length; rowIndex++) {
     const option = visibleOptions[rowIndex] ?? "";
     const descriptor = descriptorBySlashName.get(option);
-    const description = descriptor?.description ?? "Command";
+    const description = descriptor?.description ?? (option.startsWith("/") ? "Command" : "Local model");
     const commandColor = descriptor?.kind === "skill" ? INPUT_PINK : GRADIENT_BLUE;
     const selected = startIndex + rowIndex === menu.selectedIndex;
     const paddedCommand = option.padEnd(commandColumnWidth, " ");
@@ -836,7 +881,8 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
       return new PromptComposer({
         interiorWidth: Math.max(0, dimensionsRef.current.columns - 2),
         history: [...currentState.inputHistory],
-        autoComplete: registryRef.current.getAutocompleteCommands(),
+        commandAutoComplete: registryRef.current.getAutocompleteCommands(),
+        modelAutoComplete: currentState.modelAutocompleteCandidates,
         prefix: PROMPT_PREFIX,
         text: seedText
       });
@@ -845,6 +891,25 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
     if (!composerRef.current) {
       composerRef.current = createComposer();
     }
+
+    const refreshModelAutocomplete = useCallback(async (): Promise<void> => {
+      const currentState = stateRef.current;
+      if (!currentState) {
+        return;
+      }
+
+      const models = await listLocalModels({ nicknames: currentState.config.nicknames });
+      const candidates = buildModelAutocompleteCandidates(models.map((model) => model.id));
+
+      const state = stateRef.current;
+      if (!state) {
+        return;
+      }
+
+      state.modelAutocompleteCandidates = candidates;
+      composerRef.current?.setModelAutocompleteCandidates(candidates);
+      forceRender();
+    }, [forceRender]);
 
     const refreshSessionActivity = useCallback(async (): Promise<void> => {
       const currentState = stateRef.current;
@@ -946,6 +1011,10 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
     useEffect(() => {
       void refreshSessionActivity();
     }, [refreshSessionActivity]);
+
+    useEffect(() => {
+      void refreshModelAutocomplete();
+    }, [refreshModelAutocomplete]);
 
     useEffect(() => {
       let canceled = false;
@@ -1510,6 +1579,7 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
         downloaderProgressDirtyRef.current = false;
         downloaderProgressBufferRef.current = null;
         downloaderAbortControllerRef.current = null;
+        void refreshModelAutocomplete();
       } catch (error) {
         const state = stateRef.current;
         if (!state || !state.downloader) {
@@ -1524,7 +1594,7 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
       }
 
       forceRender();
-    }, [forceRender]);
+    }, [forceRender, refreshModelAutocomplete]);
 
     const refreshModelManagerModels = useCallback(async (): Promise<void> => {
       const currentState = stateRef.current;
@@ -1661,6 +1731,9 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
             messageCount: currentState.messageCount
           };
           const result = await registryRef.current.dispatch(parsed.command, parsed.args, context);
+          if (parsed.command === "download" || parsed.command === "dl") {
+            void refreshModelAutocomplete();
+          }
 
           if (result.output) {
             appendOutput(currentState, formatDimMessage(result.output));
@@ -1737,6 +1810,7 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
         forceRender,
         handleUserMessage,
         persistSessionSnapshot,
+        refreshModelAutocomplete,
         refreshSessionActivity,
         refreshModelManagerModels,
         scheduleDownloaderSearch,
@@ -1923,6 +1997,7 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
                     state.config.model = "default";
                     await saveConfig(state.config);
                   }
+                  void refreshModelAutocomplete();
                 } catch (error) {
                   state.modelManager = setModelManagerError(
                     state.modelManager,
@@ -2190,6 +2265,11 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
               shouldRender = true;
               continue;
             }
+            if (action.type === "tab") {
+              composer.acceptAutocompleteSelection();
+              shouldRender = true;
+              continue;
+            }
             if (action.type === "submit") {
               if (shouldConsumeSubmitForAutocomplete(menuState)) {
                 composer.acceptAutocompleteSelection();
@@ -2235,6 +2315,7 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
       normalizeDownloaderQuery,
       persistSessionSnapshot,
       preloadDownloaderTabs,
+      refreshModelAutocomplete,
       syncModelManagerSearchFromComposer,
       syncDownloaderSearchFromComposer,
       stdin

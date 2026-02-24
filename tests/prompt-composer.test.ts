@@ -169,6 +169,106 @@ describe("PromptComposer", () => {
     expect(composer.getAutocompleteMenuState()).toBeNull();
   });
 
+  it("suggests local model IDs for /model by model-id prefix", () => {
+    const composer = new PromptComposer({
+      interiorWidth: 40,
+      history: [],
+      commandAutoComplete: ["/model", "/nick"],
+      modelAutoComplete: [
+        {
+          value: "org/repo/model-q4.gguf",
+          aliases: ["org/repo", "model-q4.gguf", "model-q4"]
+        }
+      ]
+    });
+
+    typeText(composer, "/model org/");
+    expect(composer.getAutocompleteMenuState()?.options).toEqual(["org/repo/model-q4.gguf"]);
+  });
+
+  it("suggests local model IDs for /model by repo and filename aliases", () => {
+    const composer = new PromptComposer({
+      interiorWidth: 40,
+      history: [],
+      commandAutoComplete: ["/model"],
+      modelAutoComplete: [
+        {
+          value: "org/repo/model-q4.gguf",
+          aliases: ["org/repo", "model-q4.gguf", "model-q4"]
+        }
+      ]
+    });
+
+    typeText(composer, "/model model-q");
+    expect(composer.getAutocompleteMenuState()?.options).toEqual(["org/repo/model-q4.gguf"]);
+
+    composer.clearAutocompleteSelection();
+    while (composer.getCursor() > 0) {
+      composer.handleKey("BACKSPACE");
+    }
+    typeText(composer, "/model org/repo");
+    expect(composer.getAutocompleteMenuState()?.options).toEqual(["org/repo/model-q4.gguf"]);
+  });
+
+  it("shows local model options for /model with empty first argument", () => {
+    const composer = new PromptComposer({
+      interiorWidth: 40,
+      history: [],
+      commandAutoComplete: ["/model"],
+      modelAutoComplete: [
+        { value: "org/repo/a.gguf", aliases: ["org/repo", "a.gguf", "a"] },
+        { value: "org/repo/b.gguf", aliases: ["org/repo", "b.gguf", "b"] }
+      ]
+    });
+
+    typeText(composer, "/model ");
+    expect(composer.getAutocompleteMenuState()?.options).toEqual([
+      "org/repo/a.gguf",
+      "org/repo/b.gguf"
+    ]);
+  });
+
+  it("supports /nick model-target completion only for first argument", () => {
+    const composer = new PromptComposer({
+      interiorWidth: 40,
+      history: [],
+      commandAutoComplete: ["/nick"],
+      modelAutoComplete: [
+        {
+          value: "org/repo/model-q4.gguf",
+          aliases: ["org/repo", "model-q4.gguf", "model-q4"]
+        }
+      ]
+    });
+
+    typeText(composer, "/nick model-q");
+    expect(composer.getAutocompleteMenuState()?.options).toEqual(["org/repo/model-q4.gguf"]);
+
+    composer.acceptAutocompleteSelection();
+    typeText(composer, " speedy");
+    expect(composer.getAutocompleteMenuState()).toBeNull();
+  });
+
+  it("updates model suggestions when candidates are refreshed", () => {
+    const composer = new PromptComposer({
+      interiorWidth: 40,
+      history: [],
+      commandAutoComplete: ["/model"],
+      modelAutoComplete: []
+    });
+
+    typeText(composer, "/model ");
+    expect(composer.getAutocompleteMenuState()).toBeNull();
+
+    composer.setModelAutocompleteCandidates([
+      {
+        value: "org/repo/model-q4.gguf",
+        aliases: ["org/repo", "model-q4.gguf", "model-q4"]
+      }
+    ]);
+    expect(composer.getAutocompleteMenuState()?.options).toEqual(["org/repo/model-q4.gguf"]);
+  });
+
   it("returns submit and cancel events", () => {
     const composer = new PromptComposer({
       interiorWidth: 20,

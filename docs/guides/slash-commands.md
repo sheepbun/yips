@@ -24,6 +24,9 @@ Slash commands are user-facing commands typed directly into the Yips TUI input. 
 | `/backend` | Show current backend |
 | `/backend <name>` | Switch backend (`llamacpp` or `claude`) |
 | `/nick <model> <nickname>` | Set and persist a display nickname for a model |
+| `/tokens` | Show current token counter mode |
+| `/tokens auto` | Use automatic max token calculation from available RAM after model load |
+| `/tokens <value>` | Set manual max token value (supports `k` suffix, for example `32k`) |
 
 `/download` usage:
 
@@ -61,7 +64,7 @@ All commands recognized by yips-cli, carried forward to the TypeScript rewrite:
 /backend    /clear      /dl         /download   /exit
 /fetch      /grab       /help       /memorize   /model
 /models     /new        /nick       /quit       /search
-/sessions   /stream     /verbose    /vt
+/sessions   /stream     /tokens     /verbose    /vt
 ```
 
 ## Tab Autocompletion

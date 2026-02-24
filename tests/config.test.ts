@@ -20,6 +20,8 @@ const originalLlamaContextSize = process.env["YIPS_LLAMA_CONTEXT_SIZE"];
 const originalLlamaGpuLayers = process.env["YIPS_LLAMA_GPU_LAYERS"];
 const originalLlamaAutoStart = process.env["YIPS_LLAMA_AUTO_START"];
 const originalLlamaPortConflictPolicy = process.env["YIPS_LLAMA_PORT_CONFLICT_POLICY"];
+const originalTokensMode = process.env["YIPS_TOKENS_MODE"];
+const originalTokensManualMax = process.env["YIPS_TOKENS_MANUAL_MAX"];
 
 afterEach(() => {
   if (originalLlamaBaseUrl === undefined) {
@@ -80,6 +82,18 @@ afterEach(() => {
     delete process.env["YIPS_LLAMA_PORT_CONFLICT_POLICY"];
   } else {
     process.env["YIPS_LLAMA_PORT_CONFLICT_POLICY"] = originalLlamaPortConflictPolicy;
+  }
+
+  if (originalTokensMode === undefined) {
+    delete process.env["YIPS_TOKENS_MODE"];
+  } else {
+    process.env["YIPS_TOKENS_MODE"] = originalTokensMode;
+  }
+
+  if (originalTokensManualMax === undefined) {
+    delete process.env["YIPS_TOKENS_MANUAL_MAX"];
+  } else {
+    process.env["YIPS_TOKENS_MANUAL_MAX"] = originalTokensManualMax;
   }
 });
 
@@ -205,6 +219,8 @@ describe("loadConfig", () => {
     process.env["YIPS_LLAMA_GPU_LAYERS"] = "77";
     process.env["YIPS_LLAMA_AUTO_START"] = "false";
     process.env["YIPS_LLAMA_PORT_CONFLICT_POLICY"] = "fail";
+    process.env["YIPS_TOKENS_MODE"] = "manual";
+    process.env["YIPS_TOKENS_MANUAL_MAX"] = "32000";
 
     const result = await loadConfig(configPath);
 
@@ -217,6 +233,8 @@ describe("loadConfig", () => {
     expect(result.config.llamaGpuLayers).toBe(77);
     expect(result.config.llamaAutoStart).toBe(false);
     expect(result.config.llamaPortConflictPolicy).toBe("fail");
+    expect(result.config.tokensMode).toBe("manual");
+    expect(result.config.tokensManualMax).toBe(32000);
   });
 
   it("persists config with saveConfig and updates with updateConfig", async () => {

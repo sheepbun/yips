@@ -110,6 +110,7 @@ describe("createDefaultRegistry", () => {
     expect(registry.has("new")).toBe(true);
     expect(registry.has("model")).toBe(true);
     expect(registry.has("stream")).toBe(true);
+    expect(registry.has("tokens")).toBe(true);
     expect(registry.has("verbose")).toBe(true);
     expect(registry.has("backend")).toBe(true);
     expect(registry.has("sessions")).toBe(true);
@@ -182,6 +183,54 @@ describe("createDefaultRegistry", () => {
     const result = await registry.dispatch("verbose", "", context);
     expect(context.config.verbose).toBe(true);
     expect(result.output).toContain("enabled");
+  });
+
+  it("/tokens shows current mode with no args", async () => {
+    const registry = createDefaultRegistry();
+    const context = createContext();
+    const result = await registry.dispatch("tokens", "", context);
+    expect(result.action).toBe("continue");
+    expect(result.output).toContain("auto");
+  });
+
+  it("/tokens auto enables auto mode", async () => {
+    const registry = createDefaultRegistry();
+    const context = createContext();
+    context.config.tokensMode = "manual";
+    context.config.tokensManualMax = 20000;
+    const result = await registry.dispatch("tokens", "auto", context);
+    expect(result.action).toBe("continue");
+    expect(result.output).toContain("auto");
+    expect(context.config.tokensMode).toBe("auto");
+  });
+
+  it("/tokens sets manual numeric value", async () => {
+    const registry = createDefaultRegistry();
+    const context = createContext();
+    const result = await registry.dispatch("tokens", "32000", context);
+    expect(result.action).toBe("continue");
+    expect(result.output).toContain("32000");
+    expect(context.config.tokensMode).toBe("manual");
+    expect(context.config.tokensManualMax).toBe(32000);
+  });
+
+  it("/tokens parses k-suffixed values", async () => {
+    const registry = createDefaultRegistry();
+    const context = createContext();
+    const result = await registry.dispatch("tokens", "32k", context);
+    expect(result.action).toBe("continue");
+    expect(context.config.tokensMode).toBe("manual");
+    expect(context.config.tokensManualMax).toBe(32000);
+    expect(result.output).toContain("32000");
+  });
+
+  it("/tokens rejects invalid values", async () => {
+    const registry = createDefaultRegistry();
+    const context = createContext();
+    const result = await registry.dispatch("tokens", "-1", context);
+    expect(result.action).toBe("continue");
+    expect(result.output).toContain("Usage:");
+    expect(context.config.tokensMode).toBe("auto");
   });
 
   it("/model shows current model and usage without args", async () => {

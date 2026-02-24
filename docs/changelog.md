@@ -50,6 +50,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Model Manager tests (`tests/model-manager.test.ts`, `tests/model-manager-state.test.ts`, `tests/model-manager-ui.test.ts`)
 - Session persistence module (`src/session-store.ts`) with save/list/load support for markdown session files in `~/.yips/memory`
 - `/sessions` command implementation in the TypeScript rewrite (interactive session browser mode in TUI)
+- `/tokens` command implementation with `auto` and manual modes for title-box token max control
 
 ### Changed
 
@@ -77,6 +78,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - TUI now supports a dedicated `model-manager` UI mode with prompt-composer search input and persisted model selection
 - Title box right column now renders real recent session activity and highlights selection while browsing `/sessions`
 - TUI now auto-creates and updates session files after exchanges, derives session names from first user prompt, and restores history from selected sessions
+- Title-box token usage now renders as `x.x/y.yk tks`, with auto max derived from RAM-after-model-load and manual override via `/tokens`
 
 ## Legacy (yips-cli)
 

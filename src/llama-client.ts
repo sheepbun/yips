@@ -12,10 +12,22 @@ interface ChatCompletionRequest {
 interface StreamLineResult {
   done: boolean;
   token: string;
+  usage?: UsageTotals;
 }
 
 export interface StreamChatHandlers {
   onToken: (token: string) => void;
+}
+
+export interface UsageTotals {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+}
+
+export interface ChatResult {
+  text: string;
+  usage?: UsageTotals;
 }
 
 export interface LlamaClientOptions {
@@ -91,12 +103,37 @@ function parseStreamLine(line: string): StreamLineResult {
   }
 
   const choice = extractFirstChoice(parsed);
+  const usage = extractUsageTotals(parsed);
   if (!choice) {
-    return { done: false, token: "" };
+    return { done: false, token: "", usage };
   }
 
   const token = extractDeltaContent(choice) || extractMessageContent(choice);
-  return { done: false, token };
+  return { done: false, token, usage };
+}
+
+function extractUsageTotals(payload: unknown): UsageTotals | undefined {
+  if (!isRecord(payload)) {
+    return undefined;
+  }
+  const usage = payload["usage"];
+  if (!isRecord(usage)) {
+    return undefined;
+  }
+  const promptTokens = usage["prompt_tokens"];
+  const completionTokens = usage["completion_tokens"];
+  const totalTokens = usage["total_tokens"];
+  if (
+    typeof promptTokens !== "number" ||
+    typeof completionTokens !== "number" ||
+    typeof totalTokens !== "number"
+  ) {
+    return undefined;
+  }
+  if (promptTokens < 0 || completionTokens < 0 || totalTokens < 0) {
+    return undefined;
+  }
+  return { promptTokens, completionTokens, totalTokens };
 }
 
 async function readErrorBody(response: Response): Promise<string> {
@@ -131,7 +168,7 @@ export class LlamaClient {
     return this.model;
   }
 
-  async chat(messages: readonly ChatMessage[], model = this.model): Promise<string> {
+  async chat(messages: readonly ChatMessage[], model = this.model): Promise<ChatResult> {
     const payload = this.buildPayload(messages, model, false);
     const response = await this.requestCompletion(payload);
 
@@ -146,14 +183,17 @@ export class LlamaClient {
       throw new Error("Chat completion response did not include assistant content.");
     }
 
-    return content;
+    return {
+      text: content,
+      usage: extractUsageTotals(parsed)
+    };
   }
 
   async streamChat(
     messages: readonly ChatMessage[],
     handlers: StreamChatHandlers,
     model = this.model
-  ): Promise<string> {
+  ): Promise<ChatResult> {
     const payload = this.buildPayload(messages, model, true);
     const response = await this.requestCompletion(payload);
     if (!response.body) {
@@ -165,6 +205,7 @@ export class LlamaClient {
     let buffer = "";
     let content = "";
     let streamDone = false;
+    let usage: UsageTotals | undefined;
 
     try {
       while (!streamDone) {
@@ -179,6 +220,9 @@ export class LlamaClient {
 
         for (const line of lines) {
           const result = parseStreamLine(line.trim());
+          if (result.usage) {
+            usage = result.usage;
+          }
           if (result.token.length > 0) {
             content += result.token;
             handlers.onToken(result.token);
@@ -197,13 +241,16 @@ export class LlamaClient {
 
       if (!streamDone && buffer.trim().length > 0) {
         const result = parseStreamLine(buffer.trim());
+        if (result.usage) {
+          usage = result.usage;
+        }
         if (result.token.length > 0) {
           content += result.token;
           handlers.onToken(result.token);
         }
       }
 
-      return content;
+      return { text: content, usage };
     } finally {
       reader.releaseLock();
     }

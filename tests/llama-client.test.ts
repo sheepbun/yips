@@ -38,7 +38,8 @@ describe("LlamaClient.chat", () => {
   it("posts chat completions and returns assistant text", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       createJsonResponse({
-        choices: [{ message: { role: "assistant", content: "Hi from llama.cpp" } }]
+        choices: [{ message: { role: "assistant", content: "Hi from llama.cpp" } }],
+        usage: { prompt_tokens: 11, completion_tokens: 7, total_tokens: 18 }
       })
     );
     const client = new LlamaClient({
@@ -47,9 +48,10 @@ describe("LlamaClient.chat", () => {
       fetchImpl: fetchMock as unknown as typeof fetch
     });
 
-    const text = await client.chat(TEST_MESSAGES);
+    const result = await client.chat(TEST_MESSAGES);
 
-    expect(text).toBe("Hi from llama.cpp");
+    expect(result.text).toBe("Hi from llama.cpp");
+    expect(result.usage).toEqual({ promptTokens: 11, completionTokens: 7, totalTokens: 18 });
     expect(fetchMock).toHaveBeenCalledTimes(1);
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
@@ -100,6 +102,7 @@ describe("LlamaClient.streamChat", () => {
         createSseResponse([
           'data: {"choices":[{"delta":{"content":"Hel"}}]}\n\n',
           'data: {"choices":[{"delta":{"content":"lo"}}]}\n\n',
+          'data: {"usage":{"prompt_tokens":10,"completion_tokens":4,"total_tokens":14}}\n\n',
           "data: [DONE]\n\n"
         ])
       );
@@ -110,13 +113,14 @@ describe("LlamaClient.streamChat", () => {
     });
     const tokens: string[] = [];
 
-    const text = await client.streamChat(TEST_MESSAGES, {
+    const result = await client.streamChat(TEST_MESSAGES, {
       onToken: (token) => {
         tokens.push(token);
       }
     });
 
-    expect(text).toBe("Hello");
+    expect(result.text).toBe("Hello");
+    expect(result.usage).toEqual({ promptTokens: 10, completionTokens: 4, totalTokens: 14 });
     expect(tokens).toEqual(["Hel", "lo"]);
   });
 

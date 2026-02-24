@@ -161,6 +161,26 @@ function splitCommandArgs(input: string): string[] {
   });
 }
 
+function parseTokenCountArg(input: string): number | null {
+  const trimmed = input.trim().toLowerCase();
+  if (trimmed.length === 0) {
+    return null;
+  }
+
+  const match = trimmed.match(/^(\d+)(k)?$/u);
+  if (!match) {
+    return null;
+  }
+
+  const raw = Number(match[1]);
+  if (!Number.isInteger(raw) || raw <= 0) {
+    return null;
+  }
+
+  const multiplier = match[2] === "k" ? 1000 : 1;
+  return raw * multiplier;
+}
+
 export function parseCommand(input: string): ParsedCommand | null {
   const trimmed = input.trim();
   if (!trimmed.startsWith("/")) return null;
@@ -322,6 +342,48 @@ export function createDefaultRegistry(): CommandRegistry {
       return { output: `Verbose mode ${state}.`, action: "continue" };
     },
     "Toggle verbose mode"
+  );
+
+  registry.register(
+    "tokens",
+    async (args, context) => {
+      const trimmed = args.trim();
+      if (trimmed.length === 0) {
+        if (context.config.tokensMode === "auto") {
+          return { output: "Tokens mode: auto (dynamic).", action: "continue" };
+        }
+        return {
+          output: `Tokens mode: manual (${context.config.tokensManualMax}).`,
+          action: "continue"
+        };
+      }
+
+      if (trimmed.toLowerCase() === "auto") {
+        context.config.tokensMode = "auto";
+        await saveConfig(context.config);
+        return {
+          output: "Token limit mode set to auto.",
+          action: "continue"
+        };
+      }
+
+      const parsed = parseTokenCountArg(trimmed);
+      if (parsed === null) {
+        return {
+          output: "Usage: /tokens auto | /tokens <positive_number|numberk>",
+          action: "continue"
+        };
+      }
+
+      context.config.tokensMode = "manual";
+      context.config.tokensManualMax = parsed;
+      await saveConfig(context.config);
+      return {
+        output: `Token limit set to ${parsed} (manual).`,
+        action: "continue"
+      };
+    },
+    "Show or set token counter mode and max"
   );
 
   registry.register("download", (args) => handleDownload(args), "Open the model downloader");

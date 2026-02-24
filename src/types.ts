@@ -15,6 +15,8 @@ export interface AppConfig {
   llamaAutoStart: boolean;
   llamaPortConflictPolicy: LlamaPortConflictPolicy;
   model: string;
+  tokensMode: "auto" | "manual";
+  tokensManualMax: number;
   nicknames: Record<string, string>;
 }
 

@@ -116,6 +116,8 @@ interface AssistantReply {
   text: string;
   rendered: boolean;
   totalTokens?: number;
+  completionTokens?: number;
+  generationDurationMs?: number;
 }
 
 interface RuntimeState {
@@ -138,6 +140,7 @@ interface RuntimeState {
   sessionList: SessionListItem[];
   sessionSelectionIndex: number;
   usedTokensExact: number | null;
+  latestOutputTokensPerSecond: number | null;
 }
 
 interface InkModule {
@@ -228,6 +231,21 @@ function formatDownloadStatus(options: {
   const remainingBytes = Math.max(0, options.totalBytes - options.bytesDownloaded);
   const etaSeconds = bytesPerSecond > 0 ? remainingBytes / bytesPerSecond : 0;
   return `${formatBytes(options.bytesDownloaded)} / ${formatBytes(options.totalBytes)} | ${speedText} | ETA ${formatEta(etaSeconds)}`;
+}
+
+export function computeTokensPerSecond(tokens: number, durationMs: number): number | null {
+  if (!Number.isFinite(tokens) || !Number.isFinite(durationMs)) {
+    return null;
+  }
+  if (tokens <= 0 || durationMs <= 0) {
+    return null;
+  }
+  return tokens / (durationMs / 1000);
+}
+
+export function formatTokensPerSecond(tokensPerSecond: number): string {
+  const safe = Number.isFinite(tokensPerSecond) && tokensPerSecond > 0 ? tokensPerSecond : 0;
+  return `${safe.toFixed(1)} tk/s`;
 }
 
 function toDebugText(input: string): string {
@@ -331,6 +349,12 @@ export function buildPromptStatusText(state: RuntimeState): string {
   const parts = [provider];
   if (loadedModel) {
     parts.push(getFriendlyModelName(loadedModel, state.config.nicknames));
+    if (
+      typeof state.latestOutputTokensPerSecond === "number" &&
+      state.latestOutputTokensPerSecond > 0
+    ) {
+      parts.push(formatTokensPerSecond(state.latestOutputTokensPerSecond));
+    }
   }
   return parts.join(" · ");
 }
@@ -373,6 +397,7 @@ function resetSession(state: RuntimeState): void {
   state.sessionCreated = false;
   state.sessionName = "";
   state.usedTokensExact = null;
+  state.latestOutputTokensPerSecond = null;
 }
 
 function replayOutputFromHistory(state: RuntimeState): void {
@@ -420,7 +445,8 @@ function createRuntimeState(options: TuiOptions): RuntimeState {
     recentActivity: [],
     sessionList: [],
     sessionSelectionIndex: 0,
-    usedTokensExact: null
+    usedTokensExact: null,
+    latestOutputTokensPerSecond: null
   };
 }
 
@@ -1044,6 +1070,9 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
         throw new Error("Chat runtime is not initialized.");
       }
 
+      const estimateCompletionTokens = (text: string): number =>
+        estimateConversationTokens([{ content: text }]);
+
       const readiness = await ensureLlamaReady(currentState.config);
       if (!readiness.ready) {
         throw new Error(
@@ -1056,11 +1085,18 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
       llamaClient.setModel(currentState.config.model);
 
       if (!currentState.config.streaming) {
+        const startedAtMs = Date.now();
         startBusyIndicator("Thinking...");
 
         try {
           const result = await llamaClient.chat(currentState.history, currentState.config.model);
-          return { text: result.text, rendered: false, totalTokens: result.usage?.totalTokens };
+          return {
+            text: result.text,
+            rendered: false,
+            totalTokens: result.usage?.totalTokens,
+            completionTokens: result.usage?.completionTokens ?? estimateCompletionTokens(result.text),
+            generationDurationMs: Date.now() - startedAtMs
+          };
         } finally {
           stopBusyIndicator();
         }
@@ -1069,6 +1105,7 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
       const timestamp = new Date();
       let streamText = "";
       let receivedFirstToken = false;
+      let streamStartedAtMs: number | null = null;
       const blockStart = currentState.outputLines.length;
       let blockLength = 0;
       startBusyIndicator("Thinking...");
@@ -1081,6 +1118,7 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
             onToken: (token: string): void => {
               if (!receivedFirstToken) {
                 receivedFirstToken = true;
+                streamStartedAtMs = Date.now();
                 stopBusyIndicator();
               }
               streamText += token;
@@ -1105,7 +1143,10 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
         return {
           text: streamText,
           rendered: true,
-          totalTokens: streamResult.usage?.totalTokens
+          totalTokens: streamResult.usage?.totalTokens,
+          completionTokens: streamResult.usage?.completionTokens ?? estimateCompletionTokens(streamText),
+          generationDurationMs:
+            streamStartedAtMs === null ? undefined : Math.max(0, Date.now() - streamStartedAtMs)
         };
       } catch {
         stopBusyIndicator();
@@ -1114,6 +1155,7 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
           formatWarningMessage("Streaming failed. Retrying without streaming.")
         );
         startBusyIndicator("Retrying...");
+        const retryStartedAtMs = Date.now();
 
         try {
           const fallbackResult = await llamaClient.chat(
@@ -1130,7 +1172,10 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
           return {
             text: fallbackText,
             rendered: true,
-            totalTokens: fallbackResult.usage?.totalTokens
+            totalTokens: fallbackResult.usage?.totalTokens,
+            completionTokens:
+              fallbackResult.usage?.completionTokens ?? estimateCompletionTokens(fallbackText),
+            generationDurationMs: Date.now() - retryStartedAtMs
           };
         } catch (fallbackError) {
           currentState.outputLines.splice(blockStart, blockLength);
@@ -1565,6 +1610,15 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
           if (!reply.rendered) {
             appendOutput(currentState, formatAssistantMessage(reply.text));
           }
+          const completionTokens =
+            typeof reply.completionTokens === "number" && reply.completionTokens > 0
+              ? reply.completionTokens
+              : estimateConversationTokens([{ content: reply.text }]);
+          const throughput = computeTokensPerSecond(
+            completionTokens,
+            reply.generationDurationMs ?? 0
+          );
+          currentState.latestOutputTokensPerSecond = throughput;
           if (typeof reply.totalTokens === "number" && reply.totalTokens >= 0) {
             currentState.usedTokensExact = reply.totalTokens;
           }

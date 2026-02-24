@@ -1497,3 +1497,53 @@ Validation:
 - `git status --short --branch` checked before and after commit/push.
 Next:
 - Pull latest `main` on other machines/environments before continuing new changes.
+
+## 2026-02-24 18:35 UTC — Exchange 32
+Summary: Updated model friendly-name fallback so nested GGUF model variants display their parent GGUF folder name instead of long quantized filenames.
+Changed:
+- Updated `src/model-manager.ts`:
+  - `toFriendlyNameFallback(...)` now checks nested path segments for `.gguf` files.
+  - when the immediate parent directory name contains `gguf` (case-insensitive), it is used as the fallback display name.
+  - otherwise existing behavior remains (filename stem without `.gguf`).
+- Updated `tests/model-manager.test.ts`:
+  - added regression coverage for `Qwen/Qwen3-VL-2B-Instruct-GGUF/Qwen3VL-2B-Instruct-Q4_K_M.gguf` expecting `Qwen3-VL-2B-Instruct-GGUF`.
+  - added `listLocalModels(...)` coverage verifying both `name` and `friendlyName` use the GGUF parent folder for nested variants.
+Validation:
+- `npm test -- tests/model-manager.test.ts` — clean (7 passing)
+- `npm run typecheck` — clean
+Next:
+- Optionally run full suite (`npm test`, `npm run lint`) if you want broader regression validation before the next commit.
+
+## 2026-02-24 18:38 UTC — Exchange 33
+Summary: Changed GGUF naming strategy from conditional fallback to default parent-folder naming for nested model paths.
+Changed:
+- Updated `src/model-manager.ts`:
+  - `toFriendlyNameFallback(...)` now defaults to immediate parent directory name for nested `.gguf` model IDs.
+  - retained filename-stem behavior only when there is no parent directory segment.
+  - preserved nickname compatibility by checking both default name key and filename-stem key (e.g., `qwen`) in `getFriendlyModelName(...)`.
+- Updated `tests/model-manager.test.ts`:
+  - revised naming tests to assert parent-folder default behavior.
+  - added explicit coverage that `org/repo/model-q4.gguf` defaults to `repo`.
+Validation:
+- `npm test -- tests/model-manager.test.ts` — clean (8 passing)
+- `npm run typecheck` — clean
+Next:
+- Optionally run full suite (`npm test`, `npm run lint`) before commit.
+
+## 2026-02-24 18:43 UTC — Exchange 34
+Summary: Fixed title-box and prompt status to use shortened default model display names instead of raw model paths.
+Changed:
+- Updated `src/model-manager.ts`:
+  - exported `getModelDisplayName(modelId)` and used it as the default model naming rule.
+  - `getFriendlyModelName(...)` and `listLocalModels(...)` now share `getModelDisplayName(...)` for consistent naming.
+- Updated `src/tui.ts`:
+  - title-box model label now uses `getModelDisplayName(...)`.
+  - prompt footer status model label now uses `getModelDisplayName(...)`.
+  - both no longer render full raw `owner/repo/file.gguf` path when a parent directory label exists.
+- Updated `tests/model-manager.test.ts`:
+  - added explicit `getModelDisplayName(...)` coverage for nested Qwen GGUF path labels.
+Validation:
+- `npm test -- tests/model-manager.test.ts` — clean (9 passing)
+- `npm run typecheck` — clean
+Next:
+- Optionally run full suite (`npm test`, `npm run lint`) before commit.

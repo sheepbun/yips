@@ -16,7 +16,9 @@ OS_NAME=""
 PKG_MANAGER=""
 INSTALL_PREFIX=()
 APT_UPDATED=0
+PACMAN_UPDATED=0
 INSTALL_CUDA=0
+NODE_RUNTIME_DIAG=""
 
 log() {
   printf '[install] %s\n' "$*"
@@ -106,7 +108,13 @@ install_packages_dnf() {
 
 install_packages_pacman() {
   local packages=("$@")
-  "${INSTALL_PREFIX[@]}" pacman -Sy --needed --noconfirm "${packages[@]}"
+  if [[ "$PACMAN_UPDATED" -eq 0 ]]; then
+    log "Arch detected: using full-upgrade pacman workflow (Syu)."
+    "${INSTALL_PREFIX[@]}" pacman -Syu --needed --noconfirm "${packages[@]}"
+    PACMAN_UPDATED=1
+  else
+    "${INSTALL_PREFIX[@]}" pacman -S --needed --noconfirm "${packages[@]}"
+  fi
 }
 
 install_packages_brew() {
@@ -171,6 +179,42 @@ ensure_prerequisites() {
       die "Unsupported package manager: ${PKG_MANAGER}"
       ;;
   esac
+}
+
+capture_node_runtime_diag() {
+  local node_diag npm_diag
+  node_diag="$(node -v 2>&1 || true)"
+  npm_diag="$(npm -v 2>&1 || true)"
+  NODE_RUNTIME_DIAG=$'node -v:\n'"${node_diag}"$'\n\nnpm -v:\n'"${npm_diag}"
+}
+
+node_runtime_healthy() {
+  node -v >/dev/null 2>&1 && npm -v >/dev/null 2>&1
+}
+
+repair_node_runtime_arch() {
+  warn "Detected broken Node runtime linkage. Attempting Arch self-heal reinstall (nodejs/npm/simdjson)."
+  install_packages_pacman nodejs npm simdjson
+}
+
+ensure_node_runtime_healthy() {
+  if node_runtime_healthy; then
+    return
+  fi
+
+  capture_node_runtime_diag
+
+  if [[ "$PKG_MANAGER" == "pacman" ]]; then
+    repair_node_runtime_arch
+    if node_runtime_healthy; then
+      log "Node runtime self-heal succeeded."
+      return
+    fi
+    capture_node_runtime_diag
+    die $'Node runtime is still unhealthy after Arch self-heal.\nRun manually:\n  sudo pacman -Syu --needed nodejs npm simdjson\nThen retry ./install.sh\n\nDiagnostics:\n'"${NODE_RUNTIME_DIAG}"
+  fi
+
+  die $'Node runtime is unhealthy.\nPlease repair your Node installation and retry.\n\nDiagnostics:\n'"${NODE_RUNTIME_DIAG}"
 }
 
 setup_llama_repo() {
@@ -329,6 +373,7 @@ NODE
 }
 
 install_node_dependencies() {
+  ensure_node_runtime_healthy
   log "Installing Node dependencies"
   (cd "${REPO_ROOT}" && npm install)
 }
@@ -362,6 +407,7 @@ main() {
   parse_args "$@"
   detect_platform
   ensure_prerequisites
+  ensure_node_runtime_healthy
   install_cuda_toolkit
   setup_llama_repo
   build_llama_cuda_then_fallback

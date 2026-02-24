@@ -8,6 +8,7 @@ import {
   deleteLocalModel,
   filterModels,
   findMatchingModel,
+  getModelDisplayName,
   getFriendlyModelName,
   listLocalModels
 } from "../src/model-manager";
@@ -144,5 +145,40 @@ describe("model-manager", () => {
   it("uses nickname fallback by filename", () => {
     const friendly = getFriendlyModelName("org/repo/qwen.gguf", { qwen: "qwen-3" });
     expect(friendly).toBe("qwen-3");
+  });
+
+  it("uses parent folder as the default name for nested model variants", () => {
+    const friendly = getFriendlyModelName(
+      "Qwen/Qwen3-VL-2B-Instruct-GGUF/Qwen3VL-2B-Instruct-Q4_K_M.gguf",
+      {}
+    );
+    expect(friendly).toBe("Qwen3-VL-2B-Instruct-GGUF");
+  });
+
+  it("uses parent folder as model name when listing local models", async () => {
+    const root = await mkdtemp(join(tmpdir(), "yips-model-manager-parent-name-"));
+    const modelDir = join(root, "Qwen", "Qwen3-VL-2B-Instruct-GGUF");
+    await mkdir(modelDir, { recursive: true });
+    await writeFile(join(modelDir, "Qwen3VL-2B-Instruct-Q4_K_M.gguf"), "binary", "utf8");
+
+    try {
+      const models = await listLocalModels({ modelsDir: root });
+      expect(models).toHaveLength(1);
+      expect(models[0]?.name).toBe("Qwen3-VL-2B-Instruct-GGUF");
+      expect(models[0]?.friendlyName).toBe("Qwen3-VL-2B-Instruct-GGUF");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("uses repo directory as default name for owner/repo/model paths", () => {
+    const friendly = getFriendlyModelName("org/repo/model-q4.gguf", {});
+    expect(friendly).toBe("repo");
+  });
+
+  it("returns display name from parent folder for nested gguf model paths", () => {
+    expect(getModelDisplayName("Qwen/Qwen3-VL-2B-Instruct-GGUF/Qwen3VL-2B-Instruct-Q4_K_M.gguf")).toBe(
+      "Qwen3-VL-2B-Instruct-GGUF"
+    );
   });
 });

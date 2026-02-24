@@ -42,9 +42,15 @@ function evaluateSuitability(
   };
 }
 
-function toFriendlyNameFallback(modelId: string): string {
+export function getModelDisplayName(modelId: string): string {
+  const normalizedId = modelId.replace(/\\/gu, "/");
+  const segments = normalizedId.split("/").filter((segment) => segment.length > 0);
   const filename = basename(modelId);
   if (filename.toLowerCase().endsWith(".gguf")) {
+    const parent = segments.length > 1 ? (segments[segments.length - 2] ?? "") : "";
+    if (parent.length > 0) {
+      return parent;
+    }
     return filename.slice(0, -5);
   }
   return filename;
@@ -56,10 +62,19 @@ export function getFriendlyModelName(modelId: string, nicknames: Record<string, 
     return exact.trim();
   }
 
-  const fallback = toFriendlyNameFallback(modelId);
+  const fallback = getModelDisplayName(modelId);
   const byFilename = nicknames[fallback];
   if (typeof byFilename === "string" && byFilename.trim().length > 0) {
     return byFilename.trim();
+  }
+
+  const filename = basename(modelId);
+  if (filename.toLowerCase().endsWith(".gguf")) {
+    const filenameStem = filename.slice(0, -5);
+    const byStem = nicknames[filenameStem];
+    if (typeof byStem === "string" && byStem.trim().length > 0) {
+      return byStem.trim();
+    }
   }
 
   return fallback;
@@ -125,7 +140,7 @@ export async function listLocalModels(options?: {
 
     rows.push({
       id: modelId,
-      name: toFriendlyNameFallback(modelId),
+      name: getModelDisplayName(modelId),
       friendlyName: getFriendlyModelName(modelId, nicknames),
       host,
       backend: "llamacpp",

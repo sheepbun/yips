@@ -229,6 +229,21 @@ function withReverseHighlight(text: string): string {
   return `${ANSI_REVERSE_ON}${text}${ANSI_RESET_ALL}`;
 }
 
+export function shouldConsumeSubmitForAutocomplete(menu: {
+  token: string;
+  options: string[];
+  selectedIndex: number;
+} | null): boolean {
+  if (!menu) {
+    return false;
+  }
+  const selected = menu.options[menu.selectedIndex];
+  if (!selected) {
+    return false;
+  }
+  return selected !== menu.token;
+}
+
 export function computeVisibleLayoutSlices(
   rows: number,
   titleLines: string[],
@@ -842,9 +857,11 @@ function createInkApp(ink: InkModule): React.FC<Omit<InkAppProps, "ink">> {
               continue;
             }
             if (action.type === "submit") {
-              composer.acceptAutocompleteSelection();
-              shouldRender = true;
-              continue;
+              if (shouldConsumeSubmitForAutocomplete(menuState)) {
+                composer.acceptAutocompleteSelection();
+                shouldRender = true;
+                continue;
+              }
             }
           }
 

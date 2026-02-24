@@ -1842,3 +1842,90 @@ Validation:
 - `npm run typecheck` — clean
 Next:
 - Optional: run full-suite `npm test` and `npm run lint` before committing.
+
+## 2026-02-24 21:16 UTC — Exchange 51
+Summary: Implemented dynamic title-box token counter with `/tokens auto` and `/tokens {value}` (manual override), plus exact llama usage ingestion.
+Changed:
+- Added token counter module `src/token-counter.ts`:
+  - `computeAutoMaxTokens(...)` using RAM-after-model heuristic (`ram - model_size - 2GB`) with `4k..128k` clamp.
+  - `resolveEffectiveMaxTokens(...)` for auto/manual mode selection.
+  - `formatTitleTokenUsage(...)` rendering `x.x/y.yk tks`.
+- Expanded config schema in `src/types.ts` and `src/config.ts`:
+  - new `AppConfig` fields: `tokensMode` (`auto|manual`) and `tokensManualMax`.
+  - defaults: `tokensMode: auto`, `tokensManualMax: 8192`.
+  - load/merge/save normalization for both fields (including env overrides).
+- Added `/tokens` command in `src/commands.ts`:
+  - `/tokens` shows current mode.
+  - `/tokens auto` restores automatic max-token mode.
+  - `/tokens <value>` sets manual mode (supports `k` suffix, e.g. `32k`).
+  - invalid inputs return usage guidance.
+- Added `/tokens` to restored command metadata in `src/command-catalog.ts`.
+- Updated TUI token usage rendering in `src/tui.ts`:
+  - removed placeholder `0/8192`.
+  - title-box token usage now computes max tokens from model file size + RAM heuristic in auto mode, or manual max in manual mode.
+  - introduced runtime `usedTokensExact` state and reset behavior on session clear.
+- Updated llama client usage extraction in `src/llama-client.ts`:
+  - `chat(...)` and `streamChat(...)` now return `{ text, usage? }`.
+  - parses OpenAI-compatible `usage` totals when present.
+  - TUI now updates used token display after responses using exact `total_tokens` only.
+- Updated docs:
+  - `docs/guides/slash-commands.md` now documents `/tokens` commands.
+  - `docs/changelog.md` now includes `/tokens` and dynamic title-box token display behavior.
+- Added/updated tests:
+  - new `tests/token-counter.test.ts`.
+  - updated `tests/commands.test.ts` for `/tokens` behavior.
+  - updated `tests/llama-client.test.ts` for `{ text, usage }` return shape and SSE usage parsing.
+  - updated `tests/config.test.ts` for token-mode env overrides.
+Validation:
+- `npm run typecheck` — clean
+- `npm test -- tests/llama-client.test.ts tests/commands.test.ts tests/config.test.ts tests/token-counter.test.ts` — clean (53 passing)
+- `npm test` — clean (23 files, 236 tests)
+- `npm run lint` — clean
+- `npm run format:check` — failing due to pre-existing formatting issues across untouched files
+Next:
+- Run `npm run dev` and verify live title-box token counter behavior across:
+  - default auto mode,
+  - `/tokens 32k` manual override,
+  - `/tokens auto` reset,
+  - model-switch changes affecting auto max.
+
+## 2026-02-24 21:34 UTC — Exchange 52
+Summary: Refined title token display formatting and made used-token count update on every turn (user input + assistant response).
+Changed:
+- Updated `src/token-counter.ts`:
+  - `formatTitleTokenUsage(...)` now removes redundant trailing `.0` in both used and max segments.
+    - examples: `0/32k tks` (instead of `0.0/32.0k tks`), `15.7/32.2k tks` unchanged.
+  - added `estimateConversationTokens(...)` (rough estimate: `ceil(chars/4)` per message).
+- Updated `src/tui.ts` token-update flow:
+  - after each user message append, `usedTokensExact` is recalculated via `estimateConversationTokens(...)`.
+  - after each assistant message:
+    - if exact backend `total_tokens` is available, it is used.
+    - otherwise fallback estimate is recalculated from conversation history.
+  - when loading a saved session, token usage now initializes from estimated history usage.
+- Updated tests in `tests/token-counter.test.ts`:
+  - added no-trailing-`.0` formatting regression.
+  - added conversation token estimation coverage.
+Validation:
+- `npm run typecheck` — clean
+- `npm test -- tests/token-counter.test.ts tests/llama-client.test.ts tests/commands.test.ts tests/tui-resize-render.test.ts` — clean (64 passing)
+- `npm test` — clean (23 files, 238 tests)
+- `npm run lint` — clean
+Next:
+- Run `npm run dev` and verify live behavior for:
+  - initial display `0/<auto-or-manual>k tks`,
+  - increment after user submit,
+  - increment/replace after assistant response,
+  - `/tokens auto` and `/tokens <value>` transitions.
+
+## 2026-02-24 21:35 UTC — Exchange 53
+Summary: Adjusted title token usage format so the used side also shows `k` for values >= 1000.
+Changed:
+- Updated `src/token-counter.ts` formatting:
+  - used side now renders with `k` suffix when >= 1000 (`15.7k/32.2k tks`).
+  - values < 1000 remain plain integers (`0/32k tks`).
+- Updated `tests/token-counter.test.ts` to assert `15.7k/32.2k tks` output.
+Validation:
+- `npm test -- tests/token-counter.test.ts` — clean (8 passing)
+- `npm run typecheck` — clean
+Next:
+- Optional visual confirmation in `npm run dev` that title usage formatting matches desired display.

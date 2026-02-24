@@ -1,7 +1,8 @@
 /** Main TUI orchestrator using Ink. */
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
-import { basename } from "node:path";
+import { statSync } from "node:fs";
+import { basename, join, resolve } from "node:path";
 
 import { getVersion } from "./version";
 
@@ -18,6 +19,7 @@ import {
   INPUT_PINK
 } from "./colors";
 import { LlamaClient } from "./llama-client";
+import type { ChatResult } from "./llama-client";
 import { ensureLlamaReady, formatLlamaStartupFailure, stopLlamaServer } from "./llama-server";
 import {
   formatAssistantMessage,
@@ -85,6 +87,12 @@ import {
 import { renderTitleBox } from "./title-box";
 import type { TitleBoxOptions } from "./title-box";
 import {
+  computeAutoMaxTokens,
+  estimateConversationTokens,
+  formatTitleTokenUsage,
+  resolveEffectiveMaxTokens
+} from "./token-counter";
+import {
   createSessionFileFromHistory,
   listSessions,
   loadSession,
@@ -105,6 +113,7 @@ const DOWNLOADER_PROGRESS_RENDER_INTERVAL_MS = 200;
 interface AssistantReply {
   text: string;
   rendered: boolean;
+  totalTokens?: number;
 }
 
 interface RuntimeState {
@@ -126,6 +135,7 @@ interface RuntimeState {
   recentActivity: string[];
   sessionList: SessionListItem[];
   sessionSelectionIndex: number;
+  usedTokensExact: number | null;
 }
 
 interface InkModule {
@@ -259,13 +269,27 @@ function buildTitleBoxOptions(
   const modelLabel = loadedModel
     ? getFriendlyModelName(loadedModel, state.config.nicknames)
     : "";
+  let tokenUsage = "";
+  if (loadedModel) {
+    const modelSizeBytes = resolveLoadedModelSizeBytes(state.config, loadedModel);
+    const autoMax = computeAutoMaxTokens({
+      ramGb: getSystemSpecs().ramGb,
+      modelSizeBytes
+    });
+    const maxTokens = resolveEffectiveMaxTokens(
+      state.config.tokensMode,
+      state.config.tokensManualMax,
+      autoMax
+    );
+    tokenUsage = formatTitleTokenUsage(state.usedTokensExact ?? 0, maxTokens);
+  }
   return {
     width,
     version,
     username: state.username,
     backend: formatBackendName(state.config.backend),
     model: modelLabel,
-    tokenUsage: loadedModel ? "0/8192" : "",
+    tokenUsage,
     cwd: formatTitleCwd(process.cwd()),
     sessionName: state.sessionName,
     recentActivity: state.recentActivity,
@@ -277,6 +301,17 @@ function buildTitleBoxOptions(
           }
         : undefined
   };
+}
+
+function resolveLoadedModelSizeBytes(config: AppConfig, loadedModel: string): number {
+  try {
+    const modelsDir = resolve(config.llamaModelsDir);
+    const modelPath = resolve(join(modelsDir, loadedModel));
+    const stats = statSync(modelPath);
+    return stats.isFile() ? stats.size : 0;
+  } catch {
+    return 0;
+  }
 }
 
 function buildPromptStatusText(state: RuntimeState): string {
@@ -326,6 +361,7 @@ function resetSession(state: RuntimeState): void {
   state.sessionFilePath = null;
   state.sessionCreated = false;
   state.sessionName = "";
+  state.usedTokensExact = null;
 }
 
 function replayOutputFromHistory(state: RuntimeState): void {
@@ -372,7 +408,8 @@ function createRuntimeState(options: TuiOptions): RuntimeState {
     sessionCreated: false,
     recentActivity: [],
     sessionList: [],
-    sessionSelectionIndex: 0
+    sessionSelectionIndex: 0,
+    usedTokensExact: null
   };
 }
 
@@ -807,6 +844,7 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
           currentState.sessionFilePath = loaded.path;
           currentState.sessionCreated = true;
           replayOutputFromHistory(currentState);
+          currentState.usedTokensExact = estimateConversationTokens(currentState.history);
           currentState.uiMode = "chat";
           composerRef.current = createComposer();
           await refreshSessionActivity();
@@ -969,8 +1007,8 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
         forceRender();
 
         try {
-          const text = await llamaClient.chat(currentState.history, currentState.config.model);
-          return { text, rendered: false };
+          const result = await llamaClient.chat(currentState.history, currentState.config.model);
+          return { text: result.text, rendered: false, totalTokens: result.usage?.totalTokens };
         } finally {
           currentState.busy = false;
           currentState.busyLabel = "";
@@ -986,7 +1024,7 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
       forceRender();
 
       try {
-        streamText = await llamaClient.streamChat(
+        const streamResult: ChatResult = await llamaClient.streamChat(
           currentState.history,
           {
             onToken: (token: string): void => {
@@ -1002,12 +1040,17 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
           },
           currentState.config.model
         );
+        streamText = streamResult.text;
 
         if (streamText.length === 0) {
           throw new Error("Streaming response ended without assistant content.");
         }
 
-        return { text: streamText, rendered: true };
+        return {
+          text: streamText,
+          rendered: true,
+          totalTokens: streamResult.usage?.totalTokens
+        };
       } catch {
         appendOutput(
           currentState,
@@ -1018,17 +1061,22 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
         forceRender();
 
         try {
-          const fallbackText = await llamaClient.chat(
+          const fallbackResult = await llamaClient.chat(
             currentState.history,
             currentState.config.model
           );
+          const fallbackText = fallbackResult.text;
           replaceOutputBlock(
             currentState,
             blockStart,
             blockLength,
             formatAssistantMessage(fallbackText, timestamp)
           );
-          return { text: fallbackText, rendered: true };
+          return {
+            text: fallbackText,
+            rendered: true,
+            totalTokens: fallbackResult.usage?.totalTokens
+          };
         } catch (fallbackError) {
           currentState.outputLines.splice(blockStart, blockLength);
           throw fallbackError;
@@ -1439,6 +1487,7 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
         currentState.messageCount += 1;
         appendOutput(currentState, formatUserMessage(text));
         currentState.history.push({ role: "user", content: text });
+        currentState.usedTokensExact = estimateConversationTokens(currentState.history);
         forceRender();
 
         if (currentState.config.backend !== "llamacpp") {
@@ -1452,6 +1501,7 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
           appendOutput(currentState, formatAssistantMessage(echo));
           appendOutput(currentState, "");
           currentState.history.push({ role: "assistant", content: echo });
+          currentState.usedTokensExact = estimateConversationTokens(currentState.history);
           await persistSessionSnapshot();
           forceRender();
           return;
@@ -1462,7 +1512,13 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
           if (!reply.rendered) {
             appendOutput(currentState, formatAssistantMessage(reply.text));
           }
+          if (typeof reply.totalTokens === "number" && reply.totalTokens >= 0) {
+            currentState.usedTokensExact = reply.totalTokens;
+          }
           currentState.history.push({ role: "assistant", content: reply.text });
+          if (typeof reply.totalTokens !== "number" || reply.totalTokens < 0) {
+            currentState.usedTokensExact = estimateConversationTokens(currentState.history);
+          }
           appendOutput(currentState, "");
         } catch (error) {
           appendOutput(currentState, formatErrorMessage(`Request failed: ${formatError(error)}`));

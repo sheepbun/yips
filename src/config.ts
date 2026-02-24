@@ -39,6 +39,8 @@ export function getDefaultConfig(): AppConfig {
     llamaAutoStart: true,
     llamaPortConflictPolicy: "kill-user",
     model: "default",
+    tokensMode: "auto",
+    tokensManualMax: 8192,
     nicknames: {}
   };
 }
@@ -156,6 +158,13 @@ function normalizePortConflictPolicy(
   return fallback;
 }
 
+function normalizeTokensMode(value: unknown, fallback: AppConfig["tokensMode"]): AppConfig["tokensMode"] {
+  if (value === "auto" || value === "manual") {
+    return value;
+  }
+  return fallback;
+}
+
 function buildBaseUrl(host: string, port: number): string {
   return `http://${host}:${port}`;
 }
@@ -229,7 +238,9 @@ function applyEnvOverrides(config: AppConfig): AppConfig {
       process.env["YIPS_LLAMA_PORT_CONFLICT_POLICY"],
       config.llamaPortConflictPolicy
     ),
-    model: normalizeModel(process.env["YIPS_MODEL"], config.model)
+    model: normalizeModel(process.env["YIPS_MODEL"], config.model),
+    tokensMode: normalizeTokensMode(process.env["YIPS_TOKENS_MODE"], config.tokensMode),
+    tokensManualMax: normalizePositiveInt(process.env["YIPS_TOKENS_MANUAL_MAX"], config.tokensManualMax)
   };
 }
 
@@ -260,6 +271,8 @@ export function mergeConfig(defaults: AppConfig, candidate: unknown): AppConfig 
       defaults.llamaPortConflictPolicy
     ),
     model: normalizeModel(candidate.model, defaults.model),
+    tokensMode: normalizeTokensMode(candidate.tokensMode, defaults.tokensMode),
+    tokensManualMax: normalizePositiveInt(candidate.tokensManualMax, defaults.tokensManualMax),
     nicknames: normalizeNicknames(candidate.nicknames, defaults.nicknames)
   };
 }

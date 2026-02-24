@@ -21,7 +21,9 @@ export interface PromptComposerKeyData {
 export interface PromptComposerOptions {
   interiorWidth: number;
   history: readonly string[];
-  autoComplete: readonly string[];
+  autoComplete?: readonly string[];
+  commandAutoComplete?: readonly string[];
+  modelAutoComplete?: readonly ModelAutocompleteCandidate[];
   prefix?: string;
   text?: string;
   cursor?: number;
@@ -38,6 +40,11 @@ export interface PromptAutocompleteSuggestions {
   tokenStart: number;
   tokenEnd: number;
   options: string[];
+}
+
+export interface ModelAutocompleteCandidate {
+  value: string;
+  aliases: readonly string[];
 }
 
 export interface AutocompleteMenuState extends PromptAutocompleteSuggestions {
@@ -198,7 +205,8 @@ export class PromptComposer {
   private readonly prefix: string;
   private interiorWidth: number;
   private readonly history: readonly string[];
-  private readonly autoComplete: readonly string[];
+  private commandAutoComplete: readonly string[];
+  private modelAutoComplete: readonly ModelAutocompleteCandidate[];
   private historyIndex: number;
   private historyDraft: string;
   private preferredColumn: number | null;
@@ -213,7 +221,8 @@ export class PromptComposer {
     this.prefix = options.prefix ?? DEFAULT_PREFIX;
     this.interiorWidth = Math.max(0, options.interiorWidth);
     this.history = options.history;
-    this.autoComplete = options.autoComplete;
+    this.commandAutoComplete = options.commandAutoComplete ?? options.autoComplete ?? [];
+    this.modelAutoComplete = options.modelAutoComplete ?? [];
     this.historyIndex = this.history.length;
     this.historyDraft = initialText;
     this.preferredColumn = null;
@@ -242,6 +251,11 @@ export class PromptComposer {
   setInteriorWidth(width: number): void {
     this.interiorWidth = Math.max(0, width);
     this.recomputeLayout();
+  }
+
+  setModelAutocompleteCandidates(candidates: readonly ModelAutocompleteCandidate[]): void {
+    this.modelAutoComplete = [...candidates];
+    this.markAutocompleteDirty();
   }
 
   applyAutocompleteChoice(tokenStart: number, tokenEnd: number, selection: string): void {
@@ -507,9 +521,7 @@ export class PromptComposer {
     start: number;
     end: number;
     token: string;
-  } | null {
-    if (this.chars.length === 0) return null;
-
+  } {
     let start = this.cursor;
     while (start > 0 && !whitespace(this.chars[start - 1])) {
       start -= 1;
@@ -521,18 +533,103 @@ export class PromptComposer {
     }
 
     const token = this.chars.slice(start, end).join("");
-    if (token.length === 0) return null;
-
     return { start, end, token };
+  }
+
+  private tokenSpans(): Array<{ start: number; end: number; token: string }> {
+    const spans: Array<{ start: number; end: number; token: string }> = [];
+    let index = 0;
+
+    while (index < this.chars.length) {
+      while (index < this.chars.length && whitespace(this.chars[index])) {
+        index += 1;
+      }
+      if (index >= this.chars.length) {
+        break;
+      }
+      const start = index;
+      while (index < this.chars.length && !whitespace(this.chars[index])) {
+        index += 1;
+      }
+      const end = index;
+      spans.push({
+        start,
+        end,
+        token: this.chars.slice(start, end).join("")
+      });
+    }
+
+    return spans;
+  }
+
+  private currentTokenIndex(bounds: { start: number; end: number; token: string }): number {
+    const spans = this.tokenSpans();
+    if (bounds.token.length > 0) {
+      const index = spans.findIndex((span) => this.cursor >= span.start && this.cursor <= span.end);
+      if (index >= 0) {
+        return index;
+      }
+    }
+
+    return spans.filter((span) => span.end <= bounds.start).length;
+  }
+
+  private firstToken(): string {
+    const spans = this.tokenSpans();
+    return spans[0]?.token ?? "";
+  }
+
+  private modelOptionsForToken(token: string): string[] {
+    const needle = token.trim().toLowerCase();
+    const options: string[] = [];
+    const seen = new Set<string>();
+
+    for (const candidate of this.modelAutoComplete) {
+      const value = candidate.value.trim();
+      if (value.length === 0 || seen.has(value)) {
+        continue;
+      }
+
+      const aliases = [value, ...candidate.aliases].map((entry) => entry.trim().toLowerCase());
+      const matches =
+        needle.length === 0 || aliases.some((alias) => alias.length > 0 && alias.startsWith(needle));
+      if (!matches) {
+        continue;
+      }
+
+      seen.add(value);
+      options.push(value);
+    }
+
+    return options;
   }
 
   private computeAutocompleteSuggestions(): PromptAutocompleteSuggestions | null {
     const bounds = this.tokenBounds();
-    if (!bounds || !bounds.token.startsWith("/")) {
+    const firstToken = this.firstToken().toLowerCase();
+    const tokenIndex = this.currentTokenIndex(bounds);
+
+    if (bounds.token.startsWith("/")) {
+      const options = this.commandAutoComplete.filter((candidate) => candidate.startsWith(bounds.token));
+      if (options.length === 0) {
+        return null;
+      }
+
+      return {
+        token: bounds.token,
+        tokenStart: bounds.start,
+        tokenEnd: bounds.end,
+        options: [...options]
+      };
+    }
+
+    const isModelArg = firstToken === "/model" && tokenIndex === 1;
+    const isNickTargetArg = firstToken === "/nick" && tokenIndex === 1;
+    if (!isModelArg && !isNickTargetArg) {
       return null;
     }
 
-    const options = this.autoComplete.filter((candidate) => candidate.startsWith(bounds.token));
+    const options = this.modelOptionsForToken(bounds.token);
     if (options.length === 0) {
       return null;
     }
@@ -541,7 +638,7 @@ export class PromptComposer {
       token: bounds.token,
       tokenStart: bounds.start,
       tokenEnd: bounds.end,
-      options: [...options]
+      options
     };
   }
 

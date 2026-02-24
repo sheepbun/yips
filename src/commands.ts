@@ -161,16 +161,6 @@ function splitCommandArgs(input: string): string[] {
   });
 }
 
-const KEY_DIAGNOSTICS_TEXT = [
-  "Key diagnostics:",
-  "1) Run: YIPS_DEBUG_KEYS=1 npm run dev",
-  "2) Press Enter and Ctrl+Enter in the prompt box.",
-  "3) Compare [debug stdin] output lines for action differences.",
-  "If Ctrl+Enter logs only submit from plain CR, your terminal is not emitting a distinct modified-enter sequence.",
-  "For Alacritty, map Ctrl+Enter to CSI-u (\\u001b[13;5u).",
-  "If needed, use a fallback mapping Yips also supports: \\u001b[13;5~."
-].join("\n");
-
 export function parseCommand(input: string): ParsedCommand | null {
   const trimmed = input.trim();
   if (!trimmed.startsWith("/")) return null;
@@ -332,16 +322,6 @@ export function createDefaultRegistry(): CommandRegistry {
       return { output: `Verbose mode ${state}.`, action: "continue" };
     },
     "Toggle verbose mode"
-  );
-
-  registry.register(
-    "keys",
-    () => ({
-      output: KEY_DIAGNOSTICS_TEXT,
-      action: "continue"
-    }),
-    "Show key input diagnostics for Enter/Ctrl+Enter",
-    "builtin"
   );
 
   registry.register("download", (args) => handleDownload(args), "Open the model downloader");

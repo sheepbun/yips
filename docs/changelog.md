@@ -34,7 +34,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - TTY detection: TUI launches for interactive terminals, REPL fallback for pipes and `--no-tui`
 - `src/llama-client.ts`: OpenAI-compatible llama.cpp client for non-streaming and SSE streaming chat completions
 - New backend tests in `tests/llama-client.test.ts` covering request payloads, streaming deltas, and failure paths
-- `/keys` slash command for in-app Enter/Ctrl+Enter diagnostics instructions
 - `src/model-downloader.ts`: Hugging Face GGUF model discovery, file listing, and downloader to local models directory
 - `/download` and `/dl` command handlers implemented in the TypeScript rewrite
 - `src/hardware.ts`: runtime RAM/VRAM detection for model suitability filtering

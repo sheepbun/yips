@@ -45,23 +45,23 @@ describe("loadCommandCatalog", () => {
     const root = createTempRoot();
     writeFile(
       root,
-      "commands/tools/BUILD/BUILD.py",
+      "commands/tools/FETCH/FETCH.py",
       [
         '"""',
-        "BUILD - build helper",
-        "Description: Custom build description from docstring.",
+        "FETCH - fetch helper",
+        "Description: Custom fetch description from docstring.",
         '"""',
         "",
         "print('ok')"
       ].join("\n")
     );
 
-    const build = loadCommandCatalog({ projectRoot: root }).find(
-      (command) => command.name === "build"
+    const fetch = loadCommandCatalog({ projectRoot: root }).find(
+      (command) => command.name === "fetch"
     );
-    expect(build).toBeDefined();
-    expect(build?.description).toBe("Custom build description from docstring.");
-    expect(build?.kind).toBe("tool");
+    expect(fetch).toBeDefined();
+    expect(fetch?.description).toBe("Custom fetch description from docstring.");
+    expect(fetch?.kind).toBe("tool");
   });
 
   it("falls back to generic metadata when no command files are present", () => {
@@ -85,4 +85,3 @@ describe("loadCommandCatalog", () => {
     expect(names).toEqual(sorted);
   });
 });
-

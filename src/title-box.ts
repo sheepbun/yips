@@ -106,6 +106,7 @@ function makeTopBorder(version: string, width: number): string {
 
   appendBorder("╭─── ");
 
+  pieces.push("\u001b[1m");
   for (let i = 0; i < title.length; i++) {
     const progress = i / Math.max(title.length - 1, 1);
     pieces.push(toSingleColor(title[i]!, progress));
@@ -116,6 +117,7 @@ function makeTopBorder(version: string, width: number): string {
   position += 1;
   pieces.push(colorText(version, GRADIENT_BLUE));
   position += version.length;
+  pieces.push("\u001b[22m");
 
   const closing = ` ${"─".repeat(Math.max(0, borderAvailable))}╮`;
   appendBorder(closing);
@@ -463,7 +465,7 @@ function renderFull(options: TitleBoxOptions): string[] {
       width,
       rightStartColumn
     ),
-    styleLeftText("Recent activity", rightWidth, "white")
+    withBold(styleLeftText("Recent activity", rightWidth, "white"))
   ];
 
   const activityItems = recentActivity.length > 0 ? recentActivity : ["No recent activity yet."];

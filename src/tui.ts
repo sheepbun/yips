@@ -1,6 +1,7 @@
 /** Main TUI orchestrator using Ink. */
 
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { basename } from "node:path";
 
 import { getVersion } from "./version";
 
@@ -238,6 +239,14 @@ function toDebugBytes(input: string): string {
     .join(" ");
 }
 
+export function formatTitleCwd(cwd: string): string {
+  const folder = basename(cwd.trim());
+  if (folder.length === 0) {
+    return "~";
+  }
+  return `~/${folder}`;
+}
+
 function buildTitleBoxOptions(
   state: RuntimeState,
   version: string,
@@ -254,7 +263,7 @@ function buildTitleBoxOptions(
     backend: formatBackendName(state.config.backend),
     model: modelLabel,
     tokenUsage: loadedModel ? "0/8192" : "",
-    cwd: process.cwd(),
+    cwd: formatTitleCwd(process.cwd()),
     sessionName: state.sessionName,
     recentActivity: state.recentActivity,
     sessionSelection:

@@ -5,6 +5,7 @@ import { buildPromptBoxFrame } from "../src/prompt-box";
 import { buildPromptComposerLayout, PromptComposer } from "../src/prompt-composer";
 import {
   buildAutocompleteOverlayLines,
+  formatTitleCwd,
   buildPromptRenderLines,
   computeVisibleLayoutSlices,
   shouldConsumeSubmitForAutocomplete
@@ -207,5 +208,15 @@ describe("shouldConsumeSubmitForAutocomplete", () => {
 
   it("returns false with no menu state", () => {
     expect(shouldConsumeSubmitForAutocomplete(null)).toBe(false);
+  });
+});
+
+describe("formatTitleCwd", () => {
+  it("returns ~/current-folder for normal paths", () => {
+    expect(formatTitleCwd("/home/katherine/workspace/software/yips")).toBe("~/yips");
+  });
+
+  it("returns ~ for root paths", () => {
+    expect(formatTitleCwd("/")).toBe("~");
   });
 });

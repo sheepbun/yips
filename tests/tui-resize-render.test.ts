@@ -1,12 +1,19 @@
 import { describe, expect, it } from "vitest";
 
+import { createDefaultRegistry } from "../src/commands";
 import { buildPromptBoxFrame } from "../src/prompt-box";
-import { buildPromptComposerLayout } from "../src/prompt-composer";
-import { buildPromptRenderLines, computeVisibleLayoutSlices } from "../src/tui";
+import { buildPromptComposerLayout, PromptComposer } from "../src/prompt-composer";
+import {
+  buildAutocompleteOverlayLines,
+  buildPromptRenderLines,
+  computeVisibleLayoutSlices
+} from "../src/tui";
 import { stripMarkup } from "../src/title-box";
 
 const INPUT_PINK_ANSI = "\u001b[38;2;255;204;255m";
 const MODEL_INFO_BLUE_ANSI = "\u001b[38;2;137;207;240m";
+const MENU_SELECTION_REVERSE_ANSI = "\u001b[7m";
+const OLD_MENU_SELECTION_BG_ANSI = "\u001b[48;2;35;35;35m";
 
 describe("buildPromptRenderLines", () => {
   it("renders rounded prompt frame with prefix, content, and cursor", () => {
@@ -112,5 +119,66 @@ describe("computeVisibleLayoutSlices", () => {
     expect(
       visible.titleLines.length + visible.outputLines.length + visible.promptLines.length
     ).toBe(10);
+  });
+});
+
+describe("buildAutocompleteOverlayLines", () => {
+  it("renders aligned command+description rows without a title header", () => {
+    const registry = createDefaultRegistry();
+    const composer = new PromptComposer({
+      interiorWidth: 40,
+      history: [],
+      autoComplete: registry.getAutocompleteCommands()
+    });
+    for (const char of "/b") {
+      composer.handleKey(char, { isCharacter: true });
+    }
+
+    const lines = buildAutocompleteOverlayLines(composer, registry);
+    const plain = lines.map(stripMarkup);
+
+    expect(plain.some((line) => line.includes("Slash Commands"))).toBe(false);
+    const backendLine = plain.find((line) => line.includes("/backend"));
+    expect(backendLine).toBeDefined();
+    expect(backendLine?.indexOf("/backend")).toBe(5);
+    expect(plain.some((line) => /\/backend\s{2,}/.test(line))).toBe(true);
+  });
+
+  it("applies reverse-video selected-row highlight like yips-cli", () => {
+    const registry = createDefaultRegistry();
+    const composer = new PromptComposer({
+      interiorWidth: 40,
+      history: [],
+      autoComplete: ["/backend", "/build"]
+    });
+    for (const char of "/b") {
+      composer.handleKey(char, { isCharacter: true });
+    }
+    composer.moveAutocompleteSelection(1);
+
+    const lines = buildAutocompleteOverlayLines(composer, registry);
+    expect(lines.some((line) => line.includes(MENU_SELECTION_REVERSE_ANSI))).toBe(true);
+    expect(lines.some((line) => line.includes(OLD_MENU_SELECTION_BG_ANSI))).toBe(false);
+  });
+
+  it("does not render title/overflow text even when matches exceed visible rows", () => {
+    const registry = createDefaultRegistry();
+    const autoComplete = Array.from({ length: 12 }, (_unused, index) => `/cmd${index.toString()}`);
+    const composer = new PromptComposer({
+      interiorWidth: 50,
+      history: [],
+      autoComplete
+    });
+    for (const char of "/c") {
+      composer.handleKey(char, { isCharacter: true });
+    }
+
+    const lines = buildAutocompleteOverlayLines(composer, registry);
+    const plain = lines.map(stripMarkup).join("\n");
+    expect(lines.length).toBe(8);
+    expect(plain).not.toContain("Slash Commands");
+    expect(plain).not.toContain("... ");
+    expect(plain).not.toContain("more");
+    expect(plain).not.toContain("above");
   });
 });

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { createDefaultRegistry } from "../src/commands";
 import { buildPromptComposerLayout, PromptComposer } from "../src/prompt-composer";
 
 function typeText(composer: PromptComposer, text: string): void {
@@ -71,7 +72,7 @@ describe("PromptComposer", () => {
     expect(composer.getText()).toBe("draft");
   });
 
-  it("expands shared autocomplete prefixes and returns menu events for ambiguity", () => {
+  it("keeps tab as a no-op for slash tokens", () => {
     const composer = new PromptComposer({
       interiorWidth: 30,
       history: [],
@@ -80,15 +81,92 @@ describe("PromptComposer", () => {
 
     typeText(composer, "/he");
     expect(composer.handleKey("TAB")).toEqual({ type: "none" });
-    expect(composer.getText()).toBe("/hel");
+    expect(composer.getText()).toBe("/he");
+  });
 
-    const event = composer.handleKey("TAB");
-    expect(event.type).toBe("autocomplete-menu");
-    if (event.type === "autocomplete-menu") {
-      expect(event.options).toEqual(["/help", "/hello"]);
-      composer.applyAutocompleteChoice(event.tokenStart, event.tokenEnd, "/help");
-    }
-    expect(composer.getText()).toBe("/help");
+  it("tracks autocomplete menu state and supports selection movement + accept", () => {
+    const composer = new PromptComposer({
+      interiorWidth: 30,
+      history: [],
+      autoComplete: ["/help", "/hello", "/exit"]
+    });
+
+    typeText(composer, "/he");
+    expect(composer.getAutocompleteMenuState()).toEqual({
+      token: "/he",
+      tokenStart: 0,
+      tokenEnd: 3,
+      options: ["/help", "/hello"],
+      selectedIndex: 0
+    });
+
+    composer.moveAutocompleteSelection(1);
+    expect(composer.getAutocompleteMenuState()?.selectedIndex).toBe(1);
+
+    composer.acceptAutocompleteSelection();
+    expect(composer.getText()).toBe("/hello");
+    expect(composer.getAutocompleteMenuState()).toBeNull();
+    expect(composer.handleKey("ENTER")).toEqual({ type: "submit", value: "/hello" });
+  });
+
+  it("does not auto-insert a single slash match until accepted", () => {
+    const composer = new PromptComposer({
+      interiorWidth: 30,
+      history: [],
+      autoComplete: ["/backend", "/build"]
+    });
+
+    typeText(composer, "/backend");
+    expect(composer.getAutocompleteMenuState()).toEqual({
+      token: "/backend",
+      tokenStart: 0,
+      tokenEnd: 8,
+      options: ["/backend"],
+      selectedIndex: 0
+    });
+    expect(composer.getText()).toBe("/backend");
+    expect(composer.handleKey("TAB")).toEqual({ type: "none" });
+    expect(composer.getText()).toBe("/backend");
+  });
+
+  it("autocomplete list includes restored catalog commands from the registry list", () => {
+    const registry = createDefaultRegistry();
+    const composer = new PromptComposer({
+      interiorWidth: 30,
+      history: [],
+      autoComplete: registry.getAutocompleteCommands()
+    });
+
+    typeText(composer, "/ba");
+    const menu = composer.getAutocompleteMenuState();
+    expect(menu?.options).toContain("/backend");
+  });
+
+  it("returns live autocomplete suggestions while typing slash commands", () => {
+    const composer = new PromptComposer({
+      interiorWidth: 30,
+      history: [],
+      autoComplete: ["/help", "/backend", "/build"]
+    });
+
+    typeText(composer, "/b");
+    const suggestions = composer.getAutocompleteSuggestions();
+    expect(suggestions).not.toBeNull();
+    expect(suggestions?.options).toEqual(["/backend", "/build"]);
+    expect(suggestions?.token).toBe("/b");
+  });
+
+  it("closes autocomplete when the current token is no longer a slash command", () => {
+    const composer = new PromptComposer({
+      interiorWidth: 30,
+      history: [],
+      autoComplete: ["/help", "/hello", "/exit"]
+    });
+
+    typeText(composer, "/he");
+    expect(composer.getAutocompleteMenuState()).not.toBeNull();
+    typeText(composer, " ");
+    expect(composer.getAutocompleteMenuState()).toBeNull();
   });
 
   it("returns submit and cancel events", () => {

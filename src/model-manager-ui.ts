@@ -96,12 +96,13 @@ function highlightedRow(row: string): string {
   return `${first}${horizontalGradientBackground(rest, GRADIENT_PINK, GRADIENT_YELLOW, BLACK)}`;
 }
 
-function toSizeCell(sizeGb: number, canRun: boolean): string {
-  const sizeText = sizeGb > 0 ? `${sizeGb.toFixed(1)} GB` : "-";
-  const hwLabel = canRun ? "OK" : "LARGE";
-  const sizePart = `${sizeText}`.padStart(7, " ");
-  const combined = `${sizePart} ${hwLabel}`;
-  return combined.padEnd(12, " ").slice(0, 12);
+function toSizeCell(sizeGb: number): string {
+  return `${sizeGb.toFixed(1)}G`;
+}
+
+function getFileName(modelId: string): string {
+  const parts = modelId.split("/");
+  return parts[parts.length - 1] ?? modelId;
 }
 
 function buildModelRows(
@@ -114,19 +115,28 @@ function buildModelRows(
     return [colorText("No models found in local models directory.", WARNING_YELLOW)];
   }
 
-  const markerWidth = 2;
-  const hostWidth = 18;
-  const backendWidth = 10;
-  const friendlyWidth = 15;
-  const sizeWidth = 12;
+  const markerWidth = 3;
+  const backendWidth = 9;
+  const providerWidth = 14;
+  const sizeWidth = 7;
   const separators = 4 * 3;
-  const staticWidth =
-    markerWidth + hostWidth + backendWidth + friendlyWidth + sizeWidth + separators + 5;
-  const nameWidth = Math.max(8, contentWidth - staticWidth);
+  const staticWidth = markerWidth + backendWidth + providerWidth + sizeWidth + separators;
+  const dynamicWidth = Math.max(18, contentWidth - staticWidth);
+  let nameWidth = Math.max(10, Math.min(22, Math.floor(dynamicWidth * 0.45)));
+  let fileWidth = Math.max(8, dynamicWidth - nameWidth);
+  if (fileWidth < 12) {
+    const reclaim = 12 - fileWidth;
+    nameWidth = Math.max(10, nameWidth - reclaim);
+    fileWidth = Math.max(8, dynamicWidth - nameWidth);
+  }
 
   const rows: string[] = [];
+  const header = `   ${"Backend".padEnd(backendWidth, " ")} | ${"Provider".padEnd(providerWidth, " ")} | ${"Name".padEnd(nameWidth, " ")} | ${"File".padEnd(fileWidth, " ")} | ${"Size".padStart(sizeWidth, " ")}`;
+  rows.push(horizontalGradient(header, GRADIENT_PINK, GRADIENT_YELLOW));
+
+  const visibleRowCount = Math.max(0, rowCount - 1);
   const start = state.scrollOffset;
-  const end = Math.min(state.models.length, start + rowCount);
+  const end = Math.min(state.models.length, start + visibleRowCount);
 
   for (let index = start; index < end; index++) {
     const model = state.models[index];
@@ -135,14 +145,14 @@ function buildModelRows(
     const selected = index === state.selectedModelIndex;
     const current = model.id === currentModel;
 
-    const prefix = `${selected ? ">" : " "}${current ? "*" : " "}`;
-    const host = fitLeft(model.host, hostWidth).padEnd(hostWidth, " ");
+    const prefix = `${selected ? ">" : " "}${current ? "*" : " "} `;
     const backend = fitLeft(model.friendlyBackend, backendWidth).padEnd(backendWidth, " ");
-    const friendly = fitLeft(model.friendlyName, friendlyWidth).padEnd(friendlyWidth, " ");
-    const sizeCell = toSizeCell(model.sizeGb, model.canRun);
-    const name = fitLeft(model.name, nameWidth).padEnd(nameWidth, " ");
+    const provider = fitLeft(model.host, providerWidth).padEnd(providerWidth, " ");
+    const name = fitLeft(model.friendlyName, nameWidth).padEnd(nameWidth, " ");
+    const file = fitLeft(getFileName(model.id), fileWidth).padEnd(fileWidth, " ");
+    const sizeCell = toSizeCell(model.sizeGb).padStart(sizeWidth, " ");
 
-    const row = `${prefix} ${host} | ${backend} | ${friendly} | ${sizeCell} | ${name}`;
+    const row = `${prefix}${backend} | ${provider} | ${name} | ${file} | ${sizeCell}`;
     if (selected) {
       rows.push(highlightedRow(row));
       continue;

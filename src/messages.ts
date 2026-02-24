@@ -2,9 +2,9 @@
 
 import {
   colorText,
-  DARK_BLUE,
   DIM_GRAY,
   ERROR_RED,
+  GRADIENT_BLUE,
   GRADIENT_PINK,
   GRADIENT_YELLOW,
   horizontalGradient,
@@ -38,9 +38,9 @@ export function formatAssistantMessage(text: string, timestamp?: Date): string {
   const timestampPlain = `[${formatTimestamp(time)}]`;
   const namePlain = "Yips";
   const prefixPlain = `${timestampPlain} ${namePlain}: `;
-  const timeStr = colorText(timestampPlain, DARK_BLUE);
+  const timeStr = colorText(timestampPlain, GRADIENT_BLUE);
   const name = horizontalGradient(namePlain, GRADIENT_PINK, GRADIENT_YELLOW);
-  const colon = colorText(":", DARK_BLUE);
+  const colon = colorText(":", GRADIENT_BLUE);
 
   const lines = text.split("\n");
   const firstLine = lines[0] ?? "";

@@ -1395,3 +1395,58 @@ Validation:
 - `bash -n install.sh` — clean
 Next:
 - Optionally add a `--global-link` mode for users who prefer `/usr/local/bin/yips` instead of `~/.local/bin/yips`.
+
+## 2026-02-24 04:48 UTC — Exchange 27
+Summary: Fixed `yips` launcher staleness by defaulting launcher execution to source mode instead of stale `dist` artifacts.
+Changed:
+- Updated `install.sh` launcher generation:
+  - launcher now defaults to `npm run dev -- "$@"` for latest local source behavior
+  - `dist/index.js` is only used when explicitly requested via `YIPS_USE_DIST=1`
+  - added inline launcher comments documenting default and override behavior
+- Updated docs:
+  - `docs/guides/getting-started.md` notes launcher default source-mode behavior and `YIPS_USE_DIST=1` override
+  - `docs/changelog.md` includes launcher-mode update note
+Validation:
+- `bash -n install.sh` — clean
+Next:
+- Regenerate user launcher by re-running `./install.sh` (or update `~/.local/bin/yips` manually) so existing local launcher picks up the new logic.
+
+## 2026-02-24 04:59 UTC — Exchange 28
+Summary: Implemented Linux-first llama.cpp port-conflict handling with configurable policy, richer startup diagnostics, and bind-error classification to fix ambiguous startup failures.
+Changed:
+- Extended config/types for startup conflict policy:
+  - `src/types.ts`: added `LlamaPortConflictPolicy` and `AppConfig.llamaPortConflictPolicy`.
+  - `src/config.ts`: added normalization/default/env override support for `llamaPortConflictPolicy` (`YIPS_LLAMA_PORT_CONFLICT_POLICY`), defaulting to `kill-user`.
+- Refactored `src/llama-server.ts` lifecycle behavior:
+  - added Linux `/proc` listener ownership inspection to identify PID/UID/cmd for occupied ports.
+  - added policy-driven pre-start conflict handling:
+    - `fail`: return `port-unavailable` with owner diagnostics.
+    - `kill-llama`: only terminate conflicting owner when command matches llama-server.
+    - `kill-user`: terminate conflicting owner only when owned by current user.
+  - added SIGTERM→SIGKILL termination flow with re-check to ensure port is actually freed.
+  - added structured failure metadata (`host`, `port`, `conflictPid`, `conflictCommand`).
+  - switched spawn stderr handling to a captured ring buffer and added bind-error pattern classification so early-exit bind failures are reported as `port-unavailable`.
+  - improved startup failure formatting with endpoint/conflict context.
+- Expanded tests:
+  - `tests/config.test.ts`: env override coverage for `YIPS_LLAMA_PORT_CONFLICT_POLICY`.
+  - `tests/llama-server.test.ts`: added policy and bind-classification coverage with deterministic mocked runtime dependencies; added cleanup via `stopLlamaServer()` to avoid cross-test state leakage.
+Validation:
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+- `npm test -- tests/llama-server.test.ts tests/config.test.ts` — clean
+- `npm test` — clean (21 files, 203 tests)
+- `npm run build` — clean
+Next:
+- Optionally surface a short UI warning line when Yips auto-terminates a conflicting process, so users can see that recovery action happened without enabling verbose logs.
+
+## 2026-02-24 05:14 UTC — Exchange 29
+Summary: Matched Yips assistant timestamp/colon color to the title-box model-provider light blue.
+Changed:
+- Updated `src/messages.ts`:
+  - `formatAssistantMessage(...)` now colors the timestamp (`[h:mm AM/PM]`) and trailing `:` with `GRADIENT_BLUE` (same light blue used by title-box provider text), replacing `DARK_BLUE`.
+- Updated `tests/messages.test.ts`:
+  - added assertion that timestamp and `:` emit ANSI `38;2;137;207;240` (the `GRADIENT_BLUE` RGB) so the visual contract is locked.
+Validation:
+- `npm test -- tests/messages.test.ts` — clean (10 passing)
+Next:
+- Optionally run full suite (`npm test`, `npm run lint`, `npm run typecheck`) before next release cut.

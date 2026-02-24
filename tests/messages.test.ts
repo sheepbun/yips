@@ -46,6 +46,13 @@ describe("formatAssistantMessage", () => {
     const plain = stripMarkup(result);
     expect(plain).toMatch(/\[\d{1,2}:\d{2} [AP]M\]/);
   });
+
+  it("uses title-box light blue for timestamp and colon", () => {
+    const time = new Date(2026, 1, 22, 13, 23);
+    const result = formatAssistantMessage("Hello!", time);
+    expect(result).toContain("\u001b[38;2;137;207;240m[1:23 PM]\u001b[39m");
+    expect(result).toContain("\u001b[38;2;137;207;240m:\u001b[39m");
+  });
 });
 
 describe("formatErrorMessage", () => {

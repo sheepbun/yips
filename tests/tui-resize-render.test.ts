@@ -6,6 +6,7 @@ import { buildPromptBoxFrame } from "../src/prompt-box";
 import { buildPromptComposerLayout, PromptComposer } from "../src/prompt-composer";
 import {
   buildAutocompleteOverlayLines,
+  computeTitleVisibleScrollCap,
   formatTitleCwd,
   buildPromptRenderLines,
   computeVisibleLayoutSlices,
@@ -187,6 +188,19 @@ describe("computeVisibleLayoutSlices", () => {
     expect(visible.promptLines).toEqual(["prompt-1", "prompt-2"]);
   });
 
+  it("caps top scrollback so first content line stays visible under the title", () => {
+    const title = ["title-1", "title-2", "title-3"];
+    const output = ["", "", "out-1", "out-2", "out-3", "out-4"];
+    const prompt = ["prompt-1", "prompt-2"];
+
+    const visible = computeVisibleLayoutSlices(8, title, output, prompt, 999);
+
+    expect(visible.titleLines).toEqual(["title-1", "title-2", "title-3"]);
+    expect(visible.outputLines[0]).toBe("");
+    expect(visible.outputLines[1]).toBe("out-1");
+    expect(visible.promptLines).toEqual(["prompt-1", "prompt-2"]);
+  });
+
   it("does not push title early for spacer-only leading output rows", () => {
     const title = ["title-1", "title-2", "title-3"];
     const output = ["", "", "", "", "", "", "", "out-1"];
@@ -234,6 +248,44 @@ describe("computeVisibleLayoutSlices", () => {
 
     const exceedsGap = computeVisibleLayoutSlices(8, title, ["123456789012345678", "x"], prompt);
     expect(exceedsGap.titleLines).toEqual(["title-3"]);
+  });
+});
+
+describe("computeTitleVisibleScrollCap", () => {
+  it("caps scrolling once the title is fully visible with chat directly below", () => {
+    const title = ["title-1", "title-2", "title-3"];
+    const output = ["out-1", "out-2", "out-3", "out-4", "out-5", "out-6"];
+    const prompt = ["prompt-1", "prompt-2"];
+
+    const cap = computeTitleVisibleScrollCap(7, title, output, prompt);
+    const visibleAtCap = computeVisibleLayoutSlices(7, title, output, prompt, cap);
+
+    expect(visibleAtCap.titleLines).toEqual(["title-1", "title-2", "title-3"]);
+    expect(visibleAtCap.outputLines[0]).toBe("");
+    expect(visibleAtCap.outputLines[1]).toBe("out-1");
+  });
+
+  it("provides wrapped-output scroll capacity instead of line-only capacity", () => {
+    const title = ["title-1", "title-2", "title-3"];
+    const output = ["this line wraps well beyond the render width and should allow scrolling"];
+    const prompt = ["prompt-1", "prompt-2"];
+
+    const cap = computeTitleVisibleScrollCap(6, title, output, prompt);
+    expect(cap).toBeGreaterThan(0);
+  });
+
+  it("stops at the first full top viewport instead of overscrolling", () => {
+    const title = ["title-1", "title-2", "title-3"];
+    const output = Array.from({ length: 60 }, (_unused, index) => `out-${index.toString()}`);
+    const prompt = ["prompt-1", "prompt-2", "prompt-3"];
+
+    const cap = computeTitleVisibleScrollCap(24, title, output, prompt);
+    const visibleAtCap = computeVisibleLayoutSlices(24, title, output, prompt, cap);
+
+    expect(visibleAtCap.titleLines).toEqual(["title-1", "title-2", "title-3"]);
+    expect(visibleAtCap.outputLines[0]).toBe("");
+    expect(visibleAtCap.outputLines[1]).toBe("out-0");
+    expect(visibleAtCap.outputLines.filter((line) => line.trim().length > 0).length).toBeGreaterThan(1);
   });
 });
 

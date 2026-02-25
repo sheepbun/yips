@@ -27,12 +27,12 @@ Terminal interface with LLM integration.
 
 Autonomous tool use and multi-agent architecture.
 
-- [x] Tool protocol: structured tool calls (replacing text-tag parsing)
-- [x] File operations: read, write, edit with diff preview
-- [x] Shell command execution with safety guardrails
-- [x] Destructive command detection and confirmation flow
-- [x] Working zone enforcement
-- [x] CODE.md loading and context injection
+- [ ] Tool protocol: structured tool calls (replacing text-tag parsing)
+- [ ] File operations: read, write, edit with diff preview
+- [ ] Shell command execution with safety guardrails
+- [ ] Destructive command detection and confirmation flow
+- [ ] Working zone enforcement
+- [ ] CODE.md loading and context injection
 - [ ] Conductor agent: context assembly, tool dispatch, response chaining
 - [ ] Subagent system: delegation, scoped context, lifecycle management
 - [ ] Error recovery and automatic pivoting
@@ -75,17 +75,17 @@ Packaging and installation.
 
 ## Decision Log
 
-| Decision        | Status  | Choice                     | Alternatives Considered | Notes                                                                             |
-| --------------- | ------- | -------------------------- | ----------------------- | --------------------------------------------------------------------------------- |
-| Language        | Decided | TypeScript (strict mode)   | Rust, Go, Python        | Type safety + ecosystem; Rust considered too slow for iteration                   |
-| Runtime         | Decided | Node.js                    | Deno, Bun               | Broadest ecosystem support; Bun may be revisited                                  |
-| LLM backend     | Decided | llama.cpp (primary)        | Ollama                  | Direct control over model lifecycle; OpenAI-compatible API                        |
-| TUI framework   | Decided | Ink                        | terminal-kit, blessed   | React component model, portable input handling, and maintainable render lifecycle |
-| Config format   | Decided | JSON (`.yips_config.json`) | TOML, YAML              | Chosen for zero dependencies during bootstrap; comments may be revisited later    |
-| Distribution    | Open    | —                          | npm, binary, Homebrew   | See [Tech Stack](./stack.md) for evaluation criteria                              |
-| Package manager | Decided | npm                        | pnpm, bun               | Pragmatic default for bootstrapping                                               |
-| Formatter       | Decided | Prettier                   | Biome                   | Widest editor/tooling compatibility                                               |
-| Test framework  | Decided | Vitest                     | Jest, node:test         | Fast TypeScript test loop and simple setup                                        |
+| Decision | Status | Choice | Alternatives Considered | Notes |
+|----------|--------|--------|------------------------|-------|
+| Language | Decided | TypeScript (strict mode) | Rust, Go, Python | Type safety + ecosystem; Rust considered too slow for iteration |
+| Runtime | Decided | Node.js | Deno, Bun | Broadest ecosystem support; Bun may be revisited |
+| LLM backend | Decided | llama.cpp (primary) | Ollama | Direct control over model lifecycle; OpenAI-compatible API |
+| TUI framework | Decided | Ink | terminal-kit, blessed | React component model, portable input handling, and maintainable render lifecycle |
+| Config format | Decided | JSON (`.yips_config.json`) | TOML, YAML | Chosen for zero dependencies during bootstrap; comments may be revisited later |
+| Distribution | Open | — | npm, binary, Homebrew | See [Tech Stack](./stack.md) for evaluation criteria |
+| Package manager | Decided | npm | pnpm, bun | Pragmatic default for bootstrapping |
+| Formatter | Decided | Prettier | Biome | Widest editor/tooling compatibility |
+| Test framework | Decided | Vitest | Jest, node:test | Fast TypeScript test loop and simple setup |
 
 ---
 

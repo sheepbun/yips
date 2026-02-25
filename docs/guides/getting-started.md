@@ -120,6 +120,12 @@ bindings = [
 ]
 ```
 
+## Chat Scrollback
+
+- Scroll the mouse wheel while in chat mode to move through older/newer output history.
+- `PgUp` and `PgDn` remain available as keyboard fallbacks.
+- Sending new output automatically snaps the viewport back to the latest messages.
+
 ## Basic Commands
 
 | Command | Description |

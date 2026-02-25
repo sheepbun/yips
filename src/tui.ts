@@ -119,6 +119,10 @@ const DOWNLOADER_MIN_SEARCH_CHARS = 3;
 const DOWNLOADER_SEARCH_DEBOUNCE_MS = 400;
 const DOWNLOADER_PROGRESS_RENDER_INTERVAL_MS = 200;
 const BUSY_SPINNER_RENDER_INTERVAL_MS = 16;
+const MOUSE_SCROLL_LINE_STEP = 3;
+const ENABLE_MOUSE_REPORTING = "\u001b[?1000h\u001b[?1006h";
+const DISABLE_MOUSE_REPORTING = "\u001b[?1000l\u001b[?1006l";
+const ANSI_SGR_PATTERN = new RegExp(String.raw`\u001b\[[0-9;]*m`, "g");
 
 interface AssistantReply {
   text: string;
@@ -412,10 +416,10 @@ export function composeOutputLines(options: {
   return lines;
 }
 
-function shiftOutputScrollOffset(state: RuntimeState, delta: number): void {
-  const maxOffset = Math.max(0, state.outputLines.length - 1);
+function shiftOutputScrollOffsetWithCap(state: RuntimeState, delta: number, maxOffsetCap: number): void {
   const next = state.outputScrollOffset + delta;
-  state.outputScrollOffset = Math.max(0, Math.min(maxOffset, next));
+  const clampedCap = Math.max(0, maxOffsetCap);
+  state.outputScrollOffset = Math.max(0, Math.min(clampedCap, next));
 }
 
 function appendOutput(state: RuntimeState, text: string): void {
@@ -427,7 +431,7 @@ function appendOutput(state: RuntimeState, text: string): void {
 }
 
 function stripAnsi(text: string): string {
-  return text.replace(/\u001b\[[0-9;]*m/g, "");
+  return text.replace(ANSI_SGR_PATTERN, "");
 }
 
 function isVisuallyEmptyLine(line: string): boolean {
@@ -463,6 +467,19 @@ function countDisplayRows(lines: readonly string[], width: number): number {
   return lines.reduce((total, line) => total + lineDisplayRows(line, width), 0);
 }
 
+function trimEndByDisplayRows(line: string, rowsToTrim: number, width: number): string {
+  if (rowsToTrim <= 0) {
+    return line;
+  }
+  const safeWidth = Math.max(1, width);
+  const plainChars = Array.from(stripAnsi(line));
+  if (plainChars.length === 0) {
+    return "";
+  }
+  const nextLength = Math.max(0, plainChars.length - rowsToTrim * safeWidth);
+  return plainChars.slice(0, nextLength).join("");
+}
+
 function dropLeadingByDisplayRows(lines: readonly string[], rowsToDrop: number, width: number): string[] {
   if (rowsToDrop <= 0 || lines.length === 0) {
     return [...lines];
@@ -474,6 +491,64 @@ function dropLeadingByDisplayRows(lines: readonly string[], rowsToDrop: number, 
     index += 1;
   }
   return lines.slice(index);
+}
+
+function dropTrailingByDisplayRows(lines: readonly string[], rowsToDrop: number, width: number): string[] {
+  if (rowsToDrop <= 0 || lines.length === 0) {
+    return [...lines];
+  }
+  const next = [...lines];
+  let remaining = rowsToDrop;
+
+  while (next.length > 0 && remaining > 0) {
+    const lastIndex = next.length - 1;
+    const lastLine = next[lastIndex] ?? "";
+    const lastRows = lineDisplayRows(lastLine, width);
+    if (remaining >= lastRows) {
+      remaining -= lastRows;
+      next.pop();
+      continue;
+    }
+    next[lastIndex] = trimEndByDisplayRows(lastLine, remaining, width);
+    remaining = 0;
+  }
+
+  return next;
+}
+
+function computeMinVisibleContentRows(outputLines: readonly string[], width: number): number {
+  const firstContentIndex = outputLines.findIndex((line) => !isVisuallyEmptyLine(line));
+  if (firstContentIndex === -1) {
+    return 0;
+  }
+  // Keep the very first visible content row anchored when fully scrolled up.
+  // For wrapped first lines, this still allows scrolling through later wrapped rows.
+  const rowsBeforeFirstContent = countDisplayRows(outputLines.slice(0, firstContentIndex), width);
+  return rowsBeforeFirstContent + 1;
+}
+
+function computeMaxOutputScrollOffsetRows(outputLines: readonly string[], width: number): number {
+  const totalRows = countDisplayRows(outputLines, width);
+  const minVisibleRows = computeMinVisibleContentRows(outputLines, width);
+  return Math.max(0, totalRows - minVisibleRows);
+}
+
+function computeUsefulOutputScrollCapRows(options: {
+  rows: number;
+  titleLines: readonly string[];
+  outputLines: readonly string[];
+  promptLines: readonly string[];
+  width: number;
+}): number {
+  const structuralMax = computeMaxOutputScrollOffsetRows(options.outputLines, options.width);
+  const safeRows = Math.max(1, options.rows);
+  const promptCount = Math.min(options.promptLines.length, safeRows);
+  const upperRowCount = Math.max(0, safeRows - promptCount);
+  const topVisibleTitleCount = Math.min(options.titleLines.length, upperRowCount);
+  const topGapRows = topVisibleTitleCount > 0 ? TITLE_OUTPUT_GAP_ROWS : 0;
+  const topContentRows = Math.max(0, upperRowCount - topVisibleTitleCount - topGapRows);
+  const extraRowsBeyondAnchor = Math.max(0, topContentRows - 1);
+  return Math.max(0, structuralMax - extraRowsBeyondAnchor);
 }
 
 function pruneModelSwitchStatusArtifacts(state: RuntimeState): void {
@@ -697,11 +772,19 @@ export function computeVisibleLayoutSlices(
   // Once that gap is exhausted, additional output lines start pushing the title up.
   const baseHiddenTitle = Math.max(0, titleLines.length - upperRowCount);
   const initiallyVisibleTitleCount = titleLines.length - baseHiddenTitle;
-  const reservedTitleGap = initiallyVisibleTitleCount > 0 ? TITLE_OUTPUT_GAP_ROWS : 0;
+  const maxOffset = computeUsefulOutputScrollCapRows({
+    rows: safeRows,
+    titleLines,
+    outputLines,
+    promptLines: visiblePrompt,
+    width: renderWidth
+  });
+  const clampedOffset = Math.max(0, Math.min(outputScrollOffset, maxOffset));
+  const isAtTopOfScrollback = maxOffset > 0 && clampedOffset === maxOffset;
+  const reservedTitleGap =
+    isAtTopOfScrollback || initiallyVisibleTitleCount <= 0 ? 0 : TITLE_OUTPUT_GAP_ROWS;
   const initialGap = Math.max(0, upperRowCount - initiallyVisibleTitleCount - reservedTitleGap);
-  const clampedOffset = Math.max(0, Math.min(outputScrollOffset, outputLines.length));
-  const visibleRangeEnd = Math.max(0, outputLines.length - clampedOffset);
-  const scrollWindow = outputLines.slice(0, visibleRangeEnd);
+  const scrollWindow = dropTrailingByDisplayRows(outputLines, clampedOffset, renderWidth);
   const firstContentIndex = scrollWindow.findIndex((line) => !isVisuallyEmptyLine(line));
   const contentWindow = firstContentIndex === -1 ? [] : scrollWindow.slice(firstContentIndex);
   let lastContentIndex = -1;
@@ -717,17 +800,22 @@ export function computeVisibleLayoutSlices(
     lastContentIndex === -1 ? [] : contentWindow.slice(lastContentIndex + 1);
   const outputCount = countDisplayRows(pressureWindow, renderWidth);
 
-  const outputConsumedByGap = Math.min(outputCount, initialGap);
+  const outputConsumedByGap = isAtTopOfScrollback ? 0 : Math.min(outputCount, initialGap);
   const outputAfterGap = outputCount - outputConsumedByGap;
 
-  const outputConsumedByTitle = Math.min(outputAfterGap, initiallyVisibleTitleCount);
+  const outputConsumedByTitle =
+    isAtTopOfScrollback ? 0 : Math.min(outputAfterGap, initiallyVisibleTitleCount);
   const totalHiddenTitle = baseHiddenTitle + outputConsumedByTitle;
   const visibleTitle = titleLines.slice(totalHiddenTitle);
 
-  const hiddenOutputRows = Math.max(0, outputAfterGap - initiallyVisibleTitleCount);
+  const hiddenOutputRows = isAtTopOfScrollback
+    ? 0
+    : Math.max(0, outputAfterGap - initiallyVisibleTitleCount);
   const visibleCoreOutput = dropLeadingByDisplayRows(pressureWindow, hiddenOutputRows, renderWidth);
 
-  const outputRowsAvailable = Math.max(0, upperRowCount - visibleTitle.length);
+  const topModeGapRows =
+    isAtTopOfScrollback && visibleTitle.length > 0 ? TITLE_OUTPUT_GAP_ROWS : 0;
+  const outputRowsAvailable = Math.max(0, upperRowCount - visibleTitle.length - topModeGapRows);
   const visibleOutput = [...visibleCoreOutput];
   let usedOutputRows = countDisplayRows(visibleOutput, renderWidth);
   for (const spacerRow of trailingSpacerRows) {
@@ -741,6 +829,14 @@ export function computeVisibleLayoutSlices(
 
   if (usedOutputRows < outputRowsAvailable) {
     const outputPadding = new Array<string>(outputRowsAvailable - usedOutputRows).fill("");
+    if (isAtTopOfScrollback) {
+      const titleGapPadding = new Array<string>(topModeGapRows).fill("");
+      return {
+        titleLines: visibleTitle,
+        outputLines: [...titleGapPadding, ...visibleOutput, ...outputPadding],
+        promptLines: visiblePrompt
+      };
+    }
     return {
       titleLines: visibleTitle,
       outputLines: [...outputPadding, ...visibleOutput],
@@ -749,13 +845,31 @@ export function computeVisibleLayoutSlices(
   }
 
   if (usedOutputRows > outputRowsAvailable) {
+    const trimmedOutput = dropLeadingByDisplayRows(
+      visibleOutput,
+      usedOutputRows - outputRowsAvailable,
+      renderWidth
+    );
+    if (isAtTopOfScrollback) {
+      const titleGapPadding = new Array<string>(topModeGapRows).fill("");
+      return {
+        titleLines: visibleTitle,
+        outputLines: [...titleGapPadding, ...trimmedOutput],
+        promptLines: visiblePrompt
+      };
+    }
     return {
       titleLines: visibleTitle,
-      outputLines: dropLeadingByDisplayRows(
-        visibleOutput,
-        usedOutputRows - outputRowsAvailable,
-        renderWidth
-      ),
+      outputLines: trimmedOutput,
+      promptLines: visiblePrompt
+    };
+  }
+
+  if (isAtTopOfScrollback) {
+    const titleGapPadding = new Array<string>(topModeGapRows).fill("");
+    return {
+      titleLines: visibleTitle,
+      outputLines: [...titleGapPadding, ...visibleOutput],
       promptLines: visiblePrompt
     };
   }
@@ -765,6 +879,25 @@ export function computeVisibleLayoutSlices(
     outputLines: visibleOutput,
     promptLines: visiblePrompt
   };
+}
+
+export function computeTitleVisibleScrollCap(
+  rows: number,
+  titleLines: string[],
+  outputLines: string[],
+  promptLines: string[]
+): number {
+  const safeRows = Math.max(1, rows);
+  const promptCount = Math.min(promptLines.length, safeRows);
+  const visiblePrompt = promptLines.slice(-promptCount);
+  const renderWidth = inferRenderWidth(titleLines, visiblePrompt);
+  return computeUsefulOutputScrollCapRows({
+    rows: safeRows,
+    titleLines,
+    outputLines,
+    promptLines: visiblePrompt,
+    width: renderWidth
+  });
 }
 
 export function buildAutocompleteOverlayLines(
@@ -896,6 +1029,8 @@ function formatInputAction(action: InputAction): string {
     case "newline":
     case "scroll-page-up":
     case "scroll-page-down":
+    case "scroll-line-up":
+    case "scroll-line-down":
     case "backspace":
     case "delete":
     case "move-left":
@@ -946,6 +1081,8 @@ function applyInputAction(
       return composer.handleKey("CTRL_ENTER");
     case "scroll-page-up":
     case "scroll-page-down":
+    case "scroll-line-up":
+    case "scroll-line-down":
       return null;
     case "submit":
       return composer.handleKey("ENTER");
@@ -1382,6 +1519,16 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
         setRawMode(false);
       };
     }, [isRawModeSupported, setRawMode]);
+
+    useEffect(() => {
+      if (!stdout.isTTY) {
+        return;
+      }
+      stdout.write(ENABLE_MOUSE_REPORTING);
+      return () => {
+        stdout.write(DISABLE_MOUSE_REPORTING);
+      };
+    }, [stdout]);
 
     const requestAssistantFromLlama = useCallback(
       async (streamingOverride?: boolean): Promise<AssistantReply> => {
@@ -2713,6 +2860,33 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
         composer.setInteriorWidth(Math.max(0, dimensionsRef.current.columns - 2));
 
         let shouldRender = false;
+        const computeCurrentScrollCap = (): number => {
+          const promptLayout = composer.getLayout();
+          const statusText = buildPromptStatusText(currentState);
+          const titleLines = renderTitleBox(
+            buildTitleBoxOptions(currentState, version, dimensionsRef.current.columns)
+          );
+          const promptLines = buildPromptRenderLines(
+            dimensionsRef.current.columns,
+            statusText,
+            promptLayout,
+            true
+          );
+          const autocompleteOverlay = buildAutocompleteOverlayLines(composer, registryRef.current);
+          const busyLine =
+            currentState.busy && busySpinnerRef.current ? busySpinnerRef.current.render() : "";
+          const visibleOutputLines = composeOutputLines({
+            outputLines: currentState.outputLines,
+            autocompleteOverlay,
+            busyLine
+          });
+          return computeTitleVisibleScrollCap(
+            dimensionsRef.current.rows,
+            titleLines,
+            visibleOutputLines,
+            promptLines
+          );
+        };
 
         for (const action of actions) {
           if (action.type === "cancel") {
@@ -2725,14 +2899,34 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
 
           if (action.type === "scroll-page-up") {
             const pageSize = Math.max(1, dimensionsRef.current.rows - 6);
-            shiftOutputScrollOffset(currentState, pageSize);
+            shiftOutputScrollOffsetWithCap(currentState, pageSize, computeCurrentScrollCap());
             shouldRender = true;
             continue;
           }
 
           if (action.type === "scroll-page-down") {
             const pageSize = Math.max(1, dimensionsRef.current.rows - 6);
-            shiftOutputScrollOffset(currentState, -pageSize);
+            shiftOutputScrollOffsetWithCap(currentState, -pageSize, computeCurrentScrollCap());
+            shouldRender = true;
+            continue;
+          }
+
+          if (action.type === "scroll-line-up") {
+            shiftOutputScrollOffsetWithCap(
+              currentState,
+              MOUSE_SCROLL_LINE_STEP,
+              computeCurrentScrollCap()
+            );
+            shouldRender = true;
+            continue;
+          }
+
+          if (action.type === "scroll-line-down") {
+            shiftOutputScrollOffsetWithCap(
+              currentState,
+              -MOUSE_SCROLL_LINE_STEP,
+              computeCurrentScrollCap()
+            );
             shouldRender = true;
             continue;
           }

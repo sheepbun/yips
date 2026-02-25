@@ -314,13 +314,18 @@ if [[ ! -d "\${REPO_ROOT}" ]]; then
   echo "[yips launcher] Repository path not found: \${REPO_ROOT}" >&2
   exit 1
 fi
-cd "\${REPO_ROOT}"
-# Default to source mode so launcher always reflects latest local commit.
+# Preserve caller cwd so Yips reflects where the command was launched.
 # Set YIPS_USE_DIST=1 to prefer compiled output when desired.
-if [[ "\${YIPS_USE_DIST:-0}" == "1" ]] && [[ -f "dist/index.js" ]]; then
-  exec node dist/index.js "\$@"
+if [[ "\${YIPS_USE_DIST:-0}" == "1" ]] && [[ -f "\${REPO_ROOT}/dist/index.js" ]]; then
+  exec node "\${REPO_ROOT}/dist/index.js" "\$@"
 fi
-exec npm run dev -- "\$@"
+TSX_BIN="\${REPO_ROOT}/node_modules/tsx/dist/cli.mjs"
+if [[ ! -f "\${TSX_BIN}" ]]; then
+  echo "[yips launcher] Missing tsx runtime at \${TSX_BIN}" >&2
+  echo "[yips launcher] Run: (cd \${REPO_ROOT} && npm install)" >&2
+  exit 1
+fi
+exec node "\${TSX_BIN}" "\${REPO_ROOT}/src/index.ts" "\$@"
 EOF
   chmod +x "${YIPS_LAUNCHER_PATH}"
   log "Installed launcher: ${YIPS_LAUNCHER_PATH}"
@@ -425,10 +430,10 @@ print_summary() {
   echo
   echo "Next:"
   echo "  1) source \"${YIPS_ENV_FILE}\""
-  echo "  2) cd \"${REPO_ROOT}\""
-  echo "  3) npm run dev"
+  echo "  2) Run: yips"
+  echo "     (launch from any directory; Yips keeps your current working directory)"
   if [[ "${models_count}" == "0" ]]; then
-    echo "  4) In Yips, use /download (or /model) to fetch/select a GGUF model."
+    echo "  3) In Yips, use /download (or /model) to fetch/select a GGUF model."
   fi
 }
 

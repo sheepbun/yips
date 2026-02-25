@@ -323,11 +323,8 @@ function toDebugBytes(input: string): string {
 }
 
 export function formatTitleCwd(cwd: string): string {
-  const folder = basename(cwd.trim());
-  if (folder.length === 0) {
-    return "~";
-  }
-  return `~/${folder}`;
+  const trimmed = cwd.trim();
+  return trimmed.length > 0 ? trimmed : "/";
 }
 
 function buildTitleBoxOptions(

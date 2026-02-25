@@ -597,25 +597,37 @@ function resetSession(state: RuntimeState): void {
   state.pendingConfirmation = null;
 }
 
-function replayOutputFromHistory(state: RuntimeState): void {
-  state.outputLines = [];
-  state.outputScrollOffset = 0;
+export function renderHistoryLines(history: readonly ChatMessage[]): {
+  lines: string[];
+  userCount: number;
+} {
+  const lines: string[] = [];
   let userCount = 0;
-  for (const entry of state.history) {
+
+  for (const entry of history) {
     if (entry.role === "user") {
       userCount += 1;
-      appendOutput(state, formatUserMessage(entry.content));
-      appendOutput(state, "");
+      lines.push(...formatUserMessage(entry.content).split("\n"));
       continue;
     }
+
     if (entry.role === "assistant") {
-      appendOutput(state, formatAssistantMessage(entry.content));
-      appendOutput(state, "");
+      lines.push(...formatAssistantMessage(entry.content).split("\n"));
+      lines.push("");
       continue;
     }
-    appendOutput(state, formatDimMessage(`[system] ${entry.content}`));
+
+    lines.push(...formatDimMessage(`[system] ${entry.content}`).split("\n"));
   }
-  state.messageCount = userCount;
+
+  return { lines, userCount };
+}
+
+function replayOutputFromHistory(state: RuntimeState): void {
+  const rendered = renderHistoryLines(state.history);
+  state.outputLines = rendered.lines;
+  state.outputScrollOffset = 0;
+  state.messageCount = rendered.userCount;
 }
 
 function createRuntimeState(options: TuiOptions): RuntimeState {
@@ -2170,7 +2182,6 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
 
         currentState.messageCount += 1;
         appendOutput(currentState, formatUserMessage(text));
-        appendOutput(currentState, "");
         currentState.history.push({ role: "user", content: text });
         currentState.usedTokensExact = estimateConversationTokens(currentState.history);
         forceRender();

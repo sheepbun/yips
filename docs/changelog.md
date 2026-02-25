@@ -92,6 +92,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Milestone 4 WhatsApp adapter bootstrap:
   - added `src/gateway/adapters/whatsapp.ts` WhatsApp Cloud API adapter for webhook message parsing and Graph API `/messages` request formatting
   - added coverage in `tests/gateway/adapters/whatsapp.test.ts`
+- Milestone 4 Discord adapter + runtime bootstrap:
+  - added `src/gateway/adapters/discord.ts` Discord Bot API adapter for inbound message normalization and outbound request formatting
+  - added outbound auto-chunking for Discord message length limits
+  - added `src/gateway/runtime/discord-bot.ts` discord.js runtime loop wired into `GatewayCore.dispatch(...)`
+  - added `src/gateway/runtime/discord-main.ts` executable runtime entrypoint with env-based token/allowlist config
+  - added coverage in `tests/gateway/adapters/discord.test.ts` and `tests/gateway/runtime/discord-bot.test.ts`
 
 ### Changed
 
@@ -141,6 +147,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Milestone 3 hardware detection now includes GPU/VRAM-aware startup model auto-selection from local GGUF inventory
 - Tool executor now runs `on-file-write` hooks after successful `write_file`/`edit_file`; hook failures are surfaced as warnings in tool output while preserving successful file operations
 - Added runtime import alias mapping for `#gateway/*` in `package.json` and `tsconfig.json`
+- Gateway adapter contract now supports outbound multi-request payloads for platforms that require chunked sends
 
 ## Legacy (yips-cli)
 

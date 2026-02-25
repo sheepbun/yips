@@ -51,7 +51,7 @@ Each messaging platform has its own adapter that handles protocol-specific conce
 |----------|-----------|------|--------|
 | WhatsApp | Webhooks (Meta Business API) | App token + verify token | `Implemented` (adapter layer) |
 | Telegram | Long polling or webhooks (Bot API) | Bot token | `Implemented` (adapter layer) |
-| Discord | WebSocket gateway (Bot SDK) | Bot token | _(planned)_ |
+| Discord | WebSocket gateway (Bot SDK) | Bot token | `Implemented` (adapter + runtime loop) |
 
 An adapter's job is to:
 
@@ -80,6 +80,14 @@ Current implementation status in TypeScript:
 - `src/gateway/adapters/types.ts`: common adapter contract for platform-specific inbound/outbound translation.
 - `src/gateway/adapters/whatsapp.ts`: WhatsApp Cloud API adapter for webhook `entry/changes/messages` parsing and Graph API `/messages` outbound formatting.
 - `src/gateway/adapters/telegram.ts`: Telegram Bot API adapter for parsing webhook/poll updates into gateway messages and formatting `sendMessage` payloads.
+- `src/gateway/adapters/discord.ts`: Discord adapter for message-create event normalization and outbound API payload formatting with safe chunking.
+- `src/gateway/runtime/discord-bot.ts`: discord.js event loop that routes messages through `GatewayCore` and emits outbound requests.
+- `src/gateway/runtime/discord-main.ts`: executable Discord runtime entrypoint (`npm run gateway:discord`).
+
+Discord runtime environment variables:
+
+- `YIPS_DISCORD_BOT_TOKEN` (required): Discord bot token used for gateway and outbound message authorization.
+- `YIPS_GATEWAY_ALLOWED_SENDERS` (optional): comma-delimited sender ID allowlist enforced by `GatewayCore`.
 
 ### Headless Conductor
 

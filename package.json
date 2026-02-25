@@ -83,6 +83,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "dev": "tsx --conditions=development src/app/index.ts",
+    "gateway:discord": "tsx --conditions=development src/gateway/runtime/discord-main.ts",
     "start": "node dist/app/index.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
@@ -103,6 +104,7 @@
     "vitest": "^3.0.7"
   },
   "dependencies": {
+    "discord.js": "^14.22.1",
     "ink": "^4.4.1",
     "node-pty": "^1.1.0",
     "react": "^18.3.1"

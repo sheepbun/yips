@@ -98,6 +98,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
   - added `src/gateway/runtime/discord-bot.ts` discord.js runtime loop wired into `GatewayCore.dispatch(...)`
   - added `src/gateway/runtime/discord-main.ts` executable runtime entrypoint with env-based token/allowlist config
   - added coverage in `tests/gateway/adapters/discord.test.ts` and `tests/gateway/runtime/discord-bot.test.ts`
+- Milestone 4 authentication hardening:
+  - added `src/gateway/auth-policy.ts` for sender allowlist checks and optional `/auth <passphrase>` session bootstrap
+  - `GatewayCore` now supports optional passphrase auth with explicit unauthorized responses and authenticated handshake status
+  - Discord runtime now emits outbound denial/handshake replies when `dispatch(...)` returns a response payload for non-`ok` statuses
+  - Discord main runtime now supports optional `YIPS_GATEWAY_PASSPHRASE`
+  - added coverage in `tests/gateway/auth-policy.test.ts`, expanded `tests/gateway/core.test.ts`, and expanded `tests/gateway/runtime/discord-bot.test.ts`
 
 ### Changed
 

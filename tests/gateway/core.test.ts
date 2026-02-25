@@ -33,8 +33,112 @@ describe("gateway core", () => {
     });
     expect(result).toEqual({
       status: "unauthorized",
-      reason: "sender_not_allowed"
+      reason: "sender_not_allowed",
+      response: {
+        text: "Access denied. Authenticate with /auth <passphrase> or contact the administrator."
+      }
     });
+  });
+
+  it("requires passphrase authentication when configured", async () => {
+    const handled = vi.fn(async () => ({ text: "ok" }));
+    const core = new GatewayCore({
+      passphrase: "secret-pass",
+      handleMessage: handled
+    });
+
+    const result = await core.dispatch({
+      platform: "discord",
+      senderId: "alice",
+      text: "hello"
+    });
+    expect(result).toEqual({
+      status: "unauthorized",
+      reason: "passphrase_required",
+      response: {
+        text: "Access denied. Authenticate with /auth <passphrase> or contact the administrator."
+      }
+    });
+    expect(handled).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid passphrase auth attempts", async () => {
+    const handled = vi.fn(async () => ({ text: "ok" }));
+    const core = new GatewayCore({
+      passphrase: "secret-pass",
+      handleMessage: handled
+    });
+
+    const result = await core.dispatch({
+      platform: "discord",
+      senderId: "alice",
+      text: "/auth no"
+    });
+    expect(result).toEqual({
+      status: "unauthorized",
+      reason: "passphrase_invalid",
+      response: {
+        text: "Access denied. Authenticate with /auth <passphrase> or contact the administrator."
+      }
+    });
+    expect(handled).not.toHaveBeenCalled();
+  });
+
+  it("accepts auth command and then authorizes future messages for the sender", async () => {
+    const handled = vi.fn(async () => ({ text: "ok" }));
+    const core = new GatewayCore({
+      passphrase: "secret-pass",
+      handleMessage: handled
+    });
+
+    const authResult = await core.dispatch({
+      platform: "discord",
+      senderId: "alice",
+      channelId: "c1",
+      text: "/auth secret-pass"
+    });
+    expect(authResult).toEqual({
+      status: "authenticated",
+      response: {
+        text: "Authentication successful. You can now send messages."
+      }
+    });
+    expect(handled).not.toHaveBeenCalled();
+
+    const messageResult = await core.dispatch({
+      platform: "discord",
+      senderId: "alice",
+      channelId: "c2",
+      text: "hello after auth"
+    });
+    expect(messageResult.status).toBe("ok");
+    expect(messageResult.response).toEqual({
+      text: "ok"
+    });
+    expect(handled).toHaveBeenCalledOnce();
+  });
+
+  it("keeps authentication scoped by platform and sender", async () => {
+    const handled = vi.fn(async () => ({ text: "ok" }));
+    const core = new GatewayCore({
+      passphrase: "secret-pass",
+      handleMessage: handled
+    });
+
+    await core.dispatch({
+      platform: "discord",
+      senderId: "alice",
+      text: "/auth secret-pass"
+    });
+
+    const otherPlatform = await core.dispatch({
+      platform: "telegram",
+      senderId: "alice",
+      text: "hello"
+    });
+    expect(otherPlatform.status).toBe("unauthorized");
+    expect(otherPlatform.reason).toBe("passphrase_required");
+    expect(handled).not.toHaveBeenCalled();
   });
 
   it("enforces rate limits per sender", async () => {

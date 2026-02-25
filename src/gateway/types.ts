@@ -37,7 +37,12 @@ export interface GatewayMessageResponse {
   metadata?: Record<string, unknown>;
 }
 
-export type GatewayDispatchStatus = "ok" | "unauthorized" | "rate_limited" | "invalid";
+export type GatewayDispatchStatus =
+  | "ok"
+  | "authenticated"
+  | "unauthorized"
+  | "rate_limited"
+  | "invalid";
 
 export interface GatewayDispatchResult {
   status: GatewayDispatchStatus;

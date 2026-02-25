@@ -30,6 +30,7 @@ src/
     config.ts
     hooks.ts
   gateway/
+    auth-policy.ts
     adapters/
       discord.ts
       whatsapp.ts

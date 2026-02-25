@@ -89,6 +89,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
   - added `src/gateway/adapters/types.ts` adapter contract for platform inbound/outbound translation
   - added `src/gateway/adapters/telegram.ts` Telegram Bot API adapter for webhook/poll update parsing and `sendMessage` request formatting
   - added coverage in `tests/gateway/adapters/telegram.test.ts`
+- Milestone 4 WhatsApp adapter bootstrap:
+  - added `src/gateway/adapters/whatsapp.ts` WhatsApp Cloud API adapter for webhook message parsing and Graph API `/messages` request formatting
+  - added coverage in `tests/gateway/adapters/whatsapp.test.ts`
 
 ### Changed
 

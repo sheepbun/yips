@@ -2,85 +2,104 @@
 
 ## Concept
 
-Hooks are user-defined scripts that Yips executes at specific lifecycle points. They let you automate tasks around agent activity — for example, running a linter before the agent commits, or logging every file write to an audit trail.
+Hooks are user-defined shell commands that Yips executes at specific lifecycle points.
 
-Hooks are opt-in. Yips runs without any hooks configured. When a hook is registered for a lifecycle point, Yips calls it as a subprocess and waits for it to complete before continuing.
+Hooks are optional. If a hook is not configured, Yips skips it and continues normally.
 
-## Available Hook Points _(planned)_
-
-The following hook points are planned for the TypeScript rewrite. None are implemented yet.
+## Implemented Hook Points
 
 ### Session Hooks
 
-| Hook | Fires When | Use Case |
-|------|------------|----------|
-| `on-session-start` | A new session begins | Load project-specific context, check prerequisites |
-| `on-session-end` | A session is saved/closed | Export conversation, trigger backup |
+| Hook | Fires When |
+|------|------------|
+| `on-session-start` | TUI session boots |
+| `on-session-end` | Session exits/restarts/cancels |
 
 ### File Hooks
 
-| Hook | Fires When | Use Case |
-|------|------------|----------|
-| `on-file-write` | The agent writes or edits a file | Auto-format (Prettier/Biome), lint check |
-| `on-file-read` | The agent reads a file | Audit logging, access control |
+| Hook | Fires When |
+|------|------------|
+| `on-file-write` | `write_file` or `edit_file` tool succeeds |
 
-### Git Hooks
+### Planned (Recognized, Not Fired Yet)
 
-| Hook | Fires When | Use Case |
-|------|------------|----------|
-| `pre-commit` | Before the agent creates a git commit | Run tests, lint staged files, AI-powered code review |
+| Hook |
+|------|
+| `on-file-read` |
+| `pre-commit` |
 
-<!-- TODO: Define hook configuration format (hooks section in config file vs. dedicated hooks directory). Define hook interface (arguments passed, expected return codes, stdout/stderr handling). -->
+## Configuration
 
-## Examples
+Configure hooks in your JSON config (`$YIPS_CONFIG_PATH` or `.yips_config.json`):
 
-### Pre-commit: AI-Powered Code Review
-
-The existing yips-cli ships a pre-commit hook (`git_hooks/pre-commit`) that captures the staged diff and sends it to the Yips agent for optimization suggestions:
-
-```sh
-# In yips-cli, the hook:
-# 1. Gets staged diff with `git diff --cached`
-# 2. Sends the diff to the agent with a review prompt
-# 3. Agent prints suggestions to stdout
+```json
+{
+  "hooks": {
+    "on-session-start": {
+      "command": "echo session-start"
+    },
+    "on-file-write": {
+      "command": "./scripts/post-write.sh",
+      "timeoutMs": 15000
+    }
+  }
+}
 ```
 
-In the TypeScript rewrite, this will be configured through the hooks system rather than manual git hook installation.
+- `command`: required shell command.
+- `timeoutMs`: optional timeout in milliseconds.
+- defaults to `10000`, max `120000`.
 
-### Auto-format on File Write
+## Hook Input Contract
 
-```sh
-# Hook: on-file-write
-# Script receives the file path as an argument
-#!/usr/bin/env bash
-prettier --write "$1"
+Each hook receives structured JSON on `stdin`:
+
+```json
+{
+  "hook": "on-file-write",
+  "eventId": "...",
+  "timestamp": "2026-02-25T...Z",
+  "cwd": "/path/to/project",
+  "sessionName": "feature-session",
+  "data": {
+    "path": "/path/to/file.ts",
+    "operation": "write_file"
+  }
+}
 ```
 
-When the agent writes a file, the hook runs Prettier on it automatically, so the agent's output always matches your project's formatting rules.
+Hooks also receive environment variables:
 
-### Lint Check on File Write
+- `YIPS_HOOK_NAME`
+- `YIPS_HOOK_EVENT_ID`
+- `YIPS_HOOK_TIMESTAMP`
+- `YIPS_HOOK_CWD`
+- `YIPS_HOOK_SESSION_NAME`
+- `YIPS_HOOK_FILE_PATH`
+
+## Failure Behavior
+
+Hooks are **soft-fail**:
+
+- Yips continues even if a hook exits non-zero or times out.
+- Session hook failures are shown as warnings in the UI.
+- `on-file-write` hook failures are included in tool output/metadata.
+
+## Example: Auto-format On File Write
 
 ```sh
-# Hook: on-file-write
 #!/usr/bin/env bash
-eslint "$1"
-if [ $? -ne 0 ]; then
-  echo "Lint errors found in $1" >&2
-  exit 1
+# scripts/post-write.sh
+
+# read hook payload from stdin if needed
+payload="$(cat)"
+
+# use env var for direct shell access
+if [ -n "$YIPS_HOOK_FILE_PATH" ]; then
+  prettier --write "$YIPS_HOOK_FILE_PATH"
 fi
 ```
 
-A non-zero exit code from a hook signals a problem. The agent will be notified and can attempt to fix the issue.
-
-<!-- TODO: Define how hook failures are communicated back to the agent (stderr capture, retry policy, max attempts). -->
-
-## Configuration _(planned)_
-
-<!-- TODO: Define hook configuration format. Likely either:
-  Option A: A `hooks` section in the config file mapping hook points to script paths
-  Option B: A `.yips/hooks/` directory with scripts named after hook points
--->
-
 ---
 
-> Last updated: 2026-02-22
+> Last updated: 2026-02-25

@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { getDefaultConfig } from "../src/config";
-import { applyHardwareAwareStartupModelSelection, ensureFreshLlamaSessionOnStartup } from "../src/tui";
+import {
+  applyHardwareAwareStartupModelSelection,
+  ensureFreshLlamaSessionOnStartup,
+  runOnceGuarded
+} from "../src/tui";
 
 describe("ensureFreshLlamaSessionOnStartup", () => {
   it("skips reset when no concrete model is selected", async () => {
@@ -112,5 +116,19 @@ describe("applyHardwareAwareStartupModelSelection", () => {
 
     expect(selected).toBeNull();
     expect(listModels).not.toHaveBeenCalled();
+  });
+});
+
+describe("runOnceGuarded", () => {
+  it("runs operation only on first call", async () => {
+    const guard = { current: false };
+    const operation = vi.fn().mockResolvedValue(undefined);
+
+    const first = await runOnceGuarded(guard, operation);
+    const second = await runOnceGuarded(guard, operation);
+
+    expect(first).toBe(true);
+    expect(second).toBe(false);
+    expect(operation).toHaveBeenCalledTimes(1);
   });
 });

@@ -31,6 +31,7 @@ src/
     hooks.ts
   gateway/
     adapters/
+      whatsapp.ts
       telegram.ts
       types.ts
     core.ts

@@ -56,7 +56,7 @@ Features that make daily use productive.
 Self-hosted messaging platform bridge.
 
 - [x] Gateway core: message routing, session management, rate limiting
-- [ ] WhatsApp adapter (WhatsApp Business API)
+- [x] WhatsApp adapter (WhatsApp Business API)
 - [x] Telegram adapter (Bot API)
 - [ ] Discord adapter (Bot SDK)
 - [ ] Authentication and access control

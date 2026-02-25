@@ -3,5 +3,8 @@ node_modules/
 coverage/
 .claude/
 .obsidian/
+.github/
+AGENTS.md
+CLAUDE.md
 
 .yips_config.json

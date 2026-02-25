@@ -310,6 +310,89 @@ describe("runConductorTurn", () => {
     ).toBe(true);
   });
 
+  it("executes mixed tool outcomes in declared order across one action round", async () => {
+    const history: ChatMessage[] = [{ role: "user", content: "run mixed tools" }];
+    const events: string[] = [];
+
+    const executeToolCalls = vi.fn(async (toolCalls) => {
+      const call = toolCalls[0];
+      if (!call) {
+        return [];
+      }
+      events.push(`start:${call.id}`);
+      if (call.id === "t-ok") {
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, 20);
+        });
+        events.push(`end:${call.id}`);
+        return [{ callId: call.id, tool: call.name, status: "ok", output: "ok" } as ToolResult];
+      }
+      if (call.id === "t-error") {
+        await new Promise<void>((resolve) => {
+          setTimeout(resolve, 5);
+        });
+        events.push(`end:${call.id}`);
+        return [
+          { callId: call.id, tool: call.name, status: "error", output: "failed" } as ToolResult
+        ];
+      }
+      events.push(`end:${call.id}`);
+      return [{ callId: call.id, tool: call.name, status: "denied", output: "denied" } as ToolResult];
+    });
+
+    const requestAssistant = vi
+      .fn()
+      .mockResolvedValueOnce(
+        makeReply(
+          [
+            "Running a mixed batch.",
+            "```yips-tools",
+            '{"tool_calls":[',
+            '{"id":"t-ok","name":"read_file","arguments":{"path":"README.md"}},',
+            '{"id":"t-error","name":"edit_file","arguments":{"path":"log.txt","oldText":"x","newText":"y"}},',
+            '{"id":"t-denied","name":"run_command","arguments":{"command":"rm -rf /tmp/x"}}',
+            "]}",
+            "```"
+          ].join("\n")
+        )
+      )
+      .mockResolvedValueOnce(makeReply("done"));
+
+    const result = await runConductorTurn({
+      history,
+      requestAssistant,
+      executeToolCalls,
+      onAssistantText: vi.fn(),
+      onWarning: vi.fn(),
+      estimateCompletionTokens: vi.fn().mockReturnValue(10),
+      estimateHistoryTokens: vi.fn().mockReturnValue(90),
+      computeTokensPerSecond: vi.fn().mockReturnValue(10)
+    });
+
+    expect(result.finished).toBe(true);
+    expect(result.rounds).toBe(2);
+    expect(executeToolCalls).toHaveBeenCalledTimes(3);
+    expect(events).toEqual([
+      "start:t-ok",
+      "end:t-ok",
+      "start:t-error",
+      "end:t-error",
+      "start:t-denied",
+      "end:t-denied"
+    ]);
+
+    const toolResultsEntry = history.find(
+      (entry) => entry.role === "system" && entry.content.startsWith("Tool results:")
+    );
+    expect(toolResultsEntry?.content.indexOf('"callId":"t-ok"')).toBeGreaterThan(-1);
+    expect(toolResultsEntry?.content.indexOf('"callId":"t-error"')).toBeGreaterThan(
+      toolResultsEntry?.content.indexOf('"callId":"t-ok"') ?? -1
+    );
+    expect(toolResultsEntry?.content.indexOf('"callId":"t-denied"')).toBeGreaterThan(
+      toolResultsEntry?.content.indexOf('"callId":"t-error"') ?? -1
+    );
+  });
+
   it("warns and reports fallback results when skill runner is unavailable", async () => {
     const history: ChatMessage[] = [{ role: "user", content: "do a search" }];
     const onWarning = vi.fn();

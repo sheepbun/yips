@@ -273,6 +273,21 @@ export async function runOnceGuarded(
   return true;
 }
 
+export function yieldToUi(): Promise<void> {
+  return new Promise((resolve) => {
+    if (typeof setImmediate === "function") {
+      setImmediate(resolve);
+      return;
+    }
+    setTimeout(resolve, 0);
+  });
+}
+
+export async function flushUiRender(render: () => void): Promise<void> {
+  render();
+  await yieldToUi();
+}
+
 function formatEta(totalSeconds: number): string {
   const safeSeconds = Math.max(0, Math.floor(totalSeconds));
   const minutes = Math.floor(safeSeconds / 60);
@@ -1333,14 +1348,20 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
     const runWithBusyLabel = useCallback(
       async <T,>(label: string, run: () => Promise<T>): Promise<T> => {
         startBusyIndicator(label);
+        await flushUiRender(forceRender);
         try {
           return await run();
         } finally {
           stopBusyIndicator();
+          await flushUiRender(forceRender);
         }
       },
-      [startBusyIndicator, stopBusyIndicator]
+      [forceRender, startBusyIndicator, stopBusyIndicator]
     );
+
+    const flushUi = useCallback(async (): Promise<void> => {
+      await flushUiRender(forceRender);
+    }, [forceRender]);
 
     dimensionsRef.current = dimensions;
 
@@ -1989,6 +2010,7 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
               arguments: call.arguments
             }, { verbose: currentState.config.verbose, showIds: currentState.config.verbose })
           );
+          await flushUi();
 
           const risk = assessToolCallRisk(call, sessionRoot);
           if (risk.riskLevel === "deny") {
@@ -2013,6 +2035,9 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
               )
             );
             appendOutput(currentState, "");
+            await flushUi();
+            startBusyIndicator("Thinking...");
+            await flushUi();
             continue;
           }
           if (risk.requiresConfirmation) {
@@ -2039,6 +2064,9 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
                 )
               );
               appendOutput(currentState, "");
+              await flushUi();
+              startBusyIndicator("Thinking...");
+              await flushUi();
               continue;
             }
           }
@@ -2070,11 +2098,21 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
             )
           );
           appendOutput(currentState, "");
+          await flushUi();
+          startBusyIndicator("Thinking...");
+          await flushUi();
         }
 
         return results;
       },
-      [assessToolCallRisk, getVtSession, requestToolConfirmation, runWithBusyLabel]
+      [
+        assessToolCallRisk,
+        flushUi,
+        getVtSession,
+        requestToolConfirmation,
+        runWithBusyLabel,
+        startBusyIndicator
+      ]
     );
 
     const executeSkillCalls = useCallback(
@@ -2097,6 +2135,7 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
               arguments: call.arguments
             }, { verbose: currentState.config.verbose, showIds: currentState.config.verbose })
           );
+          await flushUi();
 
           const result = await runWithBusyLabel(
             `Running ${call.name}...`,
@@ -2123,11 +2162,14 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
             )
           );
           appendOutput(currentState, "");
+          await flushUi();
+          startBusyIndicator("Thinking...");
+          await flushUi();
         }
 
         return results;
       },
-      [getVtSession, runWithBusyLabel]
+      [flushUi, getVtSession, runWithBusyLabel, startBusyIndicator]
     );
 
     const executeSubagentCalls = useCallback(
@@ -2148,6 +2190,7 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
               name: subagentCall.task
             }, { verbose: currentState.config.verbose, showIds: currentState.config.verbose })
           );
+          await flushUi();
 
           const scopedHistory: ChatMessage[] = [
             { role: "system", content: buildSubagentScopeMessage(subagentCall) },
@@ -2245,6 +2288,9 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
               )
             );
             appendOutput(currentState, "");
+            await flushUi();
+            startBusyIndicator("Thinking...");
+            await flushUi();
           } catch (error) {
             const result: SubagentResult = {
               callId: subagentCall.id,
@@ -2266,6 +2312,9 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
               )
             );
             appendOutput(currentState, "");
+            await flushUi();
+            startBusyIndicator("Thinking...");
+            await flushUi();
           }
         }
 
@@ -2274,9 +2323,11 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
       [
         executeSkillCalls,
         executeToolCalls,
+        flushUi,
         forceRender,
         requestAssistantFromLlama,
-        runWithBusyLabel
+        runWithBusyLabel,
+        startBusyIndicator
       ]
     );
 

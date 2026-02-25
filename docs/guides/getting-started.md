@@ -32,7 +32,7 @@ What `install.sh` does:
 - Creates `~/.yips/models` and writes runtime exports to `~/.yips/env.sh`
 - Installs a `~/.local/bin/yips` launcher so Yips can be run from any directory (after sourcing `~/.yips/env.sh`)
   - launcher defaults to source mode (`npm run dev`) so it always reflects latest local commits
-  - set `YIPS_USE_DIST=1` to force compiled `dist/index.js` when desired
+  - set `YIPS_USE_DIST=1` to force compiled `dist/app/index.js` when desired
 - Installs Node dependencies for Yips (`npm install`)
 - Creates or patches config at `$YIPS_CONFIG_PATH` (defaults to `~/.yips/config.json`) with llama lifecycle defaults without overwriting existing user settings
 - If Node runtime linkage is broken on Arch, auto-attempts repair by reinstalling `nodejs npm simdjson`
@@ -157,6 +157,7 @@ When you run Yips from a directory containing `CODE.md`, the file is loaded into
 - [Slash Commands](./slash-commands.md) — full command reference
 - [Overview](../overview.md) — vision and design principles
 - [Architecture](../architecture.md) — how the system works
+- [Project Tree](../project-tree.md) — source/test directory map
 
 ---
 

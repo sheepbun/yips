@@ -17,6 +17,7 @@ Yips is a local-first AI code editor and self-hosted gateway. It runs language m
 |----------|-------------|
 | [Overview](./overview.md) | Vision, design principles, what Yips does and does not do |
 | [Architecture](./architecture.md) | System components, request flow, tool protocol |
+| [Project Tree](./project-tree.md) | Canonical source/test tree and import alias map |
 | [Roadmap](./roadmap.md) | Phased milestones, decision log |
 
 ### Developer

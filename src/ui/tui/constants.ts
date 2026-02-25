@@ -1,0 +1,15 @@
+export const PROMPT_PREFIX = ">>> ";
+export const CURSOR_MARKER = "▌";
+export const KEY_DEBUG_ENABLED = process.env["YIPS_DEBUG_KEYS"] === "1";
+export const ANSI_REVERSE_ON = "\u001b[7m";
+export const ANSI_RESET_ALL = "\u001b[0m";
+export const DOWNLOADER_MIN_SEARCH_CHARS = 3;
+export const DOWNLOADER_SEARCH_DEBOUNCE_MS = 400;
+export const DOWNLOADER_PROGRESS_RENDER_INTERVAL_MS = 200;
+export const BUSY_SPINNER_RENDER_INTERVAL_MS = 16;
+export const MOUSE_SCROLL_LINE_STEP = 3;
+export const ENABLE_MOUSE_REPORTING = "\u001b[?1000h\u001b[?1006h";
+export const DISABLE_MOUSE_REPORTING = "\u001b[?1000l\u001b[?1006l";
+export const ANSI_SGR_PATTERN = new RegExp(String.raw`\u001b\[[0-9;]*m`, "g");
+export const TITLE_OUTPUT_GAP_ROWS = 1;
+export const MAX_AUTOCOMPLETE_PREVIEW = 8;

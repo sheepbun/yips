@@ -84,6 +84,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 
 ### Changed
 
+- Refactored the TypeScript rewrite to a domain-first tree:
+  - moved flat `src/` modules into `src/app`, `src/agent`, `src/config`, `src/llm`, `src/models`, `src/types`, and `src/ui`
+  - reorganized `tests/` to mirror the new source domains for easier source-to-test navigation
+  - introduced runtime-safe Node `#imports` aliases (with matching TypeScript `paths`) for cross-domain imports
+  - added focused TUI helper modules in `src/ui/tui` (`constants`, `runtime-utils`, `history`, `layout`, `autocomplete`)
+  - updated launcher/runtime entry paths to `src/app/index.ts` and `dist/app/index.js`
 - llama.cpp startup now performs a localhost-only fresh-session reset before TUI launch:
   - stops Yips-managed llama-server state and starts a new server/model load on startup
   - fails startup immediately with actionable diagnostics if reset/start fails

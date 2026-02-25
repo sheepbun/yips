@@ -3388,3 +3388,91 @@ Next:
 
 - Add explicit system prompt guidance so llama outputs `skill_calls` for web/build/todo workflows before defaulting to raw `run_command`/`grep` tool calls.
 - Optionally add a bounded summary mode for `/fetch` and `fetch` skill output to reduce oversized page content in long sessions.
+
+## 2026-02-25 11:58 UTC — Exchange 107
+
+Summary: Refactored the TypeScript rewrite into a domain-first `src/` tree for agent navigation, mirrored `tests/` to the same layout, introduced runtime-safe `#imports` aliases, and added project tree documentation.
+Changed:
+
+- Reorganized `src/` from flat modules to domain directories:
+  - `src/app`: `index.ts`, `repl.ts`, `version.ts`
+  - `src/agent`: `conductor`, `commands`, `context`, `protocol`, `skills`, `tools`
+  - `src/config`: `config.ts`, `hooks.ts`
+  - `src/llm`: `llama-client.ts`, `llama-server.ts`, `token-counter.ts`
+  - `src/models`: `hardware.ts`, `model-downloader.ts`, `model-manager.ts`
+  - `src/types`: `app-types.ts`
+  - `src/ui`: rendering/input/downloader/model-manager/prompt/tui modules
+- Reorganized `tests/` to mirror source domains (`tests/app`, `tests/agent`, `tests/config`, `tests/llm`, `tests/models`, `tests/ui`).
+- Migrated internal imports and test imports to Node `#imports` alias paths.
+- Updated runtime/compile entry paths:
+  - `package.json` scripts now use `src/app/index.ts` (`dev`) and `dist/app/index.js` (`start`/`main`).
+  - `install.sh` launcher now runs `src/app/index.ts` in source mode and `dist/app/index.js` in dist mode.
+- Added runtime-safe alias configuration:
+  - `package.json#imports` with `development` (src) and `default` (dist) mappings.
+  - `tsconfig.json` `customConditions` + `paths` aligned with alias map.
+- Added TUI helper modules under `src/ui/tui`:
+  - `constants.ts`, `runtime-utils.ts`, `history.ts`, `layout.ts`, `autocomplete.ts`
+  - `src/ui/tui/start-tui.ts` now re-exports helper APIs from these focused modules.
+- Fixed versioning regression after path move:
+  - `src/app/version.ts` repo root resolution updated to `resolve(__dirname, "../..")`.
+- Documentation updates:
+  - Added `docs/project-tree.md` with canonical `src/` and `tests/` map plus alias guide.
+  - Updated `docs/README.md` documentation map to include Project Tree.
+  - Updated `docs/architecture.md` with a new Codebase Layout section.
+  - Updated `docs/guides/getting-started.md` dist path note and added Project Tree next-step link.
+  - Updated `docs/changelog.md` unreleased section with refactor notes.
+
+Validation:
+
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+- `npm test` — clean (37 files, 340 tests)
+- `npm run build` — clean
+- `printf '/exit\n' | npm run dev -- --no-tui` — clean
+- `printf '/exit\n' | npm start -- --no-tui` — clean
+- `npm run format:check` — fails due existing/pre-existing formatting drift across multiple files (not newly introduced by this exchange)
+
+Next:
+
+- Optionally run `npm run format` in a dedicated formatting-only pass if you want the repository to satisfy `format:check` as a hard gate.
+
+## 2026-02-25 12:00 UTC — Exchange 108
+
+Summary: Completed a focused TUI split follow-up so `src/ui/tui/app.ts` is now a thin facade and runtime implementation lives in `src/ui/tui/runtime-core.ts`.
+Changed:
+
+- Moved large Ink runtime implementation:
+  - `src/ui/tui/app.ts` → `src/ui/tui/runtime-core.ts`
+- Added new thin facade `src/ui/tui/app.ts`:
+  - re-exports `createInkApp` and `InkModule` from `runtime-core`
+- Updated `docs/project-tree.md` to include `runtime-core.ts`.
+
+Validation:
+
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+- `npm test` — clean (37 files, 340 tests)
+- `npm run build` — clean
+
+Next:
+
+- Optional: continue decomposing `runtime-core.ts` by moving mode handlers (`chat/downloader/model-manager/vt`) into dedicated files now that facade boundaries are in place.
+
+## 2026-02-25 12:03 UTC — Exchange 109
+
+Summary: Repaired stale user-installed launcher script so `yips` points to post-refactor entrypoints.
+Changed:
+
+- Updated local launcher at `~/.local/bin/yips` to use:
+  - source mode entry: `src/app/index.ts`
+  - dist mode entry: `dist/app/index.js`
+- No repository source-code changes were required for runtime behavior; this was an installed-script drift fix.
+
+Validation:
+
+- `cd /home/katherine/workspace/software && printf '/exit\\n' | yips --no-tui` — clean
+- `cd /home/katherine/workspace/software && printf '/exit\\n' | YIPS_USE_DIST=1 yips --no-tui` — clean
+
+Next:
+
+- Optional: rerun `./install.sh` to regenerate launcher from script if you want installer-managed parity on this machine.

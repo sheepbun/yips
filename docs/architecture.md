@@ -28,6 +28,19 @@
 └──────────────────────────────────────────────────────────┘
 ```
 
+## Codebase Layout
+
+The TypeScript rewrite now uses a domain-first source tree for faster navigation:
+
+- `src/app` for entrypoints and process startup
+- `src/agent` for orchestration, commands, tools, protocol, and skills
+- `src/config` for config and hooks
+- `src/llm` for model backend clients/server lifecycle
+- `src/models` for hardware/model discovery and downloads
+- `src/ui` for rendering, input, prompt systems, and TUI runtime
+
+See [Project Tree](./project-tree.md) for the full file-level map and alias reference.
+
 ## Conductor / Subagent Model _(planned)_
 
 The current yips-cli uses a single-agent loop. The TypeScript rewrite will introduce a Conductor/Subagent architecture:

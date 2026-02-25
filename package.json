@@ -2,14 +2,84 @@
   "name": "yips",
   "version": "0.1.0",
   "description": "Local-first AI code editor and self-hosted gateway (TypeScript rewrite).",
-  "main": "dist/index.js",
+  "main": "dist/app/index.js",
+  "imports": {
+    "#app/*": {
+      "development": "./src/app/*.ts",
+      "default": "./dist/app/*.js"
+    },
+    "#agent/conductor": {
+      "development": "./src/agent/conductor.ts",
+      "default": "./dist/agent/conductor.js"
+    },
+    "#agent/commands/*": {
+      "development": "./src/agent/commands/*.ts",
+      "default": "./dist/agent/commands/*.js"
+    },
+    "#agent/context/*": {
+      "development": "./src/agent/context/*.ts",
+      "default": "./dist/agent/context/*.js"
+    },
+    "#agent/protocol/*": {
+      "development": "./src/agent/protocol/*.ts",
+      "default": "./dist/agent/protocol/*.js"
+    },
+    "#agent/tools/*": {
+      "development": "./src/agent/tools/*.ts",
+      "default": "./dist/agent/tools/*.js"
+    },
+    "#agent/skills/*": {
+      "development": "./src/agent/skills/*.ts",
+      "default": "./dist/agent/skills/*.js"
+    },
+    "#config/*": {
+      "development": "./src/config/*.ts",
+      "default": "./dist/config/*.js"
+    },
+    "#llm/*": {
+      "development": "./src/llm/*.ts",
+      "default": "./dist/llm/*.js"
+    },
+    "#models/*": {
+      "development": "./src/models/*.ts",
+      "default": "./dist/models/*.js"
+    },
+    "#types/*": {
+      "development": "./src/types/*.ts",
+      "default": "./dist/types/*.js"
+    },
+    "#ui/*": {
+      "development": "./src/ui/*.ts",
+      "default": "./dist/ui/*.js"
+    },
+    "#ui/prompt/*": {
+      "development": "./src/ui/prompt/*.ts",
+      "default": "./dist/ui/prompt/*.js"
+    },
+    "#ui/input/*": {
+      "development": "./src/ui/input/*.ts",
+      "default": "./dist/ui/input/*.js"
+    },
+    "#ui/downloader/*": {
+      "development": "./src/ui/downloader/*.ts",
+      "default": "./dist/ui/downloader/*.js"
+    },
+    "#ui/model-manager/*": {
+      "development": "./src/ui/model-manager/*.ts",
+      "default": "./dist/ui/model-manager/*.js"
+    },
+    "#ui/tui/*": {
+      "development": "./src/ui/tui/*.ts",
+      "default": "./dist/ui/tui/*.js"
+    }
+  },
   "engines": {
     "node": ">=20.0.0"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
-    "dev": "tsx src/index.ts",
-    "start": "node dist/index.js",
+    "dev": "tsx --conditions=development src/app/index.ts",
+    "start": "node dist/app/index.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
     "test:watch": "vitest",

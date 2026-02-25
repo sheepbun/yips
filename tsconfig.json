@@ -9,7 +9,27 @@
     "esModuleInterop": true,
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
-    "types": ["node", "vitest/globals"]
+    "types": ["node", "vitest/globals"],
+    "customConditions": ["development"],
+    "paths": {
+      "#app/*": ["./src/app/*"],
+      "#agent/conductor": ["./src/agent/conductor"],
+      "#agent/commands/*": ["./src/agent/commands/*"],
+      "#agent/context/*": ["./src/agent/context/*"],
+      "#agent/protocol/*": ["./src/agent/protocol/*"],
+      "#agent/tools/*": ["./src/agent/tools/*"],
+      "#agent/skills/*": ["./src/agent/skills/*"],
+      "#config/*": ["./src/config/*"],
+      "#llm/*": ["./src/llm/*"],
+      "#models/*": ["./src/models/*"],
+      "#types/*": ["./src/types/*"],
+      "#ui/*": ["./src/ui/*"],
+      "#ui/prompt/*": ["./src/ui/prompt/*"],
+      "#ui/input/*": ["./src/ui/input/*"],
+      "#ui/downloader/*": ["./src/ui/downloader/*"],
+      "#ui/model-manager/*": ["./src/ui/model-manager/*"],
+      "#ui/tui/*": ["./src/ui/tui/*"]
+    }
   },
   "include": ["src/**/*.ts", "tests/**/*.ts"],
   "exclude": ["dist", "node_modules"]

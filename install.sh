@@ -316,8 +316,8 @@ if [[ ! -d "\${REPO_ROOT}" ]]; then
 fi
 # Preserve caller cwd so Yips reflects where the command was launched.
 # Set YIPS_USE_DIST=1 to prefer compiled output when desired.
-if [[ "\${YIPS_USE_DIST:-0}" == "1" ]] && [[ -f "\${REPO_ROOT}/dist/index.js" ]]; then
-  exec node "\${REPO_ROOT}/dist/index.js" "\$@"
+if [[ "\${YIPS_USE_DIST:-0}" == "1" ]] && [[ -f "\${REPO_ROOT}/dist/app/index.js" ]]; then
+  exec node "\${REPO_ROOT}/dist/app/index.js" "\$@"
 fi
 TSX_BIN="\${REPO_ROOT}/node_modules/tsx/dist/cli.mjs"
 if [[ ! -f "\${TSX_BIN}" ]]; then
@@ -325,7 +325,7 @@ if [[ ! -f "\${TSX_BIN}" ]]; then
   echo "[yips launcher] Run: (cd \${REPO_ROOT} && npm install)" >&2
   exit 1
 fi
-exec node "\${TSX_BIN}" "\${REPO_ROOT}/src/index.ts" "\$@"
+exec node "\${TSX_BIN}" "\${REPO_ROOT}/src/app/index.ts" "\$@"
 EOF
   chmod +x "${YIPS_LAUNCHER_PATH}"
   log "Installed launcher: ${YIPS_LAUNCHER_PATH}"

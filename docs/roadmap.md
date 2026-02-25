@@ -60,7 +60,7 @@ Self-hosted messaging platform bridge.
 - [x] Telegram adapter (Bot API)
 - [x] Discord adapter (Bot SDK)
 - [x] Authentication and access control
-- [ ] Platform-specific message formatting
+- [x] Platform-specific message formatting
 - [ ] Headless Conductor mode (no TUI, API-driven)
 
 ## Milestone 5: Distribution _(planned)_

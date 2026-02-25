@@ -104,6 +104,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
   - Discord runtime now emits outbound denial/handshake replies when `dispatch(...)` returns a response payload for non-`ok` statuses
   - Discord main runtime now supports optional `YIPS_GATEWAY_PASSPHRASE`
   - added coverage in `tests/gateway/auth-policy.test.ts`, expanded `tests/gateway/core.test.ts`, and expanded `tests/gateway/runtime/discord-bot.test.ts`
+- Milestone 4 platform-specific outbound formatting:
+  - added `src/gateway/adapters/formatting.ts` shared normalization helpers (line endings, markdown stripping, mention sanitization, chunking)
+  - Discord, Telegram, and WhatsApp adapters now normalize outbound text with conservative mention-safe plain-text policy
+  - Telegram and WhatsApp adapters now support outbound multi-request chunking parity with per-platform caps
+  - added coverage in `tests/gateway/adapters/formatting.test.ts` and expanded gateway adapter tests for chunking/sanitization
 
 ### Changed
 

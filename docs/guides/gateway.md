@@ -82,6 +82,7 @@ Current implementation status in TypeScript:
 - `src/gateway/adapters/whatsapp.ts`: WhatsApp Cloud API adapter for webhook `entry/changes/messages` parsing and Graph API `/messages` outbound formatting.
 - `src/gateway/adapters/telegram.ts`: Telegram Bot API adapter for parsing webhook/poll updates into gateway messages and formatting `sendMessage` payloads.
 - `src/gateway/adapters/discord.ts`: Discord adapter for message-create event normalization and outbound API payload formatting with safe chunking.
+- `src/gateway/adapters/formatting.ts`: shared outbound text normalization (line endings, markdown stripping, mention sanitization, chunking).
 - `src/gateway/runtime/discord-bot.ts`: discord.js event loop that routes messages through `GatewayCore` and emits outbound requests.
 - `src/gateway/runtime/discord-main.ts`: executable Discord runtime entrypoint (`npm run gateway:discord`).
 
@@ -96,6 +97,17 @@ Authentication behavior:
 - If `YIPS_GATEWAY_ALLOWED_SENDERS` is set, non-allowlisted sender IDs are rejected.
 - If `YIPS_GATEWAY_PASSPHRASE` is set, unauthenticated senders receive an explicit denial response until they send a valid `/auth <passphrase>` command.
 - Successful `/auth` grants in-memory access for that sender within the current process lifetime.
+
+Outbound formatting behavior:
+
+- All gateway adapters use shared outbound text normalization before sending responses.
+- Normalization converts CRLF/CR to LF, trims outer whitespace, and collapses excessive blank lines.
+- Common markdown markers are stripped to conservative plain text for consistent cross-platform rendering.
+- Mentions are sanitized to avoid accidental pings (`@everyone`, `@here`, and mention-like handles/IDs).
+- Outbound chunking uses per-platform conservative limits:
+  - Discord: 2000
+  - Telegram: 4000
+  - WhatsApp: 4000
 
 ### Headless Conductor
 

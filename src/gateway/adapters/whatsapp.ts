@@ -1,5 +1,6 @@
 import type { GatewayIncomingMessage, GatewayMessageContext, GatewayMessageResponse } from "#gateway/types";
 
+import { chunkOutboundText, normalizeOutboundText } from "#gateway/adapters/formatting";
 import type { GatewayAdapter, GatewayAdapterOutboundRequest } from "#gateway/adapters/types";
 
 interface WhatsAppContact {
@@ -59,10 +60,12 @@ export interface WhatsAppAdapterOptions {
   phoneNumberId: string;
   apiBaseUrl?: string;
   apiVersion?: string;
+  maxMessageLength?: number;
 }
 
 const DEFAULT_API_BASE_URL = "https://graph.facebook.com";
 const DEFAULT_API_VERSION = "v21.0";
+const DEFAULT_MAX_MESSAGE_LENGTH = 4000;
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -160,12 +163,14 @@ export class WhatsAppAdapter
   private readonly phoneNumberId: string;
   private readonly apiBaseUrl: string;
   private readonly apiVersion: string;
+  private readonly maxMessageLength: number;
 
   constructor(options: WhatsAppAdapterOptions) {
     this.accessToken = options.accessToken.trim();
     this.phoneNumberId = options.phoneNumberId.trim();
     this.apiBaseUrl = (options.apiBaseUrl ?? DEFAULT_API_BASE_URL).trim().replace(/\/+$/, "");
     this.apiVersion = (options.apiVersion ?? DEFAULT_API_VERSION).trim();
+    this.maxMessageLength = Math.max(1, Math.trunc(options.maxMessageLength ?? DEFAULT_MAX_MESSAGE_LENGTH));
   }
 
   parseInbound(payload: unknown): GatewayIncomingMessage[] {
@@ -175,28 +180,34 @@ export class WhatsAppAdapter
   formatOutbound(
     context: GatewayMessageContext,
     response: GatewayMessageResponse
-  ): GatewayAdapterOutboundRequest<WhatsAppSendMessageBody> | null {
-    const trimmed = response.text.trim();
-    if (trimmed.length === 0) {
+  ):
+    | GatewayAdapterOutboundRequest<WhatsAppSendMessageBody>
+    | GatewayAdapterOutboundRequest<WhatsAppSendMessageBody>[]
+    | null {
+    const normalizedText = normalizeOutboundText(response.text);
+    const chunks = chunkOutboundText(normalizedText, this.maxMessageLength);
+    if (chunks.length === 0) {
       return null;
     }
 
-    return {
-      method: "POST",
+    const requests = chunks.map((chunk) => ({
+      method: "POST" as const,
       endpoint: `${this.apiBaseUrl}/${this.apiVersion}/${this.phoneNumberId}/messages`,
       headers: {
         authorization: `Bearer ${this.accessToken}`,
         "content-type": "application/json"
       },
       body: {
-        messaging_product: "whatsapp",
-        recipient_type: "individual",
+        messaging_product: "whatsapp" as const,
+        recipient_type: "individual" as const,
         to: context.message.senderId,
-        type: "text",
+        type: "text" as const,
         text: {
-          body: trimmed
+          body: chunk
         }
       }
-    };
+    }));
+
+    return requests.length === 1 ? (requests[0] ?? null) : requests;
   }
 }

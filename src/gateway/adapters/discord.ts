@@ -1,5 +1,6 @@
 import type { GatewayIncomingMessage, GatewayMessageContext, GatewayMessageResponse } from "#gateway/types";
 
+import { chunkOutboundText, normalizeOutboundText } from "#gateway/adapters/formatting";
 import type { GatewayAdapter, GatewayAdapterOutboundRequest } from "#gateway/adapters/types";
 
 interface DiscordAuthor {
@@ -67,81 +68,9 @@ function toDiscordMessageLike(payload: unknown): DiscordMessageLike | null {
   return payload as DiscordMessageLike;
 }
 
-function splitByLimit(value: string, maxLength: number): string[] {
-  if (value.length <= maxLength) {
-    return [value];
-  }
-
-  const chunks: string[] = [];
-  let current = value;
-  while (current.length > maxLength) {
-    chunks.push(current.slice(0, maxLength));
-    current = current.slice(maxLength);
-  }
-  if (current.length > 0) {
-    chunks.push(current);
-  }
-  return chunks;
-}
-
 export function chunkDiscordMessage(text: string, maxLength = DEFAULT_MAX_MESSAGE_LENGTH): string[] {
-  const normalizedMaxLength = Math.max(1, Math.trunc(maxLength));
-  const trimmed = text.trim();
-  if (trimmed.length === 0) {
-    return [];
-  }
-
-  const chunks: string[] = [];
-  let current = "";
-  const lines = trimmed.split("\n");
-  for (const line of lines) {
-    const words = line.trim().split(/\s+/).filter((word) => word.length > 0);
-    if (words.length === 0) {
-      const candidate = current.length === 0 ? "\n" : `${current}\n`;
-      if (candidate.length <= normalizedMaxLength) {
-        current = candidate;
-      } else {
-        chunks.push(...splitByLimit(current, normalizedMaxLength));
-        current = "\n";
-      }
-      continue;
-    }
-
-    for (const word of words) {
-      const separator = current.length === 0 || current.endsWith("\n") ? "" : " ";
-      const candidate = `${current}${separator}${word}`;
-      if (candidate.length <= normalizedMaxLength) {
-        current = candidate;
-        continue;
-      }
-
-      if (current.length > 0) {
-        chunks.push(...splitByLimit(current, normalizedMaxLength));
-        current = "";
-      }
-
-      if (word.length > normalizedMaxLength) {
-        chunks.push(...splitByLimit(word, normalizedMaxLength));
-      } else {
-        current = word;
-      }
-    }
-    if (current.length > 0) {
-      const candidate = `${current}\n`;
-      if (candidate.length <= normalizedMaxLength) {
-        current = candidate;
-      } else {
-        chunks.push(...splitByLimit(current, normalizedMaxLength));
-        current = "";
-      }
-    }
-  }
-
-  if (current.length > 0) {
-    chunks.push(...splitByLimit(current, normalizedMaxLength));
-  }
-
-  return chunks.map((chunk) => chunk.trim()).filter((chunk) => chunk.length > 0);
+  const normalizedText = normalizeOutboundText(text);
+  return chunkOutboundText(normalizedText, maxLength);
 }
 
 function toInboundMessage(payload: unknown): GatewayIncomingMessage | null {

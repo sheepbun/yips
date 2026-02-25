@@ -50,7 +50,7 @@ Each messaging platform has its own adapter that handles protocol-specific conce
 | Platform | Transport | Auth | Status |
 |----------|-----------|------|--------|
 | WhatsApp | Webhooks (Meta Business API) | App token + verify token | _(planned)_ |
-| Telegram | Long polling or webhooks (Bot API) | Bot token | _(planned)_ |
+| Telegram | Long polling or webhooks (Bot API) | Bot token | `Implemented` (adapter layer) |
 | Discord | WebSocket gateway (Bot SDK) | Bot token | _(planned)_ |
 
 An adapter's job is to:
@@ -77,6 +77,8 @@ Current implementation status in TypeScript:
 - `src/gateway/session-manager.ts`: in-memory per-conversation session lifecycle (`platform + sender + channel`).
 - `src/gateway/rate-limiter.ts`: in-memory fixed-window per-sender rate limiter.
 - `src/gateway/types.ts`: shared gateway message/session/dispatch contracts.
+- `src/gateway/adapters/types.ts`: common adapter contract for platform-specific inbound/outbound translation.
+- `src/gateway/adapters/telegram.ts`: Telegram Bot API adapter for parsing webhook/poll updates into gateway messages and formatting `sendMessage` payloads.
 
 ### Headless Conductor
 

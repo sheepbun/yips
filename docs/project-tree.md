@@ -30,6 +30,9 @@ src/
     config.ts
     hooks.ts
   gateway/
+    adapters/
+      telegram.ts
+      types.ts
     core.ts
     message-router.ts
     rate-limiter.ts

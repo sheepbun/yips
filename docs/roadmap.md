@@ -57,7 +57,7 @@ Self-hosted messaging platform bridge.
 
 - [x] Gateway core: message routing, session management, rate limiting
 - [ ] WhatsApp adapter (WhatsApp Business API)
-- [ ] Telegram adapter (Bot API)
+- [x] Telegram adapter (Bot API)
 - [ ] Discord adapter (Bot SDK)
 - [ ] Authentication and access control
 - [ ] Platform-specific message formatting

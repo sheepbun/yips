@@ -29,6 +29,12 @@ src/
   config/
     config.ts
     hooks.ts
+  gateway/
+    core.ts
+    message-router.ts
+    rate-limiter.ts
+    session-manager.ts
+    types.ts
   llm/
     llama-client.ts
     llama-server.ts
@@ -88,6 +94,7 @@ tests/
 - App startup and process entry: `src/app/`
 - Agent orchestration, tools, skills, and command protocol: `src/agent/`
 - Runtime config and lifecycle hooks: `src/config/`
+- Gateway routing/session/rate-limit core: `src/gateway/`
 - LLM transport and server lifecycle: `src/llm/`
 - Local model discovery, download, and hardware fit: `src/models/`
 - Ink UI and input/render systems: `src/ui/`
@@ -104,6 +111,7 @@ Runtime-safe Node `#imports` aliases are defined in `package.json` and mirrored 
 - `#agent/skills/*`
 - `#agent/tools/*`
 - `#config/*`
+- `#gateway/*`
 - `#llm/*`
 - `#models/*`
 - `#types/*`

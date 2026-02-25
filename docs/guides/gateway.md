@@ -1,4 +1,4 @@
-# Gateway _(planned)_
+# Gateway
 
 ## Concept
 
@@ -70,18 +70,24 @@ The central routing layer:
 - **Rate Limiter**: Prevents abuse (per-user message limits, cooldowns)
 - **Authentication**: Controls who can interact with the gateway (allowlist, API keys, or platform-level permissions)
 
+Current implementation status in TypeScript:
+
+- `src/gateway/core.ts`: dispatch entrypoint that validates/authenticates/rate-limits and invokes a message handler callback.
+- `src/gateway/message-router.ts`: inbound message normalization and validation.
+- `src/gateway/session-manager.ts`: in-memory per-conversation session lifecycle (`platform + sender + channel`).
+- `src/gateway/rate-limiter.ts`: in-memory fixed-window per-sender rate limiter.
+- `src/gateway/types.ts`: shared gateway message/session/dispatch contracts.
+
 ### Headless Conductor
 
 The same Conductor used by the TUI, running without terminal display. It receives messages from the Gateway Core, processes them through the agent system (context loading, LLM call, tool execution, response chaining), and returns the final response.
 
 ## Self-Hosting Requirements
 
-<!-- TODO: Define concrete requirements once gateway implementation begins. -->
-
 - A machine running the LLM backend (GPU recommended for reasonable response times)
 - Network access for platform webhooks (static IP or reverse proxy for WhatsApp/Telegram webhooks, or use long polling to avoid inbound connections)
 - Platform API credentials (WhatsApp Business account, Telegram bot token, Discord application)
-- Persistent storage for session data
+- Persistent storage for session data (currently in-memory session manager; durable persistence still pending)
 
 ## Security Considerations
 
@@ -91,8 +97,6 @@ The same Conductor used by the TUI, running without terminal display. It receive
 - **Input sanitization**: Messages from external platforms may contain injection attempts. Sanitize before passing to the Conductor.
 - **No secrets in responses**: The agent's context may contain sensitive information (file contents, environment variables). Ensure the gateway does not leak this in responses to messaging platforms.
 
-<!-- TODO: Define security model in detail. Decide on default tool policy (allowlist vs. denylist), authentication mechanism, and session isolation. -->
-
 ---
 
-> Last updated: 2026-02-22
+> Last updated: 2026-02-25

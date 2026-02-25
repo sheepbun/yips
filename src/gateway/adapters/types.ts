@@ -18,5 +18,5 @@ export interface GatewayAdapter<TInbound = unknown, TOutboundBody = unknown> {
   formatOutbound(
     context: GatewayMessageContext,
     response: GatewayMessageResponse
-  ): GatewayAdapterOutboundRequest<TOutboundBody> | null;
+  ): GatewayAdapterOutboundRequest<TOutboundBody> | GatewayAdapterOutboundRequest<TOutboundBody>[] | null;
 }

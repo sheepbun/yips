@@ -31,9 +31,13 @@ src/
     hooks.ts
   gateway/
     adapters/
+      discord.ts
       whatsapp.ts
       telegram.ts
       types.ts
+    runtime/
+      discord-bot.ts
+      discord-main.ts
     core.ts
     message-router.ts
     rate-limiter.ts
@@ -88,6 +92,7 @@ tests/
   app/
   agent/
   config/
+  gateway/
   llm/
   models/
   ui/

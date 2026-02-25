@@ -28,11 +28,11 @@ Terminal interface with LLM integration.
 Autonomous tool use and multi-agent architecture.
 
 - [x] Tool protocol: structured tool calls (replacing text-tag parsing)
-- [ ] File operations: read, write, edit with diff preview
+- [x] File operations: read, write, edit with diff preview
 - [x] Shell command execution with safety guardrails
 - [x] Destructive command detection and confirmation flow
 - [x] Working zone enforcement
-- [ ] CODE.md loading and context injection
+- [x] CODE.md loading and context injection
 - [ ] Conductor agent: context assembly, tool dispatch, response chaining
 - [ ] Subagent system: delegation, scoped context, lifecycle management
 - [ ] Error recovery and automatic pivoting

@@ -54,7 +54,13 @@ export interface ChatMessage {
   content: string;
 }
 
-export type ToolName = "read_file" | "list_dir" | "grep" | "run_command";
+export type ToolName =
+  | "read_file"
+  | "write_file"
+  | "edit_file"
+  | "list_dir"
+  | "grep"
+  | "run_command";
 
 export interface ToolCall {
   id: string;

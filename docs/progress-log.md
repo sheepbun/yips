@@ -2428,3 +2428,65 @@ Changed:
 - Extend tool set with write/edit flows and diff preview (remaining Milestone 2 file-ops scope).
 - Add focused integration tests for confirmation modal key paths and VT-mode input routing.
 - Optionally re-enable streaming for non-tool responses while preserving deterministic tool-call parsing.
+
+## 2026-02-25 17:11 UTC — Exchange 72
+
+Summary: Completed Milestone 2 file operations by adding `write_file` and `edit_file` tools with inline diff previews, plus coverage updates.
+Changed:
+
+- Updated `src/types.ts`:
+  - extended `ToolName` union to include `write_file` and `edit_file`.
+- Updated `src/tool-protocol.ts`:
+  - allowed parser now accepts `write_file` and `edit_file` in `yips-tools` blocks.
+- Updated `src/tool-executor.ts`:
+  - added `write_file` execution with parent-directory creation and UTF-8 writes.
+  - added `edit_file` execution with `oldText`/`newText` replacement and optional `replaceAll` behavior.
+  - added compact unified-style diff preview generation (`--- before`, `+++ after`, `@@ ... @@`, changed lines) for write/edit operations.
+  - included diff preview in tool output and metadata for model reasoning and debugging.
+- Added `tests/tool-executor.test.ts`:
+  - verifies `write_file` creates files and emits diff preview.
+  - verifies `edit_file` single replacement and `replaceAll` behavior.
+  - verifies `run_command` delegation still routes through VT session.
+- Updated `tests/tool-protocol.test.ts`:
+  - valid-case now exercises `write_file` parsing.
+  - unknown-tool assertion updated to use a truly unknown tool name.
+- Updated `docs/roadmap.md`:
+  - marked `File operations: read, write, edit with diff preview` complete in Milestone 2.
+    Validation:
+- `npm test -- tests/tool-executor.test.ts tests/tool-protocol.test.ts tests/tool-safety.test.ts` — clean
+- `npm run lint` — clean
+- `npm run typecheck` — clean
+- `npm test` — clean (275 passing)
+  Next:
+- Add focused TUI integration tests for confirmation modal key paths (`y/n/enter/esc`) and VT input routing edge cases.
+- Implement CODE.md loading and context injection in the chat/tool loop path (next open Milestone 2 item).
+
+## 2026-02-25 17:15 UTC — Exchange 73
+
+Summary: Implemented CODE.md loading and context injection into llama requests (Milestone 2), including parent-directory discovery and tests.
+Changed:
+
+- Added `src/code-context.ts`:
+  - upward search for `CODE.md` from current working directory to filesystem root.
+  - `loadCodeContext(startDir)` returns nearest readable non-empty CODE.md.
+  - content truncation guard (`24,000` chars) with truncation marker.
+  - `toCodeContextSystemMessage(...)` formats injected system prompt block.
+- Updated `src/tui.ts`:
+  - runtime state now stores loaded CODE.md path/message.
+  - startup effect loads CODE.md once per TUI run from `process.cwd()` parents.
+  - llama request assembly now prepends CODE.md as a system message via `composeChatRequestMessages(...)`.
+  - added verbose-only startup line when CODE.md is loaded (and truncated indicator when applicable).
+  - exported `composeChatRequestMessages(...)` for focused unit coverage.
+- Added tests:
+  - `tests/code-context.test.ts` covering candidate discovery, nearest-parent precedence, missing-file case, and system-message formatting.
+  - `tests/tui-code-context.test.ts` covering request-message composition with/without CODE.md context.
+- Updated docs:
+  - `docs/roadmap.md` marks `CODE.md loading and context injection` complete.
+    Validation:
+- `npm run typecheck` — clean
+- `npm test -- tests/code-context.test.ts tests/tui-code-context.test.ts` — clean
+- `npm run lint` — clean
+- `npm test` — clean (281 passing)
+  Next:
+- Implement Conductor agent orchestration boundaries explicitly (context assembly + tool dispatch + response chaining module extraction from `tui.ts`).
+- Add focused integration tests for confirmation modal key paths and VT-mode raw input handling edge cases.

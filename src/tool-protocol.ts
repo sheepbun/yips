@@ -3,6 +3,8 @@ import type { ToolCall, ToolName } from "./types";
 const TOOL_BLOCK_REGEX = /```yips-tools\s*\n([\s\S]*?)```/u;
 const ALLOWED_TOOLS: ReadonlySet<ToolName> = new Set([
   "read_file",
+  "write_file",
+  "edit_file",
   "list_dir",
   "grep",
   "run_command"

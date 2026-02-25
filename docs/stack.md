@@ -51,15 +51,23 @@
 
 How users install and update Yips.
 
-| Candidate | Pros | Cons |
-|-----------|------|------|
-| **npm** (`npx yips`) | Standard Node.js distribution, easy publishing, automatic dependency resolution | Requires Node.js pre-installed, `node_modules` overhead |
-| **Standalone binary** (pkg, bun build, nexe) | No runtime dependency for user, single file | Large binary size, platform-specific builds, harder to debug |
-| **Homebrew** | Familiar to macOS/Linux developers, formula-based updates | macOS/Linux only, formula maintenance overhead |
+**Primary channel (current decision)**:
 
-**Requirements**: Works on Linux and macOS. Ideally single-command install. Should handle llama.cpp setup (bundled or first-run download).
+- **npm package** for distribution and versioning.
+- **`install.sh`** for local-first setup (llama.cpp build/wiring + launcher flow).
+- **Guided update UX** via `/update` (checks npm latest and prints explicit upgrade commands).
+- **`yips.dev`** is the docs/download hub, not the authoritative package registry.
 
-<!-- TODO: Decide after Milestone 1. Start with npm for development, evaluate binary packaging for release. -->
+**Deferred channels**:
+
+- Standalone binary releases (deferred for a later milestone due to cross-platform build complexity).
+- Homebrew formula/tap (deferred until release cadence stabilizes).
+
+**Platform support policy**:
+
+- Linux: supported
+- macOS: supported
+- Windows: WSL2 supported (native Windows packaging deferred)
 
 ## Comparison to yips-cli
 
@@ -78,4 +86,4 @@ For reference, the Python CLI's stack:
 
 ---
 
-> Last updated: 2026-02-24
+> Last updated: 2026-02-25

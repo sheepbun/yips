@@ -2,7 +2,23 @@
   "name": "yips",
   "version": "0.1.0",
   "description": "Local-first AI code editor and self-hosted gateway (TypeScript rewrite).",
+  "license": "UNLICENSED",
+  "homepage": "https://yips.dev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sheepbun/yips.git"
+  },
+  "bugs": {
+    "url": "https://github.com/sheepbun/yips/issues"
+  },
   "main": "dist/app/index.js",
+  "bin": {
+    "yips": "dist/app/index.js"
+  },
+  "files": [
+    "dist/**",
+    "install.sh"
+  ],
   "imports": {
     "#app/*": {
       "development": "./src/app/*.ts",

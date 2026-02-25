@@ -16,6 +16,7 @@
       "#agent/conductor": ["./src/agent/conductor"],
       "#agent/commands/*": ["./src/agent/commands/*"],
       "#agent/context/*": ["./src/agent/context/*"],
+      "#agent/core/*": ["./src/agent/core/*"],
       "#agent/protocol/*": ["./src/agent/protocol/*"],
       "#agent/tools/*": ["./src/agent/tools/*"],
       "#agent/skills/*": ["./src/agent/skills/*"],

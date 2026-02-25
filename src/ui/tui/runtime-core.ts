@@ -26,6 +26,8 @@ import {
   stopLlamaServer
 } from "#llm/llama-server";
 import {
+  formatActionCallBox,
+  formatActionResultBox,
   formatAssistantMessage,
   formatDimMessage,
   formatErrorMessage,
@@ -114,12 +116,17 @@ import type {
   ToolResult,
   TuiOptions
 } from "#types/app-types";
-import { assessCommandRisk, assessPathRisk, resolveToolPath, type ToolRisk } from "#agent/tools/tool-safety";
+import {
+  assessActionRisk,
+  type ActionRiskAssessment
+} from "#agent/tools/action-risk-policy";
 import { executeToolCall } from "#agent/tools/tool-executor";
 import { executeSkillCall } from "#agent/skills/skills";
 import { VirtualTerminalSession } from "#ui/input/vt-session";
 import { loadCodeContext, toCodeContextSystemMessage } from "#agent/context/code-context";
 import { decideConfirmationAction, routeVtInput } from "#ui/input/tui-input-routing";
+import { composeChatRequestMessages } from "#agent/protocol/system-prompt";
+import { parseAgentEnvelope } from "#agent/protocol/agent-envelope";
 
 const PROMPT_PREFIX = ">>> ";
 const CURSOR_MARKER = "▌";
@@ -165,8 +172,7 @@ interface RuntimeState {
 
 interface PendingConfirmation {
   summary: string;
-  destructive: boolean;
-  outOfZone: boolean;
+  reasons: string[];
 }
 
 interface AssistantRequestOptions {
@@ -615,6 +621,66 @@ function replaceOutputBlock(
   return lines.length;
 }
 
+function stripEnvelopeStart(text: string): string {
+  const yipsAgentIndex = text.indexOf("```yips-agent");
+  const yipsToolsIndex = text.indexOf("```yips-tools");
+  const candidates = [yipsAgentIndex, yipsToolsIndex].filter((value) => value >= 0);
+  if (candidates.length === 0) {
+    return text;
+  }
+  const firstIndex = Math.min(...candidates);
+  return text.slice(0, firstIndex).trimEnd();
+}
+
+function actionCallName(action: ReturnType<typeof parseAgentEnvelope>["actions"][number]): string {
+  if (action.kind === "subagent") {
+    return action.call.task;
+  }
+  return action.call.name;
+}
+
+export function renderAssistantStreamForDisplay(
+  rawText: string,
+  timestamp: Date,
+  verbose: boolean
+): string {
+  const parsed = parseAgentEnvelope(rawText);
+  if (!parsed.envelopeFound) {
+    return formatAssistantMessage(rawText, timestamp);
+  }
+
+  const lines: string[] = [];
+  const assistantText = parsed.assistantText.trim();
+  if (assistantText.length > 0) {
+    lines.push(...formatAssistantMessage(assistantText, timestamp).split("\n"));
+  } else {
+    const fallback = stripEnvelopeStart(rawText);
+    if (fallback.trim().length > 0) {
+      lines.push(...formatAssistantMessage(fallback, timestamp).split("\n"));
+    }
+  }
+
+  for (const warning of parsed.warnings) {
+    lines.push(formatWarningMessage(`Tool protocol warning: ${warning}`));
+  }
+  for (const error of parsed.errors) {
+    lines.push(formatWarningMessage(`Tool protocol error: ${error}`));
+  }
+
+  for (const action of parsed.actions) {
+    lines.push(
+      ...formatActionCallBox({
+        type: action.kind,
+        id: action.call.id,
+        name: actionCallName(action),
+        preview: verbose ? "queued for execution" : undefined
+      }).split("\n")
+    );
+  }
+
+  return lines.join("\n");
+}
+
 function resetSession(state: RuntimeState): void {
   state.outputLines = [];
   state.outputScrollOffset = 0;
@@ -695,16 +761,6 @@ function createRuntimeState(options: TuiOptions): RuntimeState {
     codeContextPath: null,
     codeContextMessage: null
   };
-}
-
-export function composeChatRequestMessages(
-  history: readonly ChatMessage[],
-  codeContextMessage: string | null
-): readonly ChatMessage[] {
-  if (!codeContextMessage) {
-    return history;
-  }
-  return [{ role: "system", content: codeContextMessage }, ...history];
 }
 
 function buildSubagentScopeMessage(call: SubagentCall): string {
@@ -1296,15 +1352,14 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
     );
 
     const requestToolConfirmation = useCallback(
-      async (summary: string, risk: ToolRisk): Promise<boolean> => {
+      async (summary: string, risk: ActionRiskAssessment): Promise<boolean> => {
         const currentState = stateRef.current;
         if (!currentState) {
           return false;
         }
         currentState.pendingConfirmation = {
           summary,
-          destructive: risk.destructive,
-          outOfZone: risk.outOfZone
+          reasons: risk.reasons
         };
         currentState.uiMode = "confirm";
         forceRender();
@@ -1751,7 +1806,11 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
                   currentState,
                   blockStart,
                   blockLength,
-                  formatAssistantMessage(streamText, timestamp)
+                  renderAssistantStreamForDisplay(
+                    streamText,
+                    timestamp,
+                    currentState.config.verbose
+                  )
                 );
                 forceRender();
               }
@@ -1793,7 +1852,11 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
               currentState,
               blockStart,
               blockLength,
-              formatAssistantMessage(fallbackText, timestamp)
+              renderAssistantStreamForDisplay(
+                fallbackText,
+                timestamp,
+                currentState.config.verbose
+              )
             );
             return {
               text: fallbackText,
@@ -1854,18 +1917,11 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
       [startBusyIndicator, stopBusyIndicator]
     );
 
-    const assessToolCallRisk = useCallback((call: ToolCall, workingZone: string): ToolRisk => {
-      if (call.name === "run_command") {
-        const command =
-          typeof call.arguments["command"] === "string" ? call.arguments["command"] : "";
-        const cwdArg = typeof call.arguments["cwd"] === "string" ? call.arguments["cwd"] : ".";
-        const resolvedCwd = resolveToolPath(cwdArg, workingZone);
-        return assessCommandRisk(command, resolvedCwd, workingZone);
-      }
-
-      const pathArg = typeof call.arguments["path"] === "string" ? call.arguments["path"] : ".";
-      return assessPathRisk(pathArg, workingZone);
-    }, []);
+    const assessToolCallRisk = useCallback(
+      (call: ToolCall, sessionRoot: string): ActionRiskAssessment =>
+        assessActionRisk(call, sessionRoot),
+      []
+    );
 
     const executeToolCalls = useCallback(
       async (toolCalls: readonly ToolCall[]): Promise<ToolResult[]> => {
@@ -1874,11 +1930,49 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
           return [];
         }
 
-        const workingZone = process.cwd();
+        const sessionRoot = process.cwd();
         const results: ToolResult[] = [];
 
         for (const call of toolCalls) {
-          const risk = assessToolCallRisk(call, workingZone);
+          appendOutput(
+            currentState,
+            formatActionCallBox({
+              type: "tool",
+              id: call.id,
+              name: call.name
+            })
+          );
+
+          const risk = assessToolCallRisk(call, sessionRoot);
+          if (risk.riskLevel === "deny") {
+            const deniedResult: ToolResult = {
+              callId: call.id,
+              tool: call.name,
+              status: "denied",
+              output: "Action denied by risk policy."
+            };
+            results.push(deniedResult);
+            if (currentState.config.verbose) {
+              appendOutput(
+                currentState,
+                formatDimMessage(`[tool] ${call.name} (${call.id}) denied by risk policy`)
+              );
+            }
+            appendOutput(
+              currentState,
+              formatActionResultBox(
+                {
+                  type: "tool",
+                  id: call.id,
+                  name: call.name,
+                  status: deniedResult.status,
+                  output: deniedResult.output
+                },
+                { verbose: currentState.config.verbose }
+              )
+            );
+            continue;
+          }
           if (risk.requiresConfirmation) {
             const approved = await requestToolConfirmation(`${call.name} (${call.id})`, risk);
             if (!approved) {
@@ -1895,6 +1989,19 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
                   formatDimMessage(`[tool] ${call.name} (${call.id}) denied`)
                 );
               }
+              appendOutput(
+                currentState,
+                formatActionResultBox(
+                  {
+                    type: "tool",
+                    id: call.id,
+                    name: call.name,
+                    status: deniedResult.status,
+                    output: deniedResult.output
+                  },
+                  { verbose: currentState.config.verbose }
+                )
+              );
               continue;
             }
           }
@@ -1904,7 +2011,7 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
           }
 
           const result = await executeToolCall(call, {
-            workingDirectory: workingZone,
+            workingDirectory: sessionRoot,
             vtSession: getVtSession(),
             runHook: async (name, payload) =>
               await runConfiguredHook(name, payload, { surfaceFailure: false })
@@ -1917,6 +2024,20 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
               formatDimMessage(`[tool-result] ${result.tool} => ${result.status}`)
             );
           }
+          appendOutput(
+            currentState,
+            formatActionResultBox(
+              {
+                type: "tool",
+                id: call.id,
+                name: call.name,
+                status: result.status,
+                output: result.output,
+                metadata: result.metadata
+              },
+              { verbose: currentState.config.verbose }
+            )
+          );
         }
 
         if (currentState.config.verbose) {
@@ -1939,6 +2060,15 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
         const results: SkillResult[] = [];
 
         for (const call of skillCalls) {
+          appendOutput(
+            currentState,
+            formatActionCallBox({
+              type: "skill",
+              id: call.id,
+              name: call.name
+            })
+          );
+
           if (currentState.config.verbose) {
             appendOutput(currentState, formatDimMessage(`[skill] ${call.name} (${call.id})`));
           }
@@ -1955,6 +2085,20 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
               formatDimMessage(`[skill-result] ${result.skill} => ${result.status}`)
             );
           }
+          appendOutput(
+            currentState,
+            formatActionResultBox(
+              {
+                type: "skill",
+                id: call.id,
+                name: call.name,
+                status: result.status,
+                output: result.output,
+                metadata: result.metadata
+              },
+              { verbose: currentState.config.verbose }
+            )
+          );
         }
 
         if (currentState.config.verbose) {
@@ -1976,6 +2120,15 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
         const results: SubagentResult[] = [];
 
         for (const subagentCall of subagentCalls) {
+          appendOutput(
+            currentState,
+            formatActionCallBox({
+              type: "subagent",
+              id: subagentCall.id,
+              name: subagentCall.task
+            })
+          );
+
           if (currentState.config.verbose) {
             appendOutput(
               currentState,
@@ -2066,6 +2219,20 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
                 formatDimMessage(`[subagent-result] ${subagentCall.id} => ${result.status}`)
               );
             }
+            appendOutput(
+              currentState,
+              formatActionResultBox(
+                {
+                  type: "subagent",
+                  id: subagentCall.id,
+                  name: subagentCall.task,
+                  status: result.status,
+                  output: result.output,
+                  metadata: result.metadata
+                },
+                { verbose: currentState.config.verbose }
+              )
+            );
           } catch (error) {
             const result: SubagentResult = {
               callId: subagentCall.id,
@@ -2079,6 +2246,19 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
                 formatDimMessage(`[subagent-result] ${subagentCall.id} => error`)
               );
             }
+            appendOutput(
+              currentState,
+              formatActionResultBox(
+                {
+                  type: "subagent",
+                  id: subagentCall.id,
+                  name: subagentCall.task,
+                  status: result.status,
+                  output: result.output
+                },
+                { verbose: currentState.config.verbose }
+              )
+            );
           }
         }
 
@@ -3336,12 +3516,7 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
       );
     }
     if (state.uiMode === "confirm" && state.pendingConfirmation) {
-      const riskTags = [
-        state.pendingConfirmation.destructive ? "destructive" : null,
-        state.pendingConfirmation.outOfZone ? "outside-working-zone" : null
-      ]
-        .filter((value): value is string => value !== null)
-        .join(", ");
+      const riskTags = state.pendingConfirmation.reasons.join(", ");
       outputLines.push("");
       outputLines.push(formatWarningMessage("Confirmation required"));
       outputLines.push(formatDimMessage(`Action: ${state.pendingConfirmation.summary}`));

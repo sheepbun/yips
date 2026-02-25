@@ -12,6 +12,10 @@ src/
     version.ts
   agent/
     conductor.ts
+    core/
+      action-runner.ts
+      contracts.ts
+      turn-engine.ts
     commands/
       command-catalog.ts
       commands.ts
@@ -20,10 +24,12 @@ src/
       memory-store.ts
       session-store.ts
     protocol/
+      agent-envelope.ts
       tool-protocol.ts
     skills/
       skills.ts
     tools/
+      action-risk-policy.ts
       tool-executor.ts
       tool-safety.ts
   config/

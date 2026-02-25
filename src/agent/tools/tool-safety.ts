@@ -1,34 +1,10 @@
-import { relative, resolve } from "node:path";
-
-const DESTRUCTIVE_COMMAND_PATTERNS: ReadonlyArray<RegExp> = [
-  /(^|\s)rm\s+-rf(\s|$)/u,
-  /(^|\s)rm\s+-fr(\s|$)/u,
-  /(^|\s)mkfs(\.|\s|$)/u,
-  /(^|\s)dd\s+if=/u,
-  /(^|\s)reboot(\s|$)/u,
-  /(^|\s)shutdown(\s|$)/u,
-  /(^|\s)poweroff(\s|$)/u,
-  /(^|\s)halt(\s|$)/u
-];
-
-function normalizeBase(base: string): string {
-  return resolve(base);
-}
-
-export function resolveToolPath(path: string, workingZone: string): string {
-  const trimmed = path.trim();
-  if (trimmed.length === 0) {
-    return normalizeBase(workingZone);
-  }
-  return resolve(normalizeBase(workingZone), trimmed);
-}
-
-export function isWithinWorkingZone(path: string, workingZone: string): boolean {
-  const absolutePath = resolve(path);
-  const absoluteZone = normalizeBase(workingZone);
-  const rel = relative(absoluteZone, absolutePath);
-  return rel === "" || (!rel.startsWith("..") && rel !== ".." && !rel.startsWith("../"));
-}
+import {
+  assessCommandRisk as assessCommandRiskV2,
+  assessPathRisk as assessPathRiskV2,
+  isWithinSessionRoot,
+  resolveSessionPath,
+  type ActionRiskAssessment
+} from "#agent/tools/action-risk-policy";
 
 export interface ToolRisk {
   destructive: boolean;
@@ -36,23 +12,28 @@ export interface ToolRisk {
   requiresConfirmation: boolean;
 }
 
+export function resolveToolPath(path: string, workingZone: string): string {
+  return resolveSessionPath(path, workingZone);
+}
+
+export function isWithinWorkingZone(path: string, workingZone: string): boolean {
+  return isWithinSessionRoot(path, workingZone);
+}
+
 export function assessCommandRisk(command: string, cwd: string, workingZone: string): ToolRisk {
-  const destructive = DESTRUCTIVE_COMMAND_PATTERNS.some((pattern) => pattern.test(command));
-  const resolvedCwd = resolveToolPath(cwd, workingZone);
-  const outOfZone = !isWithinWorkingZone(resolvedCwd, workingZone);
-  return {
-    destructive,
-    outOfZone,
-    requiresConfirmation: destructive || outOfZone
-  };
+  const risk = assessCommandRiskV2(command, cwd, workingZone);
+  return toLegacyRisk(risk);
 }
 
 export function assessPathRisk(path: string, workingZone: string): ToolRisk {
-  const resolved = resolveToolPath(path, workingZone);
-  const outOfZone = !isWithinWorkingZone(resolved, workingZone);
+  const risk = assessPathRiskV2(path, workingZone);
+  return toLegacyRisk(risk);
+}
+
+function toLegacyRisk(risk: ActionRiskAssessment): ToolRisk {
   return {
-    destructive: false,
-    outOfZone,
-    requiresConfirmation: outOfZone
+    destructive: risk.destructive,
+    outOfZone: risk.outOfZone,
+    requiresConfirmation: risk.requiresConfirmation || risk.riskLevel === "deny"
   };
 }

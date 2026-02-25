@@ -2,7 +2,7 @@
 
 ## High-Level Components
 
-```
+```text
 ┌──────────────────────────────────────────────────────────┐
 │                        TUI Layer                         │
 │  Input handling, layout, streaming display, status bar   │
@@ -10,15 +10,14 @@
                │
                ▼
 ┌──────────────────────────────────────────────────────────┐
-│                       Conductor                          │
-│  Receives user input, assembles context, plans actions,  │
-│  delegates to Subagents, manages conversation state      │
+│                    Agent Turn Engine                     │
+│  Context assembly, envelope parsing, action execution,   │
+│  result chaining, warning/pivot handling                 │
 └──────┬──────────────────┬──────────────────┬─────────────┘
        │                  │                  │
        ▼                  ▼                  ▼
 ┌─────────────┐  ┌─────────────────┐  ┌─────────────────┐
-│  Subagent   │  │    Subagent     │  │    Subagent      │
-│  (file ops) │  │  (search/fetch) │  │  (build/test)    │
+│ Tool Runner │  │  Skill Runner   │  │ Subagent Runner │
 └──────┬──────┘  └───────┬─────────┘  └────────┬─────────┘
        │                 │                      │
        ▼                 ▼                      ▼
@@ -30,151 +29,126 @@
 
 ## Codebase Layout
 
-The TypeScript rewrite now uses a domain-first source tree for faster navigation:
+The TypeScript rewrite uses a domain-first source tree:
 
-- `src/app` for entrypoints and process startup
-- `src/agent` for orchestration, commands, tools, protocol, and skills
-- `src/config` for config and hooks
-- `src/gateway` for messaging gateway core routing/session/rate-limit logic
-- `src/llm` for model backend clients/server lifecycle
-- `src/models` for hardware/model discovery and downloads
-- `src/ui` for rendering, input, prompt systems, and TUI runtime
+- `src/app` entrypoints and startup
+- `src/agent` orchestration, protocol, tools, skills, and core turn engine
+- `src/config` config and hooks
+- `src/gateway` adapters and headless runtime
+- `src/llm` backend client/server lifecycle
+- `src/models` hardware + model discovery/download
+- `src/ui` TUI rendering and input systems
 
-See [Project Tree](./project-tree.md) for the full file-level map and alias reference.
+See [Project Tree](./project-tree.md) for file-level mapping.
 
-## Conductor / Subagent Model _(planned)_
+## Context Assembly
 
-The current yips-cli uses a single-agent loop. The TypeScript rewrite will introduce a Conductor/Subagent architecture:
+Each llama request is composed from:
 
-- **Conductor**: The top-level agent. It receives every user message, decides whether to handle it directly or delegate, and owns the conversation state. The Conductor assembles its context from CODE.md, project files, memory, and system information.
+1. Protocol system prompt (`TOOL_PROTOCOL_SYSTEM_PROMPT`) with tool-envelope instructions.
+2. Optional `CODE.md` system context message.
+3. Existing chat history.
 
-- **Subagents**: Focused workers spawned by the Conductor for bounded tasks (e.g., "read these 5 files and summarize," "run the test suite and report failures"). Each Subagent has a scoped context, a limited tool set, and reports results back to the Conductor. Subagents do not persist across turns.
+This composition path is shared across TUI and gateway headless runtime.
 
-- **Delegation**: The Conductor decides to delegate when a task is self-contained and benefits from isolation (separate context window, parallel execution). The delegation message includes the task description, allowed tools, and any relevant context excerpts.
+## Tool-Call Protocol
 
-- **Lifecycle**: Subagent spawned → receives task + scoped context → executes tools → returns result → terminated. The Conductor integrates the result into its own conversation.
+Yips uses structured fenced JSON envelopes.
 
-## Context System
+### Preferred format: `yips-agent`
 
-The agent's system prompt is assembled at session start from multiple sources:
-
-```
-System Prompt
-├── Soul document (AGENT.md) — personality, principles, tool protocol
-├── Identity (IDENTITY.md) — evolving self-understanding
-├── Human info (author/HUMAN.md) — information about the user
-├── System information — version, backend, model, hardware specs, context limits
-├── Focus area (.yips/FOCUS.md) — current project focus
-├── User preferences (.yips/preferences.json)
-├── Recent git commits — last 5 commits from the working directory
-├── Recent memories — last 5 memory files from memories/
-├── Available commands — dynamically discovered from tools/ and skills/ dirs
-└── Thought signature — current task plan, if set
-```
-
-In the TypeScript rewrite, this will also include:
-
-- **CODE.md** from the current project directory (see [CODE.md Guide](./guides/code-md.md))
-- **Subagent context** scoped per-delegation _(planned)_
-
-## Tool Protocol
-
-Tools are how the agent takes action. In yips-cli, the agent embeds tagged requests in its response text; the tool execution layer parses and executes them autonomously.
-
-### Action Tags
-
-```
-{ACTION:read_file:/path/to/file}
-{ACTION:write_file:/path/to/file:content}
-{ACTION:edit_file:path:::old_string:::new_string}
-{ACTION:run_command:command --with --args}
-{ACTION:ls:/path/to/dir}
-{ACTION:grep:pattern:/path}
-{ACTION:git:status}
-{ACTION:sed:expression:/path}
-{ACTION:create_plan:name:content}
+```yips-agent
+{
+  "assistant_text": "optional",
+  "actions": [
+    {
+      "type": "tool",
+      "id": "t1",
+      "name": "read_file",
+      "arguments": { "path": "README.md" }
+    }
+  ]
+}
 ```
 
-### Skill Invocation
+### Compatibility format: `yips-tools`
 
-```
-{INVOKE_SKILL:SEARCH:current TypeScript TUI frameworks}
-{INVOKE_SKILL:FETCH:https://example.com}
-{INVOKE_SKILL:BUILD}
-{INVOKE_SKILL:MEMORIZE:save session_notes}
-{INVOKE_SKILL:RENAME:New Session Title}
-{INVOKE_SKILL:VT:npm test}
-```
+Legacy compatibility is still accepted via `tool_calls`, `skill_calls`, and `subagent_calls`.
 
-### Thought Signatures
+### Parse Contract
 
-```
-{THOUGHT:Refactoring the context loader to support CODE.md}
-```
+- Exactly one envelope block per assistant message.
+- JSON body required; object root required.
+- Duplicate action IDs are deduplicated with warnings.
+- Unsupported/malformed calls are filtered.
 
-Sets a persistent high-level goal visible in the agent's context until changed.
+See [Tool Calls Guide](./guides/tool-calls.md) for full schema and examples.
 
-### Execution Model
+## Turn Engine and Chaining
 
-- **Autonomous by default**: File reads, writes, commands, and skill invocations execute without confirmation.
-- **Confirmation required**: Destructive commands matching safety patterns (`rm -rf`, `mkfs`, `dd`, `reboot`, system package removal) prompt the user before execution.
-- **Working zone enforcement**: File operations outside the designated working directory prompt for confirmation.
-- **Deduplication**: Identical consecutive tool requests are deduplicated (LLMs sometimes repeat tags).
-- **Error recovery**: On consecutive errors, the system notifies the agent, which pivots to an alternative approach or asks the user for help.
+`runAgentTurn(...)` executes bounded multi-round orchestration:
 
-### TypeScript Rewrite Changes _(planned)_
+1. Request assistant response.
+2. Parse envelope and assistant text.
+3. Emit assistant text to UI/runtime.
+4. Execute actions through unified action runner.
+5. Inject action results into history.
+6. Repeat while actions are present and round budget remains.
 
-The tag-based protocol (`{ACTION:...}`, `{INVOKE_SKILL:...}`) will be replaced with a structured protocol — likely JSON-based tool calls or a function-calling convention — to improve parseability, type safety, and compatibility with model APIs that support native tool use.
+If consecutive rounds fail (`error`/`denied`/`timeout`), the engine injects automatic pivot guidance.
+
+## Safety Model
+
+Tool execution uses `ActionRiskAssessment` with:
+
+- `none`: run immediately
+- `confirm`: require user confirmation (TUI)
+- `deny`: deny immediately
+
+Risk includes destructive command patterns and outside-working-zone paths/cwd.
+
+Gateway headless mode auto-denies risky calls rather than interactive confirmation.
 
 ## Request Flow
 
-```
+```text
 User Input
     │
     ├─ Slash Command? (/model, /stream, /verbose, /exit, ...)
-    │   └─> Handle command directly (no LLM call) → return
+    │   └─> Handle locally (no LLM call) → return
     │
     └─ Regular Message
         │
-        ├─> Conductor assembles context (CODE.md, memory, system info)
+        ├─> Compose system context (protocol prompt + optional CODE.md)
         ├─> Send to LLM backend
         │
         ├─ Streaming enabled?
-        │   ├─ YES → Stream tokens, display with gradient, buffer tool calls
-        │   └─ NO  → Show spinner, wait for complete response
+        │   ├─ YES → stream tokens to UI
+        │   └─ NO  → wait for complete response
         │
-        ├─> Parse response for tool requests
-        │   ├─ Action tags → execute autonomously (or confirm if destructive)
-        │   ├─ Skill invocations → run skill script, capture output
-        │   ├─ Identity updates → append to IDENTITY.md
-        │   └─ Thought signatures → update session state
-        │
-        ├─> Feed tool results back to LLM (automatic chaining)
-        │
-        └─> Display final response to user
+        ├─> Parse one action envelope (`yips-agent` preferred)
+        ├─> Execute actions (tool/skill/subagent) with safety checks
+        ├─> Append results to history for follow-up rounds
+        └─> Display final assistant output
 ```
 
 ## LLM Backend
 
 ### llama.cpp (Primary)
 
-Yips manages llama.cpp as a subprocess:
-
-- **Model management**: Download, list, and switch models via `/model` and `/download`
-- **Hardware-aware**: Detects GPU/VRAM and selects appropriate model quantization
-- **Server lifecycle**: Starts/stops the llama.cpp HTTP server as needed
-- **API**: OpenAI-compatible `/v1/chat/completions` endpoint with streaming support
-- **Fallback**: On error, falls back to non-streaming mode, then to Claude CLI if available
+- OpenAI-compatible `/v1/chat/completions` API
+- streaming and non-streaming support
+- managed startup/readiness behavior
+- model selection and hardware-aware workflows
 
 ### Claude CLI (Fallback)
 
-- Subprocess-based integration (`--print`, `--resume`)
-- Streaming via line-buffered stdout reading
-- Supports model selection (haiku, sonnet, opus)
+- subprocess integration (`--print`, `--resume`)
+- line-buffered streaming behavior
 
-## Gateway Architecture _(planned)_
+## Gateway Architecture
 
-```
+```text
 ┌─────────────────┐   ┌─────────────────┐   ┌─────────────────┐
 │    WhatsApp      │   │    Telegram      │   │    Discord       │
 │    Adapter       │   │    Adapter       │   │    Adapter       │
@@ -189,15 +163,13 @@ Yips manages llama.cpp as a subprocess:
                            │
                            ▼
 ┌──────────────────────────────────────────────────────────────┐
-│                    Conductor + Subagents                      │
-│              (same system as TUI, headless mode)             │
+│              Headless Agent Turn Engine Path                │
+│        (same protocol and action model as the TUI)          │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-The gateway will reuse the same Conductor/Subagent system that powers the TUI, running in headless mode. Platform adapters will handle protocol-specific concerns (webhooks, authentication, message format conversion) while the gateway core manages routing, sessions, and security.
-
-See [Gateway Guide](./guides/gateway.md) for setup and configuration details.
+See [Gateway Guide](./guides/gateway.md) for runtime-specific details.
 
 ---
 
-> Last updated: 2026-02-22
+> Last updated: 2026-02-25

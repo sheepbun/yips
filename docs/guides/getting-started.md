@@ -108,6 +108,12 @@ Type a message and press Enter. With backend `llamacpp`, Yips sends your in-memo
 Yips: Hi there! How can I help?
 ```
 
+## How Tool Calls Are Triggered
+
+Yips prepends a protocol system prompt to llama requests so the model knows how to emit structured tool-call envelopes (`yips-agent` preferred, `yips-tools` compatibility). When a valid envelope is produced, the Conductor executes those actions and chains results back into context.
+
+For the exact schema, validation rules, safety behavior, and debugging steps, see [Tool Calls](./tool-calls.md).
+
 ## Multiline Key Troubleshooting
 
 Yips uses this contract in the TUI prompt:
@@ -153,14 +159,14 @@ bindings = [
 
 ## Basic Commands
 
-| Command | Description |
-|---------|-------------|
-| `/help` | Show available commands |
-| `/model` | Show or set active model name |
-| `/stream` | Toggle token streaming on/off |
-| `/update` | Check npm latest version and show upgrade commands |
-| `/clear` or `/new` | Reset the current conversation session |
-| `/exit` or `/quit` | Exit Yips |
+| Command            | Description                                        |
+| ------------------ | -------------------------------------------------- |
+| `/help`            | Show available commands                            |
+| `/model`           | Show or set active model name                      |
+| `/stream`          | Toggle token streaming on/off                      |
+| `/update`          | Check npm latest version and show upgrade commands |
+| `/clear` or `/new` | Reset the current conversation session             |
+| `/exit` or `/quit` | Exit Yips                                          |
 
 See [Slash Commands](./slash-commands.md) for the planned full command reference.
 

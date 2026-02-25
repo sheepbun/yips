@@ -1,4 +1,5 @@
 import { formatAssistantMessage, formatDimMessage, formatUserMessage } from "#ui/messages";
+import { composeChatRequestMessages as composeChatMessagesWithProtocol } from "#agent/protocol/system-prompt";
 import type { ChatMessage } from "#types/app-types";
 
 export function renderHistoryLines(history: readonly ChatMessage[]): {
@@ -31,8 +32,5 @@ export function composeChatRequestMessages(
   history: readonly ChatMessage[],
   codeContextMessage: string | null
 ): readonly ChatMessage[] {
-  if (!codeContextMessage) {
-    return history;
-  }
-  return [{ role: "system", content: codeContextMessage }, ...history];
+  return composeChatMessagesWithProtocol(history, codeContextMessage);
 }

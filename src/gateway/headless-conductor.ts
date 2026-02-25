@@ -3,12 +3,11 @@ import { loadCodeContext, toCodeContextSystemMessage } from "#agent/context/code
 import { createSessionFileFromHistory, writeSessionFile } from "#agent/context/session-store";
 import { executeSkillCall } from "#agent/skills/skills";
 import { executeToolCall } from "#agent/tools/tool-executor";
+import { composeChatRequestMessages } from "#agent/protocol/system-prompt";
 import {
-  assessCommandRisk,
-  assessPathRisk,
-  resolveToolPath,
-  type ToolRisk
-} from "#agent/tools/tool-safety";
+  assessActionRisk,
+  type ActionRiskAssessment
+} from "#agent/tools/action-risk-policy";
 import { ensureLlamaReady, formatLlamaStartupFailure } from "#llm/llama-server";
 import { LlamaClient, type ChatResult } from "#llm/llama-client";
 import { estimateConversationTokens } from "#llm/token-counter";
@@ -34,16 +33,6 @@ interface HeadlessSessionState {
   sessionFilePath: string | null;
 }
 
-function composeChatRequestMessages(
-  history: readonly ChatMessage[],
-  codeContextMessage: string | null
-): readonly ChatMessage[] {
-  if (!codeContextMessage) {
-    return history;
-  }
-  return [{ role: "system", content: codeContextMessage }, ...history];
-}
-
 function buildSubagentScopeMessage(call: SubagentCall): string {
   const lines = [
     "Subagent scope:",
@@ -57,16 +46,8 @@ function buildSubagentScopeMessage(call: SubagentCall): string {
   return lines.join("\n");
 }
 
-function assessToolCallRisk(call: ToolCall, workingZone: string): ToolRisk {
-  if (call.name === "run_command") {
-    const command = typeof call.arguments["command"] === "string" ? call.arguments["command"] : "";
-    const cwdArg = typeof call.arguments["cwd"] === "string" ? call.arguments["cwd"] : ".";
-    const resolvedCwd = resolveToolPath(cwdArg, workingZone);
-    return assessCommandRisk(command, resolvedCwd, workingZone);
-  }
-
-  const pathArg = typeof call.arguments["path"] === "string" ? call.arguments["path"] : ".";
-  return assessPathRisk(pathArg, workingZone);
+function assessToolCallRisk(call: ToolCall, workingZone: string): ActionRiskAssessment {
+  return assessActionRisk(call, workingZone);
 }
 
 function toErrorMessage(error: unknown): string {
@@ -193,7 +174,7 @@ export class GatewayHeadlessConductor {
 
           for (const call of toolCalls) {
             const risk = assessToolCallRisk(call, this.workingDirectory);
-            if (risk.requiresConfirmation) {
+            if (risk.riskLevel !== "none") {
               results.push({
                 callId: call.id,
                 tool: call.name,
@@ -282,7 +263,7 @@ export class GatewayHeadlessConductor {
                     }
 
                     const risk = assessToolCallRisk(call, this.workingDirectory);
-                    if (risk.requiresConfirmation) {
+                    if (risk.riskLevel !== "none") {
                       denied.push({
                         callId: call.id,
                         tool: call.name,

@@ -13,37 +13,38 @@ Yips is a local-first AI code editor and self-hosted gateway. It runs language m
 
 ### Core
 
-| Document | Description |
-|----------|-------------|
-| [Overview](./overview.md) | Vision, design principles, what Yips does and does not do |
-| [Architecture](./architecture.md) | System components, request flow, tool protocol |
-| [Project Tree](./project-tree.md) | Canonical source/test tree and import alias map |
-| [Roadmap](./roadmap.md) | Phased milestones, decision log |
+| Document                          | Description                                               |
+| --------------------------------- | --------------------------------------------------------- |
+| [Overview](./overview.md)         | Vision, design principles, what Yips does and does not do |
+| [Architecture](./architecture.md) | System components, request flow, tool protocol            |
+| [Project Tree](./project-tree.md) | Canonical source/test tree and import alias map           |
+| [Roadmap](./roadmap.md)           | Phased milestones, decision log                           |
 
 ### Developer
 
-| Document | Description |
-|----------|-------------|
-| [Rewrite Guide](./rewrite.md) | yips-cli → yips TUI migration plan |
-| [Tech Stack](./stack.md) | Decided and open technology choices |
-| [Changelog](./changelog.md) | Version history (Keep a Changelog format) |
+| Document                          | Description                                                                   |
+| --------------------------------- | ----------------------------------------------------------------------------- |
+| [Rewrite Guide](./rewrite.md)     | yips-cli → yips TUI migration plan                                            |
+| [Tech Stack](./stack.md)          | Decided and open technology choices                                           |
+| [Changelog](./changelog.md)       | Version history (Keep a Changelog format)                                     |
 | [Progress Log](./progress-log.md) | Progress-log index with per-exchange files under `./progress-log/YYYY/MM/DD/` |
 
 ### Guides
 
-| Document | Description |
-|----------|-------------|
-| [Getting Started](./guides/getting-started.md) | Prerequisites, installation, first run |
-| [CODE.md](./guides/code-md.md) | Project brief format for the AI agent |
-| [Slash Commands](./guides/slash-commands.md) | Command reference and tab completion |
-| [Hooks](./guides/hooks.md) | Lifecycle hooks and custom scripts |
-| [MCP Integration](./guides/mcp.md) | Status note: MCP integration is intentionally skipped |
-| [Gateway](./guides/gateway.md) | Self-hosted messaging gateway |
+| Document                                       | Description                                                           |
+| ---------------------------------------------- | --------------------------------------------------------------------- |
+| [Getting Started](./guides/getting-started.md) | Prerequisites, installation, first run                                |
+| [CODE.md](./guides/code-md.md)                 | Project brief format for the AI agent                                 |
+| [Tool Calls](./guides/tool-calls.md)           | Structured `yips-agent` envelopes, safety policy, and troubleshooting |
+| [Slash Commands](./guides/slash-commands.md)   | Command reference and tab completion                                  |
+| [Hooks](./guides/hooks.md)                     | Lifecycle hooks and custom scripts                                    |
+| [MCP Integration](./guides/mcp.md)             | Status note: MCP integration is intentionally skipped                 |
+| [Gateway](./guides/gateway.md)                 | Self-hosted messaging gateway                                         |
 
 ### Community
 
-| Document | Description |
-|----------|-------------|
+| Document                          | Description                       |
+| --------------------------------- | --------------------------------- |
 | [Contributing](./contributing.md) | Setup, code standards, PR process |
 
 ---

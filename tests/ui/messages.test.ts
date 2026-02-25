@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  formatActionCallBox,
+  formatActionResultBox,
   formatAssistantMessage,
   formatDimMessage,
   formatErrorMessage,
@@ -84,5 +86,58 @@ describe("formatDimMessage", () => {
     const result = formatDimMessage("subtle");
     expect(result).toContain("\u001b[");
     expect(stripMarkup(result)).toBe("subtle");
+  });
+});
+
+describe("formatActionCallBox", () => {
+  it("renders a bordered call box with id/name/preview", () => {
+    const result = formatActionCallBox({
+      type: "tool",
+      id: "t1",
+      name: "read_file",
+      preview: "README.md"
+    });
+    const plain = stripMarkup(result);
+    expect(plain).toContain("Tool Call");
+    expect(plain).toContain("id: t1");
+    expect(plain).toContain("name:");
+    expect(plain).toContain("read_file");
+    expect(plain).toContain("preview: README.md");
+  });
+});
+
+describe("formatActionResultBox", () => {
+  it("renders compact mode with status and preview", () => {
+    const result = formatActionResultBox({
+      type: "skill",
+      id: "s1",
+      name: "search",
+      status: "ok",
+      output: "Found 10 results\nMore detail"
+    });
+    const plain = stripMarkup(result);
+    expect(plain).toContain("Skill Result");
+    expect(plain).toContain("id: s1");
+    expect(plain).toContain("status: ok");
+    expect(plain).toContain("preview: Found 10 results");
+  });
+
+  it("renders verbose mode with output lines and metadata", () => {
+    const result = formatActionResultBox(
+      {
+        type: "subagent",
+        id: "a1",
+        name: "summarize docs",
+        status: "error",
+        output: "line one\nline two",
+        metadata: { rounds: 2 }
+      },
+      { verbose: true }
+    );
+    const plain = stripMarkup(result);
+    expect(plain).toContain("Subagent Result");
+    expect(plain).toContain("status: error");
+    expect(plain).toContain("out: line one");
+    expect(plain).toContain("meta: {\"rounds\":2}");
   });
 });

@@ -36,6 +36,10 @@
       "development": "./src/agent/context/*.ts",
       "default": "./dist/agent/context/*.js"
     },
+    "#agent/core/*": {
+      "development": "./src/agent/core/*.ts",
+      "default": "./dist/agent/core/*.js"
+    },
     "#agent/protocol/*": {
       "development": "./src/agent/protocol/*.ts",
       "default": "./dist/agent/protocol/*.js"

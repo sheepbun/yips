@@ -26,7 +26,7 @@ Slash commands are user-facing commands typed directly into the Yips TUI input. 
 | `/tokens`                  | Show current token counter mode                                                |
 | `/tokens auto`             | Use automatic max token calculation from available RAM after model load        |
 | `/tokens <value>`          | Set manual max token value (supports `k` suffix, for example `32k`)            |
-| `/update`                  | Check latest npm version and print guided upgrade commands (`@sheepbun/yips`) |
+| `/update`                  | Check latest npm version and print guided upgrade commands (`@sheepbun/yips`)  |
 
 `/download` usage:
 
@@ -38,10 +38,10 @@ Slash commands are user-facing commands typed directly into the Yips TUI input. 
 
 ### Display & Behavior
 
-| Command    | Description                                              |
-| ---------- | -------------------------------------------------------- |
-| `/verbose` | Toggle verbose mode (shows tool calls made by the agent) |
-| `/stream`  | Toggle response streaming on/off                         |
+| Command    | Description                                                                                                                  |
+| ---------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `/verbose` | Toggle verbose mode (shows tool-call execution details; useful with [Tool Calls](./tool-calls.md#troubleshooting-checklist)) |
+| `/stream`  | Toggle response streaming on/off                                                                                             |
 
 ### Skills & Tools
 

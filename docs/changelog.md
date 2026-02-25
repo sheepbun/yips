@@ -56,6 +56,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - New tests:
   - `tests/conductor.test.ts` for tool-chaining and max-depth behavior
   - `tests/tui-input-routing.test.ts` for confirm and VT routing behavior
+- Milestone 2 hard reboot architecture:
+  - added `src/agent/core/contracts.ts` as the unified action/turn contract surface
+  - added `src/agent/core/action-runner.ts` for normalized tool/skill/subagent dispatch with fallback warnings
+  - added `src/agent/core/turn-engine.ts` deterministic action-loop state machine (`runAgentTurn`)
+  - added strict envelope parsing in `src/agent/protocol/agent-envelope.ts` (`yips-agent` primary, `yips-tools` compatibility)
+  - added protocol instruction composition in `src/agent/protocol/system-prompt.ts` so llama requests always include explicit `yips-agent` action-envelope guidance
+  - added first-class risk policy in `src/agent/tools/action-risk-policy.ts` (`none|confirm|deny`, reason tags, explicit session-root checks)
+  - added new coverage in `tests/agent/core/turn-engine.test.ts`, `tests/agent/protocol/agent-envelope.test.ts`, and `tests/agent/tools/action-risk-policy.test.ts`
+- Tool-call protocol documentation:
+  - added `docs/guides/tool-calls.md` with operational flow, schema/contracts, safety semantics, and troubleshooting guidance
+  - synchronized `docs/architecture.md` with current `yips-agent`/turn-engine implementation (removed legacy tag-based protocol description as current behavior)
 - Conductor automatic-pivot guidance for repeated tool-failure rounds (injects recovery system context after consecutive all-failed tool rounds)
 - Subagent delegation system:
   - `subagent_calls` support in `yips-tools` protocol parsing
@@ -170,6 +181,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Title-box token usage now renders as `x.x/y.yk tks`, with auto max derived from RAM-after-model-load and manual override via `/tokens`
 - Ink TUI chat scrollback now supports mouse wheel input (with `PgUp`/`PgDn` fallback), including terminal mouse-reporting enable/disable during app lifetime
 - `src/tui.ts` now delegates chat/tool orchestration to the Conductor module and uses extracted confirm/VT routing helpers, reducing inline control-flow complexity without changing user-visible behavior
+- Milestone 2 runtime internals now route through the new action-engine stack:
+  - `src/agent/conductor.ts` is now a compatibility shim delegating to `runAgentTurn(...)`
+  - `src/ui/tui/runtime-core.ts` and `src/gateway/headless-conductor.ts` now consume the new risk-policy assessment path
+  - legacy `tool-protocol` remains as a compatibility shim over `agent-envelope`
+- TUI action rendering now hides raw `yips-agent` envelope blocks during streaming and renders styled action call/result boxes for tool, skill, and subagent events (compact by default, richer detail in verbose mode)
 - Milestone 2 recovery behavior now includes automatic pivoting when tool executions fail repeatedly, so the assistant is steered toward alternate approaches instead of repeating failing calls
 - Milestone 2 now includes Conductor-managed subagent delegation, scoped context execution, and lifecycle result chaining
 - Milestone 3 hardware detection now includes GPU/VRAM-aware startup model auto-selection from local GGUF inventory

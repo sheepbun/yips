@@ -68,12 +68,29 @@ export interface ToolCall {
   arguments: Record<string, unknown>;
 }
 
+export interface SubagentCall {
+  id: string;
+  task: string;
+  context?: string;
+  allowedTools?: ToolName[];
+  maxRounds?: number;
+}
+
 export type ToolExecutionStatus = "ok" | "error" | "denied" | "timeout";
 
 export interface ToolResult {
   callId: string;
   tool: ToolName;
   status: ToolExecutionStatus;
+  output: string;
+  metadata?: Record<string, unknown>;
+}
+
+export type SubagentExecutionStatus = "ok" | "error" | "timeout";
+
+export interface SubagentResult {
+  callId: string;
+  status: SubagentExecutionStatus;
   output: string;
   metadata?: Record<string, unknown>;
 }

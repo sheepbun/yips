@@ -1,6 +1,7 @@
 import { readdir, rmdir, stat, unlink } from "node:fs/promises";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 
+import type { SystemSpecs } from "./hardware";
 import { resolveDefaultModelsDir } from "./model-downloader";
 
 export interface ModelManagerModel {
@@ -199,6 +200,33 @@ export function findMatchingModel(
   );
 
   return partial ?? null;
+}
+
+function byLargestSize(left: ModelManagerModel, right: ModelManagerModel): number {
+  if (left.sizeBytes !== right.sizeBytes) {
+    return right.sizeBytes - left.sizeBytes;
+  }
+  return left.id.localeCompare(right.id);
+}
+
+export function selectBestModelForHardware(
+  models: readonly ModelManagerModel[],
+  specs: Pick<SystemSpecs, "vramGb">
+): ModelManagerModel | null {
+  const runnable = models.filter((model) => model.canRun);
+  if (runnable.length === 0) {
+    return null;
+  }
+
+  const vramBytes = Number.isFinite(specs.vramGb) && specs.vramGb > 0 ? specs.vramGb * 1024 ** 3 : 0;
+  if (vramBytes > 0) {
+    const gpuFit = runnable.filter((model) => model.sizeBytes <= vramBytes);
+    if (gpuFit.length > 0) {
+      return [...gpuFit].sort(byLargestSize)[0] ?? null;
+    }
+  }
+
+  return [...runnable].sort(byLargestSize)[0] ?? null;
 }
 
 async function pruneEmptyParents(path: string, root: string): Promise<void> {

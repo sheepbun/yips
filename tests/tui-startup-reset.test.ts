@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { getDefaultConfig } from "../src/config";
-import { ensureFreshLlamaSessionOnStartup } from "../src/tui";
+import { applyHardwareAwareStartupModelSelection, ensureFreshLlamaSessionOnStartup } from "../src/tui";
 
 describe("ensureFreshLlamaSessionOnStartup", () => {
   it("skips reset when no concrete model is selected", async () => {
@@ -51,5 +51,66 @@ describe("ensureFreshLlamaSessionOnStartup", () => {
     await expect(ensureFreshLlamaSessionOnStartup({ config }, { reset })).rejects.toThrow(
       "Could not resolve model."
     );
+  });
+});
+
+describe("applyHardwareAwareStartupModelSelection", () => {
+  it("auto-selects and saves a runnable model when current config is default", async () => {
+    const config = { ...getDefaultConfig(), model: "default", backend: "llamacpp" as const };
+    const save = vi.fn().mockResolvedValue(undefined);
+
+    const selected = await applyHardwareAwareStartupModelSelection(
+      { config },
+      {
+        getSpecs: vi.fn().mockReturnValue({
+          ramGb: 32,
+          vramGb: 8,
+          totalMemoryGb: 40,
+          diskFreeGb: 100,
+          gpuType: "nvidia"
+        }),
+        listModels: vi.fn().mockResolvedValue([
+          {
+            id: "org/repo/model-q4.gguf",
+            name: "model-q4",
+            friendlyName: "model-q4",
+            host: "org",
+            backend: "llamacpp",
+            friendlyBackend: "llama.cpp",
+            sizeBytes: 4 * 1024 ** 3,
+            sizeGb: 4,
+            canRun: true,
+            reason: "Fits RAM+VRAM",
+            path: "/tmp/model-q4.gguf"
+          }
+        ]),
+        selectModel: vi.fn().mockReturnValue({
+          id: "org/repo/model-q4.gguf"
+        }),
+        save
+      }
+    );
+
+    expect(selected).toBe("org/repo/model-q4.gguf");
+    expect(config.model).toBe("org/repo/model-q4.gguf");
+    expect(save).toHaveBeenCalledWith(config);
+  });
+
+  it("skips auto-selection when a concrete model is already configured", async () => {
+    const config = { ...getDefaultConfig(), model: "org/repo/existing.gguf" };
+    const listModels = vi.fn();
+
+    const selected = await applyHardwareAwareStartupModelSelection(
+      { config },
+      {
+        getSpecs: vi.fn(),
+        listModels,
+        selectModel: vi.fn(),
+        save: vi.fn()
+      }
+    );
+
+    expect(selected).toBeNull();
+    expect(listModels).not.toHaveBeenCalled();
   });
 });

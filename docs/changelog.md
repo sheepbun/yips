@@ -186,6 +186,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
   - `src/ui/tui/runtime-core.ts` and `src/gateway/headless-conductor.ts` now consume the new risk-policy assessment path
   - legacy `tool-protocol` remains as a compatibility shim over `agent-envelope`
 - TUI action rendering now hides raw `yips-agent` envelope blocks during streaming and renders styled action call/result boxes for tool, skill, and subagent events (compact by default, richer detail in verbose mode)
+- TUI action/event rendering now uses compact bullet-style lines instead of bordered boxes:
+  - tool calls render with tool-specific labels (for example `Bash(...)`, `Read(...)`, `Search(...)`)
+  - action results render as concise `⎿` summaries in normal mode
+  - verbose mode expands inline details/metadata and shows action IDs
+  - legacy verbose debug tag lines (`[tool]`, `[tool-result]`, `[skill]`, `[subagent]`) were removed
 - Milestone 2 recovery behavior now includes automatic pivoting when tool executions fail repeatedly, so the assistant is steered toward alternate approaches instead of repeating failing calls
 - Milestone 2 now includes Conductor-managed subagent delegation, scoped context execution, and lifecycle result chaining
 - Milestone 3 hardware detection now includes GPU/VRAM-aware startup model auto-selection from local GGUF inventory

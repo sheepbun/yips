@@ -90,24 +90,39 @@ describe("formatDimMessage", () => {
 });
 
 describe("formatActionCallBox", () => {
-  it("renders a bordered call box with id/name/preview", () => {
+  it("renders compact tool call labels using arguments", () => {
     const result = formatActionCallBox({
       type: "tool",
       id: "t1",
-      name: "read_file",
-      preview: "README.md"
+      name: "run_command",
+      arguments: { command: "echo \"Hello from Bash!\"" }
     });
     const plain = stripMarkup(result);
-    expect(plain).toContain("Tool Call");
-    expect(plain).toContain("id: t1");
-    expect(plain).toContain("name:");
-    expect(plain).toContain("read_file");
-    expect(plain).toContain("preview: README.md");
+    expect(plain).toContain("● Bash(echo \"Hello from Bash!\")");
+    expect(plain).not.toContain("id: t1");
+    expect(plain).not.toContain("╭");
+  });
+
+  it("shows IDs and preview only in verbose mode", () => {
+    const result = formatActionCallBox(
+      {
+        type: "tool",
+        id: "t1",
+        name: "read_file",
+        arguments: { path: "README.md" },
+        preview: "queued for execution"
+      },
+      { verbose: true }
+    );
+    const plain = stripMarkup(result);
+    expect(plain).toContain("● Read(README.md)");
+    expect(plain).toContain("⎿ id: t1");
+    expect(plain).toContain("⎿ queued for execution");
   });
 });
 
 describe("formatActionResultBox", () => {
-  it("renders compact mode with status and preview", () => {
+  it("renders compact mode as a single summary line without IDs", () => {
     const result = formatActionResultBox({
       type: "skill",
       id: "s1",
@@ -116,13 +131,12 @@ describe("formatActionResultBox", () => {
       output: "Found 10 results\nMore detail"
     });
     const plain = stripMarkup(result);
-    expect(plain).toContain("Skill Result");
-    expect(plain).toContain("id: s1");
-    expect(plain).toContain("status: ok");
-    expect(plain).toContain("preview: Found 10 results");
+    expect(plain).toBe("⎿ Found 10 results");
+    expect(plain).not.toContain("id: s1");
+    expect(plain).not.toContain("╭");
   });
 
-  it("renders verbose mode with output lines and metadata", () => {
+  it("renders verbose mode with IDs, detail lines, and metadata", () => {
     const result = formatActionResultBox(
       {
         type: "subagent",
@@ -135,9 +149,9 @@ describe("formatActionResultBox", () => {
       { verbose: true }
     );
     const plain = stripMarkup(result);
-    expect(plain).toContain("Subagent Result");
-    expect(plain).toContain("status: error");
-    expect(plain).toContain("out: line one");
-    expect(plain).toContain("meta: {\"rounds\":2}");
+    expect(plain).toContain("⎿ error: line one");
+    expect(plain).toContain("⎿ id: a1");
+    expect(plain).toContain("⎿ out: line two");
+    expect(plain).toContain("⎿ meta: {\"rounds\":2}");
   });
 });

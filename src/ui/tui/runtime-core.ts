@@ -632,20 +632,65 @@ function stripEnvelopeStart(text: string): string {
   return text.slice(0, firstIndex).trimEnd();
 }
 
-function actionCallName(action: ReturnType<typeof parseAgentEnvelope>["actions"][number]): string {
-  if (action.kind === "subagent") {
-    return action.call.task;
+function hasEnvelopeStart(text: string): boolean {
+  return text.includes("```yips-agent") || text.includes("```yips-tools");
+}
+
+function extractBareEnvelopeAssistantText(rawText: string): string | null {
+  const trimmed = rawText.trim();
+  if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
+    return null;
   }
-  return action.call.name;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(trimmed);
+  } catch {
+    return null;
+  }
+
+  if (typeof parsed !== "object" || parsed === null) {
+    return null;
+  }
+
+  const record = parsed as Record<string, unknown>;
+  const hasActionShape =
+    Array.isArray(record["actions"]) ||
+    Array.isArray(record["tool_calls"]) ||
+    Array.isArray(record["skill_calls"]) ||
+    Array.isArray(record["subagent_calls"]);
+  if (!hasActionShape) {
+    return null;
+  }
+
+  const assistantText = record["assistant_text"];
+  if (typeof assistantText !== "string" || assistantText.trim().length === 0) {
+    return "";
+  }
+  return assistantText.trim();
 }
 
 export function renderAssistantStreamForDisplay(
   rawText: string,
   timestamp: Date,
-  verbose: boolean
+  _verbose: boolean
 ): string {
   const parsed = parseAgentEnvelope(rawText);
   if (!parsed.envelopeFound) {
+    const bareAssistantText = extractBareEnvelopeAssistantText(rawText);
+    if (bareAssistantText !== null) {
+      if (bareAssistantText.length === 0) {
+        return "";
+      }
+      return formatAssistantMessage(bareAssistantText, timestamp);
+    }
+    if (hasEnvelopeStart(rawText)) {
+      const prefix = stripEnvelopeStart(rawText);
+      if (prefix.trim().length === 0) {
+        return "";
+      }
+      return formatAssistantMessage(prefix, timestamp);
+    }
     return formatAssistantMessage(rawText, timestamp);
   }
 
@@ -665,17 +710,6 @@ export function renderAssistantStreamForDisplay(
   }
   for (const error of parsed.errors) {
     lines.push(formatWarningMessage(`Tool protocol error: ${error}`));
-  }
-
-  for (const action of parsed.actions) {
-    lines.push(
-      ...formatActionCallBox({
-        type: action.kind,
-        id: action.call.id,
-        name: actionCallName(action),
-        preview: verbose ? "queued for execution" : undefined
-      }).split("\n")
-    );
   }
 
   return lines.join("\n");
@@ -1295,6 +1329,18 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
       currentState.busyLabel = "";
       forceRender();
     }, [forceRender]);
+
+    const runWithBusyLabel = useCallback(
+      async <T,>(label: string, run: () => Promise<T>): Promise<T> => {
+        startBusyIndicator(label);
+        try {
+          return await run();
+        } finally {
+          stopBusyIndicator();
+        }
+      },
+      [startBusyIndicator, stopBusyIndicator]
+    );
 
     dimensionsRef.current = dimensions;
 
@@ -1939,8 +1985,9 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
             formatActionCallBox({
               type: "tool",
               id: call.id,
-              name: call.name
-            })
+              name: call.name,
+              arguments: call.arguments
+            }, { verbose: currentState.config.verbose, showIds: currentState.config.verbose })
           );
 
           const risk = assessToolCallRisk(call, sessionRoot);
@@ -1952,12 +1999,6 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
               output: "Action denied by risk policy."
             };
             results.push(deniedResult);
-            if (currentState.config.verbose) {
-              appendOutput(
-                currentState,
-                formatDimMessage(`[tool] ${call.name} (${call.id}) denied by risk policy`)
-              );
-            }
             appendOutput(
               currentState,
               formatActionResultBox(
@@ -1968,9 +2009,10 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
                   status: deniedResult.status,
                   output: deniedResult.output
                 },
-                { verbose: currentState.config.verbose }
+                { verbose: currentState.config.verbose, showIds: currentState.config.verbose }
               )
             );
+            appendOutput(currentState, "");
             continue;
           }
           if (risk.requiresConfirmation) {
@@ -1983,12 +2025,6 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
                 output: "Action denied by user confirmation policy."
               };
               results.push(deniedResult);
-              if (currentState.config.verbose) {
-                appendOutput(
-                  currentState,
-                  formatDimMessage(`[tool] ${call.name} (${call.id}) denied`)
-                );
-              }
               appendOutput(
                 currentState,
                 formatActionResultBox(
@@ -1999,31 +2035,26 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
                     status: deniedResult.status,
                     output: deniedResult.output
                   },
-                  { verbose: currentState.config.verbose }
+                  { verbose: currentState.config.verbose, showIds: currentState.config.verbose }
                 )
               );
+              appendOutput(currentState, "");
               continue;
             }
           }
 
-          if (currentState.config.verbose) {
-            appendOutput(currentState, formatDimMessage(`[tool] ${call.name} (${call.id})`));
-          }
-
-          const result = await executeToolCall(call, {
-            workingDirectory: sessionRoot,
-            vtSession: getVtSession(),
-            runHook: async (name, payload) =>
-              await runConfiguredHook(name, payload, { surfaceFailure: false })
-          });
+          const result = await runWithBusyLabel(
+            `Running ${call.name}...`,
+            async () =>
+              await executeToolCall(call, {
+                workingDirectory: sessionRoot,
+                vtSession: getVtSession(),
+                runHook: async (name, payload) =>
+                  await runConfiguredHook(name, payload, { surfaceFailure: false })
+              })
+          );
           results.push(result);
 
-          if (currentState.config.verbose) {
-            appendOutput(
-              currentState,
-              formatDimMessage(`[tool-result] ${result.tool} => ${result.status}`)
-            );
-          }
           appendOutput(
             currentState,
             formatActionResultBox(
@@ -2035,18 +2066,15 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
                 output: result.output,
                 metadata: result.metadata
               },
-              { verbose: currentState.config.verbose }
+              { verbose: currentState.config.verbose, showIds: currentState.config.verbose }
             )
           );
-        }
-
-        if (currentState.config.verbose) {
           appendOutput(currentState, "");
         }
 
         return results;
       },
-      [assessToolCallRisk, getVtSession, requestToolConfirmation]
+      [assessToolCallRisk, getVtSession, requestToolConfirmation, runWithBusyLabel]
     );
 
     const executeSkillCalls = useCallback(
@@ -2065,26 +2093,21 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
             formatActionCallBox({
               type: "skill",
               id: call.id,
-              name: call.name
-            })
+              name: call.name,
+              arguments: call.arguments
+            }, { verbose: currentState.config.verbose, showIds: currentState.config.verbose })
           );
 
-          if (currentState.config.verbose) {
-            appendOutput(currentState, formatDimMessage(`[skill] ${call.name} (${call.id})`));
-          }
-
-          const result = await executeSkillCall(call, {
-            workingDirectory: workingZone,
-            vtSession: getVtSession()
-          });
+          const result = await runWithBusyLabel(
+            `Running ${call.name}...`,
+            async () =>
+              await executeSkillCall(call, {
+                workingDirectory: workingZone,
+                vtSession: getVtSession()
+              })
+          );
           results.push(result);
 
-          if (currentState.config.verbose) {
-            appendOutput(
-              currentState,
-              formatDimMessage(`[skill-result] ${result.skill} => ${result.status}`)
-            );
-          }
           appendOutput(
             currentState,
             formatActionResultBox(
@@ -2096,18 +2119,15 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
                 output: result.output,
                 metadata: result.metadata
               },
-              { verbose: currentState.config.verbose }
+              { verbose: currentState.config.verbose, showIds: currentState.config.verbose }
             )
           );
-        }
-
-        if (currentState.config.verbose) {
           appendOutput(currentState, "");
         }
 
         return results;
       },
-      [getVtSession]
+      [getVtSession, runWithBusyLabel]
     );
 
     const executeSubagentCalls = useCallback(
@@ -2126,15 +2146,8 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
               type: "subagent",
               id: subagentCall.id,
               name: subagentCall.task
-            })
+            }, { verbose: currentState.config.verbose, showIds: currentState.config.verbose })
           );
-
-          if (currentState.config.verbose) {
-            appendOutput(
-              currentState,
-              formatDimMessage(`[subagent] spawn ${subagentCall.id}: ${subagentCall.task}`)
-            );
-          }
 
           const scopedHistory: ChatMessage[] = [
             { role: "system", content: buildSubagentScopeMessage(subagentCall) },
@@ -2146,57 +2159,61 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
           const startedAtMs = Date.now();
 
           try {
-            const turn = await runConductorTurn({
-              history: scopedHistory,
-              requestAssistant: () =>
-                requestAssistantFromLlama({
-                  streamingOverride: false,
-                  historyOverride: scopedHistory,
-                  codeContextOverride: null,
-                  busyLabel: `Subagent ${subagentCall.id}...`
-                }),
-              executeToolCalls: async (toolCalls: readonly ToolCall[]): Promise<ToolResult[]> => {
-                if (!allowedTools) {
-                  return executeToolCalls(toolCalls);
-                }
+            const turn = await runWithBusyLabel(
+              `Running subagent ${subagentCall.id}...`,
+              async () =>
+                await runConductorTurn({
+                  history: scopedHistory,
+                  requestAssistant: () =>
+                    requestAssistantFromLlama({
+                      streamingOverride: false,
+                      historyOverride: scopedHistory,
+                      codeContextOverride: null,
+                      busyLabel: `Subagent ${subagentCall.id}...`
+                    }),
+                  executeToolCalls: async (toolCalls: readonly ToolCall[]): Promise<ToolResult[]> => {
+                    if (!allowedTools) {
+                      return executeToolCalls(toolCalls);
+                    }
 
-                const permittedCalls: ToolCall[] = [];
-                const deniedResults: ToolResult[] = [];
+                    const permittedCalls: ToolCall[] = [];
+                    const deniedResults: ToolResult[] = [];
 
-                for (const call of toolCalls) {
-                  if (allowedTools.has(call.name)) {
-                    permittedCalls.push(call);
-                    continue;
-                  }
-                  deniedResults.push({
-                    callId: call.id,
-                    tool: call.name,
-                    status: "denied",
-                    output: `Tool '${call.name}' is not allowed for subagent ${subagentCall.id}.`
-                  });
-                }
+                    for (const call of toolCalls) {
+                      if (allowedTools.has(call.name)) {
+                        permittedCalls.push(call);
+                        continue;
+                      }
+                      deniedResults.push({
+                        callId: call.id,
+                        tool: call.name,
+                        status: "denied",
+                        output: `Tool '${call.name}' is not allowed for subagent ${subagentCall.id}.`
+                      });
+                    }
 
-                const permittedResults =
-                  permittedCalls.length > 0 ? await executeToolCalls(permittedCalls) : [];
-                return [...deniedResults, ...permittedResults];
-              },
-              executeSkillCalls,
-              onAssistantText: (): void => {
-                // Subagent text is consumed internally and summarized in result metadata.
-              },
-              onWarning: (message: string): void => {
-                warnings.push(message);
-              },
-              onRoundComplete: (): void => {
-                forceRender();
-              },
-              estimateCompletionTokens: (text: string): number =>
-                estimateConversationTokens([{ content: text }]),
-              estimateHistoryTokens: (history: readonly ChatMessage[]): number =>
-                estimateConversationTokens(history),
-              computeTokensPerSecond,
-              maxRounds: subagentCall.maxRounds ?? 4
-            });
+                    const permittedResults =
+                      permittedCalls.length > 0 ? await executeToolCalls(permittedCalls) : [];
+                    return [...deniedResults, ...permittedResults];
+                  },
+                  executeSkillCalls,
+                  onAssistantText: (): void => {
+                    // Subagent text is consumed internally and summarized in result metadata.
+                  },
+                  onWarning: (message: string): void => {
+                    warnings.push(message);
+                  },
+                  onRoundComplete: (): void => {
+                    forceRender();
+                  },
+                  estimateCompletionTokens: (text: string): number =>
+                    estimateConversationTokens([{ content: text }]),
+                  estimateHistoryTokens: (history: readonly ChatMessage[]): number =>
+                    estimateConversationTokens(history),
+                  computeTokensPerSecond,
+                  maxRounds: subagentCall.maxRounds ?? 4
+                })
+            );
 
             const lastAssistant = [...scopedHistory]
               .reverse()
@@ -2213,12 +2230,6 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
               }
             };
             results.push(result);
-            if (currentState.config.verbose) {
-              appendOutput(
-                currentState,
-                formatDimMessage(`[subagent-result] ${subagentCall.id} => ${result.status}`)
-              );
-            }
             appendOutput(
               currentState,
               formatActionResultBox(
@@ -2230,9 +2241,10 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
                   output: result.output,
                   metadata: result.metadata
                 },
-                { verbose: currentState.config.verbose }
+                { verbose: currentState.config.verbose, showIds: currentState.config.verbose }
               )
             );
+            appendOutput(currentState, "");
           } catch (error) {
             const result: SubagentResult = {
               callId: subagentCall.id,
@@ -2240,12 +2252,6 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
               output: `Subagent failed: ${formatError(error)}`
             };
             results.push(result);
-            if (currentState.config.verbose) {
-              appendOutput(
-                currentState,
-                formatDimMessage(`[subagent-result] ${subagentCall.id} => error`)
-              );
-            }
             appendOutput(
               currentState,
               formatActionResultBox(
@@ -2256,18 +2262,22 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
                   status: result.status,
                   output: result.output
                 },
-                { verbose: currentState.config.verbose }
+                { verbose: currentState.config.verbose, showIds: currentState.config.verbose }
               )
             );
+            appendOutput(currentState, "");
           }
         }
 
-        if (currentState.config.verbose) {
-          appendOutput(currentState, "");
-        }
         return results;
       },
-      [executeSkillCalls, executeToolCalls, forceRender, requestAssistantFromLlama]
+      [
+        executeSkillCalls,
+        executeToolCalls,
+        forceRender,
+        requestAssistantFromLlama,
+        runWithBusyLabel
+      ]
     );
 
     const loadDownloaderModels = useCallback(

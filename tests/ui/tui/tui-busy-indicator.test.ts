@@ -27,6 +27,16 @@ describe("composeOutputLines", () => {
 
     expect(lines).toEqual(["out-1"]);
   });
+
+  it("supports tool-specific busy labels during action execution", () => {
+    const lines = composeOutputLines({
+      outputLines: ["● Read(README.md)"],
+      autocompleteOverlay: [],
+      busyLine: "⠹ Running read_file... (0s)"
+    });
+
+    expect(lines).toEqual(["● Read(README.md)", "⠹ Running read_file... (0s)"]);
+  });
 });
 
 describe("buildPromptStatusText", () => {

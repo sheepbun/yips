@@ -14,7 +14,7 @@ describe("renderAssistantStreamForDisplay", () => {
     expect(plain).toContain("Yips: Hello from assistant.");
   });
 
-  it("renders assistant prose and action call boxes for yips-agent envelopes", () => {
+  it("renders assistant prose but not streamed action call previews for yips-agent envelopes", () => {
     const rendered = renderAssistantStreamForDisplay(
       [
         "```yips-agent",
@@ -37,11 +37,41 @@ describe("renderAssistantStreamForDisplay", () => {
 
     const plain = stripMarkup(rendered);
     expect(plain).toContain("Yips: Calling tool now");
-    expect(plain).toContain("Tool Call");
-    expect(plain).toContain("id: t1");
-    expect(plain).toContain("name:");
-    expect(plain).toContain("read_file");
+    expect(plain).not.toContain("● Read(README.md)");
+    expect(plain).not.toContain("⎿ id: t1");
+    expect(plain).not.toContain("queued for execution");
+    expect(plain).not.toContain("Tool Call");
+    expect(plain).not.toContain("╭");
+    expect(plain).not.toContain("│");
     expect(plain).not.toContain("```yips-agent");
+  });
+
+  it("does not render streamed action previews in verbose mode either", () => {
+    const rendered = renderAssistantStreamForDisplay(
+      [
+        "```yips-agent",
+        JSON.stringify({
+          assistant_text: "Calling tool now",
+          actions: [
+            {
+              type: "tool",
+              id: "t1",
+              name: "read_file",
+              arguments: { path: "README.md" }
+            }
+          ]
+        }),
+        "```"
+      ].join("\n"),
+      new Date(2026, 1, 25, 11, 40),
+      true
+    );
+
+    const plain = stripMarkup(rendered);
+    expect(plain).toContain("Yips: Calling tool now");
+    expect(plain).not.toContain("● Read(README.md)");
+    expect(plain).not.toContain("⎿ id: t1");
+    expect(plain).not.toContain("⎿ queued for execution");
   });
 
   it("shows parse warning text for malformed envelopes", () => {
@@ -54,5 +84,71 @@ describe("renderAssistantStreamForDisplay", () => {
     const plain = stripMarkup(rendered);
     expect(plain).toContain("Tool protocol error:");
     expect(plain).not.toContain("```yips-agent");
+  });
+
+  it("does not render partial envelope text while streaming", () => {
+    const rendered = renderAssistantStreamForDisplay(
+      "```yips-agent\n{\"actions\":[{\"type\":\"tool\"",
+      new Date(2026, 1, 25, 11, 40),
+      false
+    );
+
+    const plain = stripMarkup(rendered);
+    expect(plain).toBe("");
+    expect(plain).not.toContain("```yips-agent");
+  });
+
+  it("does not render grouped streamed call previews for multi-action envelopes", () => {
+    const rendered = renderAssistantStreamForDisplay(
+      [
+        "```yips-agent",
+        JSON.stringify({
+          actions: [
+            {
+              type: "tool",
+              id: "t1",
+              name: "list_dir",
+              arguments: { path: "." }
+            },
+            {
+              type: "tool",
+              id: "t2",
+              name: "read_file",
+              arguments: { path: "README.md" }
+            }
+          ]
+        }),
+        "```"
+      ].join("\n"),
+      new Date(2026, 1, 25, 11, 40),
+      false
+    );
+
+    const plain = stripMarkup(rendered);
+    expect(plain).not.toContain("● List(.)");
+    expect(plain).not.toContain("● Read(README.md)");
+  });
+
+  it("renders assistant_text from unfenced raw envelope JSON instead of dumping JSON", () => {
+    const rendered = renderAssistantStreamForDisplay(
+      JSON.stringify({
+        assistant_text: "I found relevant files and can inspect one.",
+        actions: [
+          {
+            type: "tool",
+            id: "t1",
+            name: "list_dir",
+            arguments: { path: "." }
+          }
+        ]
+      }),
+      new Date(2026, 1, 25, 11, 40),
+      false
+    );
+
+    const plain = stripMarkup(rendered);
+    expect(plain).toContain("Yips: I found relevant files and can inspect one.");
+    expect(plain).not.toContain("{\"assistant_text\"");
+    expect(plain).not.toContain("\"actions\"");
   });
 });

@@ -64,6 +64,13 @@ Rolling implementation handoff between exchanges, stored as one file per entry.
 - [11:52 — Exchange 122](./progress-log/2026/02/25/1152-exchange-122.md)
 - [11:55 — Exchange 171](./progress-log/2026/02/25/1155-exchange-171.md)
 - [11:56 — Exchange 123](./progress-log/2026/02/25/1156-exchange-123.md)
+- [12:10 — Exchange 172](./progress-log/2026/02/25/1210-exchange-172.md)
+- [12:25 — Exchange 173](./progress-log/2026/02/25/1225-exchange-173.md)
+- [12:43 — Exchange 174](./progress-log/2026/02/25/1243-exchange-174.md)
+- [12:46 — Exchange 175](./progress-log/2026/02/25/1246-exchange-175.md)
+- [12:56 — Exchange 176](./progress-log/2026/02/25/1256-exchange-176.md)
+- [13:00 — Exchange 177](./progress-log/2026/02/25/1300-exchange-177.md)
+- [13:03 — Exchange 178](./progress-log/2026/02/25/1303-exchange-178.md)
 - [13:40 — Exchange 134](./progress-log/2026/02/25/1340-exchange-134.md)
 - [13:45 — Exchange 135](./progress-log/2026/02/25/1345-exchange-135.md)
 - [13:48 — Exchange 136](./progress-log/2026/02/25/1348-exchange-136.md)
@@ -210,5 +217,5 @@ Historical headings were normalized to local timezone and exchange numbers were 
 
 ## Stats
 
-- Total entries: 171
+- Total entries: 178
 - Total dates: 4

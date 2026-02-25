@@ -12,7 +12,11 @@ import {
   SUCCESS_GREEN,
   WARNING_YELLOW
 } from "#ui/colors";
-import type { SkillExecutionStatus, SubagentExecutionStatus, ToolExecutionStatus } from "#types/app-types";
+import type {
+  SkillExecutionStatus,
+  SubagentExecutionStatus,
+  ToolExecutionStatus
+} from "#types/app-types";
 
 export type ActionBoxType = "tool" | "skill" | "subagent";
 type ActionBoxStatus = ToolExecutionStatus | SkillExecutionStatus | SubagentExecutionStatus;
@@ -21,6 +25,7 @@ export interface ActionCallBoxEvent {
   type: ActionBoxType;
   id: string;
   name: string;
+  arguments?: Record<string, unknown>;
   preview?: string;
 }
 
@@ -36,6 +41,12 @@ export interface ActionResultBoxEvent {
 export interface ActionResultBoxOptions {
   verbose?: boolean;
   previewMaxChars?: number;
+  showIds?: boolean;
+}
+
+export interface ActionCallBoxOptions {
+  verbose?: boolean;
+  showIds?: boolean;
 }
 
 function formatTimestamp(date: Date): string {
@@ -132,35 +143,146 @@ function toTypeLabel(type: ActionBoxType): string {
   return "Subagent";
 }
 
-function boxWidth(lines: readonly string[]): number {
-  const maxLen = lines.reduce((acc, line) => Math.max(acc, Array.from(line).length), 0);
-  return Math.max(36, Math.min(120, maxLen + 4));
+function normalizeStringArg(value: unknown): string | null {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
-function renderBox(title: string, bodyLines: readonly string[]): string {
-  const width = boxWidth([title, ...bodyLines]);
-  const innerWidth = Math.max(1, width - 2);
-  const clippedBody = bodyLines.map((line) => truncate(line, innerWidth));
-  const topPadding = "─".repeat(Math.max(0, innerWidth - title.length - 2));
-  const top = horizontalGradient(`╭ ${title} ${topPadding}╮`, GRADIENT_PINK, GRADIENT_YELLOW);
-  const bottom = horizontalGradient(`╰${"─".repeat(innerWidth)}╯`, GRADIENT_PINK, GRADIENT_YELLOW);
-
-  const rows = clippedBody.map((line) => {
-    const pad = " ".repeat(Math.max(0, innerWidth - Array.from(line).length));
-    return `${colorText("│", GRADIENT_PINK)}${line}${pad}${colorText("│", GRADIENT_YELLOW)}`;
-  });
-
-  return [top, ...rows, bottom].join("\n");
+function compact(value: string | null, fallback: string, maxChars = 72): string {
+  return truncate((value ?? fallback).replace(/\s+/gu, " "), maxChars);
 }
 
-export function formatActionCallBox(event: ActionCallBoxEvent): string {
-  const title = `${toTypeLabel(event.type)} Call`;
-  const bodyLines = [
-    `id: ${event.id}`,
-    `name: ${event.name}`,
-    `preview: ${event.preview && event.preview.trim().length > 0 ? truncate(event.preview.trim(), 96) : "(pending)"}`
-  ];
-  return renderBox(title, bodyLines);
+function blue(text: string): string {
+  return colorText(text, GRADIENT_BLUE);
+}
+
+function formatToolCallLabel(name: string, args: Record<string, unknown>): string {
+  if (name === "run_command") {
+    return `Bash(${compact(normalizeStringArg(args.command), "<command>")})`;
+  }
+  if (name === "read_file") {
+    return `Read(${compact(normalizeStringArg(args.path), ".")})`;
+  }
+  if (name === "list_dir") {
+    return `List(${compact(normalizeStringArg(args.path), ".")})`;
+  }
+  if (name === "grep") {
+    const pattern = compact(normalizeStringArg(args.pattern), "<pattern>", 48);
+    const path = compact(normalizeStringArg(args.path), ".", 48);
+    return `Search("${pattern}" in ${path})`;
+  }
+  if (name === "write_file") {
+    return `Write(${compact(normalizeStringArg(args.path), ".")})`;
+  }
+  if (name === "edit_file") {
+    return `Edit(${compact(normalizeStringArg(args.path), ".")})`;
+  }
+  return `Tool(${name})`;
+}
+
+function formatSkillCallLabel(name: string, args: Record<string, unknown>): string {
+  if (name === "search") {
+    const query = normalizeStringArg(args.query) ?? normalizeStringArg(args.q);
+    return `Search(${compact(query, "<query>")})`;
+  }
+  if (name === "fetch") {
+    return `Fetch(${compact(normalizeStringArg(args.url), "<url>")})`;
+  }
+  if (name === "build") {
+    return `Build(${compact(normalizeStringArg(args.command), "auto")})`;
+  }
+  if (name === "todos") {
+    return `Todos(${compact(normalizeStringArg(args.path), ".")})`;
+  }
+  if (name === "virtual_terminal") {
+    return `VirtualTerminal(${compact(normalizeStringArg(args.command), "<command>")})`;
+  }
+  return `Skill(${name})`;
+}
+
+function formatCallLabel(event: ActionCallBoxEvent): string {
+  const args = event.arguments ?? {};
+  if (event.type === "tool") {
+    return formatToolCallLabel(event.name, args);
+  }
+  if (event.type === "skill") {
+    return formatSkillCallLabel(event.name, args);
+  }
+  return `Subagent(${compact(event.name, toTypeLabel(event.type))})`;
+}
+
+function formatActionCallLine(event: ActionCallBoxEvent): string {
+  const bullet = `${blue("●")} `;
+  const args = event.arguments ?? {};
+
+  if (event.type === "tool") {
+    if (event.name === "read_file") {
+      const path = compact(normalizeStringArg(args.path), ".");
+      return `${bullet}${horizontalGradient("Read(", GRADIENT_PINK, GRADIENT_YELLOW)}${blue(path)}${horizontalGradient(")", GRADIENT_PINK, GRADIENT_YELLOW)}`;
+    }
+    if (event.name === "list_dir") {
+      const path = compact(normalizeStringArg(args.path), ".");
+      return `${bullet}${horizontalGradient("List(", GRADIENT_PINK, GRADIENT_YELLOW)}${blue(path)}${horizontalGradient(")", GRADIENT_PINK, GRADIENT_YELLOW)}`;
+    }
+    if (event.name === "write_file") {
+      const path = compact(normalizeStringArg(args.path), ".");
+      return `${bullet}${horizontalGradient("Write(", GRADIENT_PINK, GRADIENT_YELLOW)}${blue(path)}${horizontalGradient(")", GRADIENT_PINK, GRADIENT_YELLOW)}`;
+    }
+    if (event.name === "edit_file") {
+      const path = compact(normalizeStringArg(args.path), ".");
+      return `${bullet}${horizontalGradient("Edit(", GRADIENT_PINK, GRADIENT_YELLOW)}${blue(path)}${horizontalGradient(")", GRADIENT_PINK, GRADIENT_YELLOW)}`;
+    }
+    if (event.name === "grep") {
+      const pattern = compact(normalizeStringArg(args.pattern), "<pattern>", 48);
+      const path = compact(normalizeStringArg(args.path), ".", 48);
+      return `${bullet}${horizontalGradient(`Search("${pattern}" in `, GRADIENT_PINK, GRADIENT_YELLOW)}${blue(path)}${horizontalGradient(")", GRADIENT_PINK, GRADIENT_YELLOW)}`;
+    }
+  }
+
+  return `${bullet}${horizontalGradient(formatCallLabel(event), GRADIENT_PINK, GRADIENT_YELLOW)}`;
+}
+
+function resultSummaryForStatus(status: ActionBoxStatus, summary: string): string {
+  if (status === "ok") {
+    return summary;
+  }
+  return `${status}: ${summary}`;
+}
+
+function statusColor(status: ActionBoxStatus) {
+  if (status === "error") {
+    return ERROR_RED;
+  }
+  if (status === "timeout" || status === "denied") {
+    return WARNING_YELLOW;
+  }
+  return DIM_GRAY;
+}
+
+function toOutputLines(output: string): string[] {
+  return output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+}
+
+export function formatActionCallBox(
+  event: ActionCallBoxEvent,
+  options: ActionCallBoxOptions = {}
+): string {
+  const showIds = options.showIds ?? options.verbose === true;
+  const line = formatActionCallLine(event);
+  const detailLines: string[] = [];
+  if (showIds) {
+    detailLines.push(colorText(`⎿ id: ${event.id}`, DIM_GRAY));
+  }
+  if (options.verbose === true && event.preview && event.preview.trim().length > 0) {
+    detailLines.push(colorText(`⎿ ${truncate(event.preview.trim(), 96)}`, DIM_GRAY));
+  }
+  return [line, ...detailLines].join("\n");
 }
 
 export function formatActionResultBox(
@@ -168,31 +290,32 @@ export function formatActionResultBox(
   options: ActionResultBoxOptions = {}
 ): string {
   const verbose = options.verbose === true;
+  const showIds = options.showIds ?? verbose;
   const previewMaxChars = options.previewMaxChars ?? 96;
-  const bodyLines: string[] = [
-    `id: ${event.id}`,
-    `name: ${event.name}`,
-    `status: ${event.status}`
-  ];
+  const summary = resultSummaryForStatus(
+    event.status,
+    normalizePreview(event.output ?? "", previewMaxChars)
+  );
+  const lines: string[] = [colorText(`⎿ ${summary}`, statusColor(event.status))];
 
-  if (verbose) {
-    const outputLines = (event.output ?? "")
-      .split("\n")
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0)
-      .slice(0, 4)
-      .map((line) => `out: ${truncate(line, previewMaxChars)}`);
-    if (outputLines.length === 0) {
-      bodyLines.push("out: (no output)");
-    } else {
-      bodyLines.push(...outputLines);
-    }
-    if (event.metadata) {
-      bodyLines.push(`meta: ${truncate(JSON.stringify(event.metadata), previewMaxChars)}`);
-    }
-  } else {
-    bodyLines.push(`preview: ${normalizePreview(event.output ?? "", previewMaxChars)}`);
+  if (!verbose) {
+    return lines.join("\n");
   }
 
-  return renderBox(`${toTypeLabel(event.type)} Result`, bodyLines);
+  if (showIds) {
+    lines.push(colorText(`⎿ id: ${event.id}`, DIM_GRAY));
+  }
+
+  const outputLines = toOutputLines(event.output ?? "");
+  for (const line of outputLines.slice(1, 4)) {
+    lines.push(colorText(`⎿ out: ${truncate(line, previewMaxChars)}`, DIM_GRAY));
+  }
+  if (outputLines.length === 0) {
+    lines.push(colorText("⎿ out: (no output)", DIM_GRAY));
+  }
+  if (event.metadata) {
+    lines.push(colorText(`⎿ meta: ${truncate(JSON.stringify(event.metadata), previewMaxChars)}`, DIM_GRAY));
+  }
+
+  return lines.join("\n");
 }

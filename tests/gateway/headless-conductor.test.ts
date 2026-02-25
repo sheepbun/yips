@@ -66,6 +66,28 @@ describe("gateway headless conductor", () => {
     expect(response.text).toContain("supports backend 'llamacpp' only");
   });
 
+  it("allows llama gateway override when app backend is non-llama", async () => {
+    const config = { ...getDefaultConfig(), backend: "claude" as const };
+    const deps = createBaseDeps();
+    deps.runConductor = vi.fn(async (runtimeDeps) => {
+      runtimeDeps.history.push({ role: "assistant", content: "gateway llama override ok" });
+      runtimeDeps.onAssistantText("gateway llama override ok", false);
+      return {
+        finished: true,
+        rounds: 1,
+        latestOutputTokensPerSecond: null,
+        usedTokensExact: 3
+      };
+    });
+    const handler = await createGatewayHeadlessMessageHandler(
+      configureOptions(config, { gatewayBackend: "llamacpp" }),
+      deps
+    );
+
+    const response = await handler.handleMessage(createGatewayContext("hello"));
+    expect(response.text).toBe("gateway llama override ok");
+  });
+
   it("returns final assistant round only", async () => {
     const config = getDefaultConfig();
     const deps = createBaseDeps();
@@ -214,10 +236,14 @@ describe("gateway headless conductor", () => {
   });
 });
 
-function configureOptions(config: ReturnType<typeof getDefaultConfig>) {
+function configureOptions(
+  config: ReturnType<typeof getDefaultConfig>,
+  overrides: { gatewayBackend?: ReturnType<typeof getDefaultConfig>["backend"] } = {}
+) {
   return {
     config,
     username: "Gateway User",
-    workingDirectory: process.cwd()
+    workingDirectory: process.cwd(),
+    gatewayBackend: overrides.gatewayBackend
   };
 }

@@ -114,10 +114,12 @@ export interface GatewayHeadlessConductorOptions {
   username?: string;
   workingDirectory?: string;
   maxRounds?: number;
+  gatewayBackend?: AppConfig["backend"];
 }
 
 export class GatewayHeadlessConductor {
   private readonly config: AppConfig;
+  private readonly gatewayBackend: AppConfig["backend"];
   private readonly username: string;
   private readonly workingDirectory: string;
   private readonly maxRounds: number | undefined;
@@ -132,6 +134,7 @@ export class GatewayHeadlessConductor {
     deps: Partial<GatewayHeadlessConductorDeps> = {}
   ) {
     this.config = options.config;
+    this.gatewayBackend = options.gatewayBackend ?? this.config.backend;
     this.username = options.username ?? "Gateway User";
     this.workingDirectory = options.workingDirectory ?? process.cwd();
     this.maxRounds = options.maxRounds;
@@ -150,8 +153,10 @@ export class GatewayHeadlessConductor {
   }
 
   async handleMessage(context: GatewayMessageContext): Promise<GatewayMessageResponse> {
-    if (this.config.backend !== "llamacpp") {
-      return { text: UNSUPPORTED_BACKEND_RESPONSE };
+    if (this.gatewayBackend !== "llamacpp") {
+      return {
+        text: `${UNSUPPORTED_BACKEND_RESPONSE} Configured backend: '${this.gatewayBackend}'.`
+      };
     }
 
     const state = this.getOrCreateSessionState(context);

@@ -1,3 +1,4 @@
+import { GatewayAuthPolicy } from "#gateway/auth-policy";
 import { normalizeIncomingMessage, validateIncomingMessage } from "#gateway/message-router";
 import { GatewayRateLimiter } from "#gateway/rate-limiter";
 import { GatewaySessionManager } from "#gateway/session-manager";
@@ -10,22 +11,28 @@ import type {
 
 export interface GatewayCoreOptions {
   allowedSenderIds?: readonly string[];
+  passphrase?: string;
+  unauthorizedMessage?: string;
   rateLimiter?: GatewayRateLimiter;
   sessionManager?: GatewaySessionManager;
   handleMessage: (context: GatewayMessageContext) => Promise<GatewayMessageResponse>;
 }
 
 export class GatewayCore {
-  private readonly allowedSenderIds: ReadonlySet<string> | null;
+  private readonly authPolicy: GatewayAuthPolicy;
+  private readonly unauthorizedMessage: string;
   private readonly rateLimiter: GatewayRateLimiter;
   private readonly sessionManager: GatewaySessionManager;
   private readonly handleMessageFn: (context: GatewayMessageContext) => Promise<GatewayMessageResponse>;
 
   constructor(options: GatewayCoreOptions) {
-    this.allowedSenderIds =
-      options.allowedSenderIds && options.allowedSenderIds.length > 0
-        ? new Set(options.allowedSenderIds)
-        : null;
+    this.authPolicy = new GatewayAuthPolicy({
+      allowedSenderIds: options.allowedSenderIds,
+      passphrase: options.passphrase
+    });
+    this.unauthorizedMessage =
+      options.unauthorizedMessage ??
+      "Access denied. Authenticate with /auth <passphrase> or contact the administrator.";
     this.rateLimiter =
       options.rateLimiter ??
       new GatewayRateLimiter({
@@ -46,10 +53,22 @@ export class GatewayCore {
       };
     }
 
-    if (this.allowedSenderIds && !this.allowedSenderIds.has(normalizedMessage.senderId)) {
+    const authDecision = this.authPolicy.evaluate(normalizedMessage);
+    if (authDecision.type === "authenticated") {
+      return {
+        status: "authenticated",
+        response: {
+          text: "Authentication successful. You can now send messages."
+        }
+      };
+    }
+    if (authDecision.type === "unauthorized") {
       return {
         status: "unauthorized",
-        reason: "sender_not_allowed"
+        reason: authDecision.reason,
+        response: {
+          text: this.unauthorizedMessage
+        }
       };
     }
 

@@ -141,7 +141,7 @@ describe("DiscordGatewayRuntime", () => {
     expect(secondBody.content).toBe("gamma delta");
   });
 
-  it("does not send outbound requests when dispatch result is non-ok", async () => {
+  it("does not send outbound requests when dispatch result has no response", async () => {
     const state: { client: FakeDiscordClient | null } = { client: null };
     const loadDiscordModule = async () => ({
       Client: class {
@@ -182,5 +182,50 @@ describe("DiscordGatewayRuntime", () => {
     });
 
     expect(fetchImpl).not.toHaveBeenCalled();
+  });
+
+  it("sends outbound requests for non-ok dispatch results when response is present", async () => {
+    const state: { client: FakeDiscordClient | null } = { client: null };
+    const loadDiscordModule = async () => ({
+      Client: class {
+        constructor() {
+          state.client = new FakeDiscordClient();
+          return state.client;
+        }
+      } as unknown as new (options: Record<string, unknown>) => DiscordClientLike
+    });
+
+    const dispatch = vi.fn(async (): Promise<GatewayDispatchResult> => ({
+      status: "unauthorized",
+      reason: "passphrase_required",
+      response: {
+        text: "Access denied"
+      }
+    }));
+    const fetchImpl = vi.fn<(input: string, init?: RequestInit) => Promise<Response>>(
+      async () => new Response(null, { status: 200 })
+    );
+    const runtime = createDiscordGatewayRuntime({
+      botToken: "secret",
+      gateway: { dispatch },
+      loadDiscordModule,
+      fetchImpl
+    });
+
+    await runtime.start();
+    if (!state.client) {
+      throw new Error("missing fake discord client");
+    }
+    await state.client.emit("messageCreate", {
+      id: "m1",
+      content: "ping",
+      channelId: "c1",
+      author: {
+        id: "u1",
+        bot: false
+      }
+    });
+
+    expect(fetchImpl).toHaveBeenCalledOnce();
   });
 });

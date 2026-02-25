@@ -107,7 +107,7 @@ export class DiscordGatewayRuntime {
       const inboundMessages = this.adapter.parseInbound(payload);
       for (const inbound of inboundMessages) {
         const result = await this.gateway.dispatch(inbound);
-        if (result.status !== "ok" || !result.response) {
+        if (!result.response) {
           continue;
         }
 

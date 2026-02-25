@@ -20,12 +20,19 @@ function readAllowedSenders(): string[] {
     .filter((value) => value.length > 0);
 }
 
+function readOptionalEnv(name: string): string | undefined {
+  const value = process.env[name]?.trim();
+  return value && value.length > 0 ? value : undefined;
+}
+
 async function main(): Promise<void> {
   const botToken = readRequiredEnv("YIPS_DISCORD_BOT_TOKEN");
   const allowedSenderIds = readAllowedSenders();
+  const passphrase = readOptionalEnv("YIPS_GATEWAY_PASSPHRASE");
 
   const gateway = new GatewayCore({
     allowedSenderIds: allowedSenderIds.length > 0 ? allowedSenderIds : undefined,
+    passphrase,
     handleMessage: async (context) => ({
       text: context.message.text
     })

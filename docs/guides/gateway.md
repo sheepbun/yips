@@ -68,11 +68,12 @@ The central routing layer:
 - **Message Router**: Maps incoming messages to the correct Conductor session based on sender identity and conversation context
 - **Session Manager**: Creates, persists, and resumes Conductor sessions per user/channel
 - **Rate Limiter**: Prevents abuse (per-user message limits, cooldowns)
-- **Authentication**: Controls who can interact with the gateway (allowlist, API keys, or platform-level permissions)
+- **Authentication**: Controls who can interact with the gateway (sender allowlist + optional passphrase handshake)
 
 Current implementation status in TypeScript:
 
 - `src/gateway/core.ts`: dispatch entrypoint that validates/authenticates/rate-limits and invokes a message handler callback.
+- `src/gateway/auth-policy.ts`: allowlist + `/auth <passphrase>` policy with persistent sender auth state (`platform + sender` scoped).
 - `src/gateway/message-router.ts`: inbound message normalization and validation.
 - `src/gateway/session-manager.ts`: in-memory per-conversation session lifecycle (`platform + sender + channel`).
 - `src/gateway/rate-limiter.ts`: in-memory fixed-window per-sender rate limiter.
@@ -88,6 +89,13 @@ Discord runtime environment variables:
 
 - `YIPS_DISCORD_BOT_TOKEN` (required): Discord bot token used for gateway and outbound message authorization.
 - `YIPS_GATEWAY_ALLOWED_SENDERS` (optional): comma-delimited sender ID allowlist enforced by `GatewayCore`.
+- `YIPS_GATEWAY_PASSPHRASE` (optional): when set, senders must first send `/auth <passphrase>` before normal messages are processed.
+
+Authentication behavior:
+
+- If `YIPS_GATEWAY_ALLOWED_SENDERS` is set, non-allowlisted sender IDs are rejected.
+- If `YIPS_GATEWAY_PASSPHRASE` is set, unauthenticated senders receive an explicit denial response until they send a valid `/auth <passphrase>` command.
+- Successful `/auth` grants in-memory access for that sender within the current process lifetime.
 
 ### Headless Conductor
 
@@ -102,7 +110,7 @@ The same Conductor used by the TUI, running without terminal display. It receive
 
 ## Security Considerations
 
-- **Authentication**: The gateway should only respond to authorized users. Implement an allowlist of sender IDs or require a passphrase in the first message.
+- **Authentication**: Current implementation supports sender allowlists and optional passphrase handshake. Rotate passphrases regularly and prefer allowlist + passphrase together for public endpoints.
 - **Tool restrictions**: The gateway Conductor should have a more restricted tool set than the TUI. File writes, shell commands, and git operations are high-risk when triggered by remote messages. Consider a read-only or explicitly scoped tool policy for gateway sessions.
 - **Rate limiting**: Messaging platforms can deliver high volumes. Rate limit per sender to prevent resource exhaustion.
 - **Input sanitization**: Messages from external platforms may contain injection attempts. Sanitize before passing to the Conductor.

@@ -59,7 +59,7 @@ Self-hosted messaging platform bridge.
 - [x] WhatsApp adapter (WhatsApp Business API)
 - [x] Telegram adapter (Bot API)
 - [x] Discord adapter (Bot SDK)
-- [ ] Authentication and access control
+- [x] Authentication and access control
 - [ ] Platform-specific message formatting
 - [ ] Headless Conductor mode (no TUI, API-driven)
 

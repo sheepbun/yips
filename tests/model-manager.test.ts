@@ -10,7 +10,8 @@ import {
   findMatchingModel,
   getModelDisplayName,
   getFriendlyModelName,
-  listLocalModels
+  listLocalModels,
+  selectBestModelForHardware
 } from "../src/model-manager";
 
 describe("model-manager", () => {
@@ -188,5 +189,73 @@ describe("model-manager", () => {
     expect(getModelDisplayName("Qwen/Qwen3-VL-2B-Instruct-GGUF/Qwen3VL-2B-Instruct-Q4_K_M.gguf")).toBe(
       "Qwen3-VL-2B-Instruct-GGUF"
     );
+  });
+
+  it("selects the largest runnable model that fits VRAM when GPU memory is available", () => {
+    const models = [
+      {
+        id: "org/repo/q4.gguf",
+        name: "q4",
+        friendlyName: "q4",
+        host: "org",
+        backend: "llamacpp" as const,
+        friendlyBackend: "llama.cpp" as const,
+        sizeBytes: 4 * 1024 ** 3,
+        sizeGb: 4,
+        canRun: true,
+        reason: "Fits RAM+VRAM",
+        path: "/tmp/q4.gguf"
+      },
+      {
+        id: "org/repo/q6.gguf",
+        name: "q6",
+        friendlyName: "q6",
+        host: "org",
+        backend: "llamacpp" as const,
+        friendlyBackend: "llama.cpp" as const,
+        sizeBytes: 6 * 1024 ** 3,
+        sizeGb: 6,
+        canRun: true,
+        reason: "Fits RAM+VRAM",
+        path: "/tmp/q6.gguf"
+      }
+    ];
+
+    const selected = selectBestModelForHardware(models, { vramGb: 5 });
+    expect(selected?.id).toBe("org/repo/q4.gguf");
+  });
+
+  it("falls back to largest runnable model when none fit VRAM", () => {
+    const models = [
+      {
+        id: "org/repo/a.gguf",
+        name: "a",
+        friendlyName: "a",
+        host: "org",
+        backend: "llamacpp" as const,
+        friendlyBackend: "llama.cpp" as const,
+        sizeBytes: 6 * 1024 ** 3,
+        sizeGb: 6,
+        canRun: true,
+        reason: "Fits RAM+VRAM",
+        path: "/tmp/a.gguf"
+      },
+      {
+        id: "org/repo/b.gguf",
+        name: "b",
+        friendlyName: "b",
+        host: "org",
+        backend: "llamacpp" as const,
+        friendlyBackend: "llama.cpp" as const,
+        sizeBytes: 8 * 1024 ** 3,
+        sizeGb: 8,
+        canRun: true,
+        reason: "Fits RAM+VRAM",
+        path: "/tmp/b.gguf"
+      }
+    ];
+
+    const selected = selectBestModelForHardware(models, { vramGb: 4 });
+    expect(selected?.id).toBe("org/repo/b.gguf");
   });
 });

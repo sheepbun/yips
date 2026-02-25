@@ -69,7 +69,12 @@ import {
   type DownloaderState
 } from "./downloader-state";
 import { getSystemSpecs } from "./hardware";
-import { deleteLocalModel, getFriendlyModelName, listLocalModels } from "./model-manager";
+import {
+  deleteLocalModel,
+  getFriendlyModelName,
+  listLocalModels,
+  selectBestModelForHardware
+} from "./model-manager";
 import { renderModelManagerLines } from "./model-manager-ui";
 import {
   createModelManagerState,
@@ -96,6 +101,7 @@ import {
   formatTitleTokenUsage,
   resolveEffectiveMaxTokens
 } from "./token-counter";
+import { runConductorTurn, type ConductorAssistantReply } from "./conductor";
 import {
   createSessionFileFromHistory,
   listSessions,
@@ -103,12 +109,20 @@ import {
   writeSessionFile,
   type SessionListItem
 } from "./session-store";
-import type { AppConfig, ChatMessage, ToolCall, ToolResult, TuiOptions } from "./types";
-import { parseToolProtocol } from "./tool-protocol";
+import type {
+  AppConfig,
+  ChatMessage,
+  SubagentCall,
+  SubagentResult,
+  ToolCall,
+  ToolResult,
+  TuiOptions
+} from "./types";
 import { assessCommandRisk, assessPathRisk, resolveToolPath, type ToolRisk } from "./tool-safety";
 import { executeToolCall } from "./tool-executor";
 import { VirtualTerminalSession } from "./vt-session";
 import { loadCodeContext, toCodeContextSystemMessage } from "./code-context";
+import { decideConfirmationAction, routeVtInput } from "./tui-input-routing";
 
 const PROMPT_PREFIX = ">>> ";
 const CURSOR_MARKER = "▌";
@@ -123,14 +137,6 @@ const MOUSE_SCROLL_LINE_STEP = 3;
 const ENABLE_MOUSE_REPORTING = "\u001b[?1000h\u001b[?1006h";
 const DISABLE_MOUSE_REPORTING = "\u001b[?1000l\u001b[?1006l";
 const ANSI_SGR_PATTERN = new RegExp(String.raw`\u001b\[[0-9;]*m`, "g");
-
-interface AssistantReply {
-  text: string;
-  rendered: boolean;
-  totalTokens?: number;
-  completionTokens?: number;
-  generationDurationMs?: number;
-}
 
 interface RuntimeState {
   outputLines: string[];
@@ -164,6 +170,13 @@ interface PendingConfirmation {
   summary: string;
   destructive: boolean;
   outOfZone: boolean;
+}
+
+interface AssistantRequestOptions {
+  streamingOverride?: boolean;
+  historyOverride?: readonly ChatMessage[];
+  codeContextOverride?: string | null;
+  busyLabel?: string;
 }
 
 interface InkModule {
@@ -674,6 +687,19 @@ export function composeChatRequestMessages(
     return history;
   }
   return [{ role: "system", content: codeContextMessage }, ...history];
+}
+
+function buildSubagentScopeMessage(call: SubagentCall): string {
+  const lines = [
+    "Subagent scope:",
+    `Task: ${call.task}`,
+    call.context ? `Context: ${call.context}` : null,
+    call.allowedTools
+      ? `Allowed tools: ${call.allowedTools.length > 0 ? call.allowedTools.join(", ") : "(none)"}`
+      : "Allowed tools: all available tools",
+    "Stay focused on the delegated scope and return concise findings."
+  ].filter((line): line is string => line !== null);
+  return lines.join("\n");
 }
 
 export function buildModelAutocompleteCandidates(
@@ -1543,7 +1569,7 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
     }, [stdout]);
 
     const requestAssistantFromLlama = useCallback(
-      async (streamingOverride?: boolean): Promise<AssistantReply> => {
+      async (options?: AssistantRequestOptions): Promise<ConductorAssistantReply> => {
         const currentState = stateRef.current;
         const llamaClient = llamaClientRef.current;
         if (!currentState || !llamaClient) {
@@ -1563,16 +1589,22 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
         }
 
         llamaClient.setModel(currentState.config.model);
+        const history = options?.historyOverride ?? currentState.history;
+        const codeContext =
+          options?.codeContextOverride !== undefined
+            ? options.codeContextOverride
+            : currentState.codeContextMessage;
         const requestMessages = composeChatRequestMessages(
-          currentState.history,
-          currentState.codeContextMessage
+          history,
+          codeContext ?? null
         );
 
-        const shouldStream = streamingOverride ?? currentState.config.streaming;
+        const shouldStream = options?.streamingOverride ?? currentState.config.streaming;
+        const busyLabel = options?.busyLabel ?? "Thinking...";
 
         if (!shouldStream) {
           const startedAtMs = Date.now();
-          startBusyIndicator("Thinking...");
+          startBusyIndicator(busyLabel);
 
           try {
             const result = await llamaClient.chat(requestMessages, currentState.config.model);
@@ -1595,7 +1627,7 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
         let streamStartedAtMs: number | null = null;
         const blockStart = currentState.outputLines.length;
         let blockLength = 0;
-        startBusyIndicator("Thinking...");
+        startBusyIndicator(busyLabel);
         forceRender();
 
         try {
@@ -1781,6 +1813,129 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
         return results;
       },
       [assessToolCallRisk, getVtSession, requestToolConfirmation]
+    );
+
+    const executeSubagentCalls = useCallback(
+      async (subagentCalls: readonly SubagentCall[]): Promise<SubagentResult[]> => {
+        const currentState = stateRef.current;
+        if (!currentState) {
+          return [];
+        }
+
+        const results: SubagentResult[] = [];
+
+        for (const subagentCall of subagentCalls) {
+          if (currentState.config.verbose) {
+            appendOutput(
+              currentState,
+              formatDimMessage(`[subagent] spawn ${subagentCall.id}: ${subagentCall.task}`)
+            );
+          }
+
+          const scopedHistory: ChatMessage[] = [
+            { role: "system", content: buildSubagentScopeMessage(subagentCall) },
+            { role: "user", content: subagentCall.task }
+          ];
+          const warnings: string[] = [];
+          const allowedTools =
+            subagentCall.allowedTools !== undefined ? new Set(subagentCall.allowedTools) : null;
+          const startedAtMs = Date.now();
+
+          try {
+            const turn = await runConductorTurn({
+              history: scopedHistory,
+              requestAssistant: () =>
+                requestAssistantFromLlama({
+                  streamingOverride: false,
+                  historyOverride: scopedHistory,
+                  codeContextOverride: null,
+                  busyLabel: `Subagent ${subagentCall.id}...`
+                }),
+              executeToolCalls: async (toolCalls: readonly ToolCall[]): Promise<ToolResult[]> => {
+                if (!allowedTools) {
+                  return executeToolCalls(toolCalls);
+                }
+
+                const permittedCalls: ToolCall[] = [];
+                const deniedResults: ToolResult[] = [];
+
+                for (const call of toolCalls) {
+                  if (allowedTools.has(call.name)) {
+                    permittedCalls.push(call);
+                    continue;
+                  }
+                  deniedResults.push({
+                    callId: call.id,
+                    tool: call.name,
+                    status: "denied",
+                    output: `Tool '${call.name}' is not allowed for subagent ${subagentCall.id}.`
+                  });
+                }
+
+                const permittedResults =
+                  permittedCalls.length > 0 ? await executeToolCalls(permittedCalls) : [];
+                return [...deniedResults, ...permittedResults];
+              },
+              onAssistantText: (): void => {
+                // Subagent text is consumed internally and summarized in result metadata.
+              },
+              onWarning: (message: string): void => {
+                warnings.push(message);
+              },
+              onRoundComplete: (): void => {
+                forceRender();
+              },
+              estimateCompletionTokens: (text: string): number =>
+                estimateConversationTokens([{ content: text }]),
+              estimateHistoryTokens: (history: readonly ChatMessage[]): number =>
+                estimateConversationTokens(history),
+              computeTokensPerSecond,
+              maxRounds: subagentCall.maxRounds ?? 4
+            });
+
+            const lastAssistant = [...scopedHistory]
+              .reverse()
+              .find((entry) => entry.role === "assistant")?.content;
+
+            const result: SubagentResult = {
+              callId: subagentCall.id,
+              status: turn.finished ? "ok" : "timeout",
+              output: lastAssistant ?? "Subagent completed without assistant output.",
+              metadata: {
+                rounds: turn.rounds,
+                durationMs: Math.max(0, Date.now() - startedAtMs),
+                warnings
+              }
+            };
+            results.push(result);
+            if (currentState.config.verbose) {
+              appendOutput(
+                currentState,
+                formatDimMessage(`[subagent-result] ${subagentCall.id} => ${result.status}`)
+              );
+            }
+          } catch (error) {
+            const result: SubagentResult = {
+              callId: subagentCall.id,
+              status: "error",
+              output: `Subagent failed: ${formatError(error)}`
+            };
+            results.push(result);
+            if (currentState.config.verbose) {
+              appendOutput(
+                currentState,
+                formatDimMessage(`[subagent-result] ${subagentCall.id} => error`)
+              );
+            }
+          }
+        }
+
+        if (currentState.config.verbose) {
+          appendOutput(currentState, "");
+        }
+        return results;
+      },
+      [executeToolCalls, forceRender, requestAssistantFromLlama]
     );
 
     const loadDownloaderModels = useCallback(
@@ -2204,58 +2359,32 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
         }
 
         try {
-          const maxRounds = 6;
-          let rounds = 0;
-          let finished = false;
-
-          while (!finished && rounds < maxRounds) {
-            rounds += 1;
-            const reply = await requestAssistantFromLlama();
-            const parsed = parseToolProtocol(reply.text);
-            const assistantText = parsed.assistantText.trim();
-
-            if (assistantText.length > 0) {
-              if (!reply.rendered) {
+          const turn = await runConductorTurn({
+            history: currentState.history,
+            requestAssistant: () => requestAssistantFromLlama(),
+            executeToolCalls,
+            executeSubagentCalls,
+            onAssistantText: (assistantText: string, rendered: boolean): void => {
+              if (!rendered) {
                 appendOutput(currentState, formatAssistantMessage(assistantText));
               }
               appendOutput(currentState, "");
-              currentState.history.push({ role: "assistant", content: assistantText });
-            }
-
-            const completionTokens =
-              typeof reply.completionTokens === "number" && reply.completionTokens > 0
-                ? reply.completionTokens
-                : estimateConversationTokens([{ content: reply.text }]);
-            currentState.latestOutputTokensPerSecond = computeTokensPerSecond(
-              completionTokens,
-              reply.generationDurationMs ?? 0
-            );
-            if (typeof reply.totalTokens === "number" && reply.totalTokens >= 0) {
-              currentState.usedTokensExact = reply.totalTokens;
-            } else {
-              currentState.usedTokensExact = estimateConversationTokens(currentState.history);
-            }
-
-            if (parsed.toolCalls.length === 0) {
-              finished = true;
-              break;
-            }
-
-            const toolResults = await executeToolCalls(parsed.toolCalls);
-            currentState.history.push({
-              role: "system",
-              content: `Tool results: ${JSON.stringify(toolResults)}`
-            });
-            forceRender();
-          }
-
-          if (!finished) {
-            appendOutput(
-              currentState,
-              formatWarningMessage("Stopped tool chaining after max depth (6 rounds).")
-            );
-            appendOutput(currentState, "");
-          }
+            },
+            onWarning: (message: string): void => {
+              appendOutput(currentState, formatWarningMessage(message));
+              appendOutput(currentState, "");
+            },
+            onRoundComplete: (): void => {
+              forceRender();
+            },
+            estimateCompletionTokens: (text: string): number =>
+              estimateConversationTokens([{ content: text }]),
+            estimateHistoryTokens: (history: readonly ChatMessage[]): number =>
+              estimateConversationTokens(history),
+            computeTokensPerSecond
+          });
+          currentState.latestOutputTokensPerSecond = turn.latestOutputTokensPerSecond;
+          currentState.usedTokensExact = turn.usedTokensExact;
         } catch (error) {
           appendOutput(currentState, formatErrorMessage(`Request failed: ${formatError(error)}`));
           appendOutput(currentState, "");
@@ -2264,7 +2393,13 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
         await persistSessionSnapshot();
         forceRender();
       },
-      [executeToolCalls, forceRender, persistSessionSnapshot, requestAssistantFromLlama]
+      [
+        executeSubagentCalls,
+        executeToolCalls,
+        forceRender,
+        persistSessionSnapshot,
+        requestAssistantFromLlama
+      ]
     );
 
     const processSubmittedInput = useCallback(
@@ -2472,54 +2607,31 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
         }
 
         if (currentState.uiMode === "confirm") {
-          for (const action of actions) {
-            if (action.type === "cancel") {
-              resolvePendingConfirmation(false);
-              return;
-            }
-            if (action.type === "submit") {
-              resolvePendingConfirmation(true);
-              return;
-            }
-            if (action.type === "insert") {
-              const normalized = action.text.trim().toLowerCase();
-              if (normalized === "y" || normalized === "yes") {
-                resolvePendingConfirmation(true);
-                return;
-              }
-              if (normalized === "n" || normalized === "no") {
-                resolvePendingConfirmation(false);
-                return;
-              }
-            }
+          const decision = decideConfirmationAction(actions);
+          if (decision === "approve") {
+            resolvePendingConfirmation(true);
+            return;
+          }
+          if (decision === "deny") {
+            resolvePendingConfirmation(false);
+            return;
           }
           forceRender();
           return;
         }
 
         if (currentState.uiMode === "vt") {
-          const bytes = Buffer.from(sequence, "latin1");
-          if (bytes.includes(0x11)) {
-            vtEscapePendingRef.current = false;
+          const route = routeVtInput(sequence, vtEscapePendingRef.current);
+          vtEscapePendingRef.current = route.nextEscapePending;
+          if (route.exitToChat) {
             currentState.uiMode = "chat";
             forceRender();
             return;
           }
-
-          if (sequence === "\u001b") {
-            if (vtEscapePendingRef.current) {
-              vtEscapePendingRef.current = false;
-              currentState.uiMode = "chat";
-              forceRender();
-              return;
-            }
-            vtEscapePendingRef.current = true;
-            return;
+          if (route.passthrough !== null) {
+            getVtSession().write(route.passthrough);
+            forceRender();
           }
-
-          vtEscapePendingRef.current = false;
-          getVtSession().write(sequence);
-          forceRender();
           return;
         }
 
@@ -3131,6 +3243,7 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
 
 export async function startTui(options: TuiOptions): Promise<"exit" | "restart"> {
   let restartRequested = false;
+  await applyHardwareAwareStartupModelSelection(options);
   await ensureFreshLlamaSessionOnStartup(options);
   const version = await getVersion();
   const ink = (await import("ink")) as unknown as InkModule;
@@ -3150,6 +3263,42 @@ export async function startTui(options: TuiOptions): Promise<"exit" | "restart">
 
   await instance.waitUntilExit();
   return restartRequested ? "restart" : "exit";
+}
+
+export async function applyHardwareAwareStartupModelSelection(
+  options: TuiOptions,
+  deps: {
+    getSpecs: typeof getSystemSpecs;
+    listModels: typeof listLocalModels;
+    selectModel: typeof selectBestModelForHardware;
+    save: typeof saveConfig;
+  } = {
+    getSpecs: getSystemSpecs,
+    listModels: listLocalModels,
+    selectModel: selectBestModelForHardware,
+    save: saveConfig
+  }
+): Promise<string | null> {
+  if (options.config.backend !== "llamacpp") {
+    return null;
+  }
+  if (resolveLoadedModel(options.config.model)) {
+    return null;
+  }
+
+  const specs = deps.getSpecs();
+  const models = await deps.listModels({
+    totalMemoryGb: specs.totalMemoryGb,
+    nicknames: options.config.nicknames
+  });
+  const selected = deps.selectModel(models, specs);
+  if (!selected) {
+    return null;
+  }
+
+  options.config.model = selected.id;
+  await deps.save(options.config);
+  return selected.id;
 }
 
 export async function ensureFreshLlamaSessionOnStartup(

@@ -7,14 +7,14 @@ describe("tool-protocol", () => {
     const input = [
       "Working on it.",
       "```yips-tools",
-      '{"tool_calls":[{"id":"1","name":"read_file","arguments":{"path":"README.md"}}]}',
+      '{"tool_calls":[{"id":"1","name":"write_file","arguments":{"path":"README.md","content":"x"}}]}',
       "```"
     ].join("\n");
 
     const parsed = parseToolProtocol(input);
     expect(parsed.assistantText).toContain("Working on it.");
     expect(parsed.toolCalls).toHaveLength(1);
-    expect(parsed.toolCalls[0]?.name).toBe("read_file");
+    expect(parsed.toolCalls[0]?.name).toBe("write_file");
   });
 
   it("returns no tool calls on invalid json", () => {
@@ -24,7 +24,7 @@ describe("tool-protocol", () => {
 
   it("ignores unknown tool names", () => {
     const input =
-      '```yips-tools\n{"tool_calls":[{"id":"1","name":"write_file","arguments":{}}]}\n```';
+      '```yips-tools\n{"tool_calls":[{"id":"1","name":"unknown_tool","arguments":{}}]}\n```';
     const parsed = parseToolProtocol(input);
     expect(parsed.toolCalls).toHaveLength(0);
   });

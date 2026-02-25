@@ -24,7 +24,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - JSON config loader with safe defaults and malformed-config fallback handling
 - CI workflow for install, typecheck, test, and formatting checks
 - Initial ESLint + Prettier project configuration
-- Exchange continuity log at `docs/progress-log.md`
+- Exchange continuity log index at `docs/progress-log.md` with per-entry files under `docs/progress-log/YYYY/MM/DD/`
 - Ink-based TUI: conversation pane, prompt composer, and command-aware multiline input
 - Color system (`src/colors.ts`): gradient palette, horizontal/diagonal gradients, truecolor markup
 - Responsive title box (`src/title-box.ts`): ASCII YIPS logo, 4 layout modes (full/single/compact/minimal), gradient borders

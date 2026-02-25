@@ -27,7 +27,7 @@ Yips is a local-first AI code editor and self-hosted gateway. It runs language m
 | [Rewrite Guide](./rewrite.md) | yips-cli → yips TUI migration plan |
 | [Tech Stack](./stack.md) | Decided and open technology choices |
 | [Changelog](./changelog.md) | Version history (Keep a Changelog format) |
-| [Progress Log](./progress-log.md) | Rolling exchange handoff and implementation status |
+| [Progress Log](./progress-log.md) | Progress-log index with per-exchange files under `./progress-log/YYYY/MM/DD/` |
 
 ### Guides
 

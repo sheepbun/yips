@@ -115,6 +115,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
   - gateway headless runtime uses llama.cpp-only assistant turns, final-answer response output, and auto-deny safety behavior for risky tool calls
   - gateway sessions now persist transcript snapshots via existing session-store APIs
   - added coverage in `tests/gateway/headless-conductor.test.ts`
+- Gateway backend policy formalization:
+  - added `src/gateway/runtime/backend-policy.ts` for `YIPS_GATEWAY_BACKEND` resolution with default `llamacpp`
+  - `src/gateway/runtime/discord-main.ts` now resolves and validates gateway backend at startup and passes it to headless runtime
+  - `src/gateway/headless-conductor.ts` now supports explicit gateway backend override while retaining defensive unsupported-backend guardrails
+  - added coverage in `tests/gateway/runtime/backend-policy.test.ts` and expanded `tests/gateway/headless-conductor.test.ts`
 
 ### Changed
 

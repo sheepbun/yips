@@ -2,6 +2,7 @@ import { GatewayCore } from "#gateway/core";
 import { createDiscordGatewayRuntime } from "#gateway/runtime/discord-bot";
 import { loadConfig } from "#config/config";
 import { createGatewayHeadlessMessageHandler } from "#gateway/headless-conductor";
+import { resolveGatewayBackendFromEnv } from "#gateway/runtime/backend-policy";
 
 function readRequiredEnv(name: string): string {
   const value = process.env[name]?.trim();
@@ -31,6 +32,7 @@ async function main(): Promise<void> {
   const botToken = readRequiredEnv("YIPS_DISCORD_BOT_TOKEN");
   const allowedSenderIds = readAllowedSenders();
   const passphrase = readOptionalEnv("YIPS_GATEWAY_PASSPHRASE");
+  const gatewayBackend = resolveGatewayBackendFromEnv(process.env.YIPS_GATEWAY_BACKEND);
   const configResult = await loadConfig();
 
   if (configResult.warning) {
@@ -39,7 +41,8 @@ async function main(): Promise<void> {
 
   const headless = await createGatewayHeadlessMessageHandler({
     config: configResult.config,
-    username: "Gateway User"
+    username: "Gateway User",
+    gatewayBackend
   });
 
   const gateway = new GatewayCore({

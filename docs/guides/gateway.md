@@ -92,6 +92,7 @@ Discord runtime environment variables:
 - `YIPS_DISCORD_BOT_TOKEN` (required): Discord bot token used for gateway and outbound message authorization.
 - `YIPS_GATEWAY_ALLOWED_SENDERS` (optional): comma-delimited sender ID allowlist enforced by `GatewayCore`.
 - `YIPS_GATEWAY_PASSPHRASE` (optional): when set, senders must first send `/auth <passphrase>` before normal messages are processed.
+- `YIPS_GATEWAY_BACKEND` (optional): gateway backend selector. Defaults to `llamacpp`. Currently `llamacpp` is the only supported value; unsupported values fail startup.
 
 Authentication behavior:
 
@@ -116,7 +117,8 @@ The same Conductor used by the TUI, running without terminal display. It receive
 
 Current implementation behavior:
 
-- Backend scope is currently `llamacpp` only in gateway headless mode.
+- Gateway runtime uses `YIPS_GATEWAY_BACKEND` (default `llamacpp`) and fails fast on unsupported values.
+- Headless Conductor backend scope is currently `llamacpp` only.
 - Gateway turns run non-streaming assistant requests and return the final assistant answer for each user message.
 - The full tool/skill/subagent path is enabled, but calls that would require confirmation in TUI (destructive commands or out-of-zone paths/cwd) are auto-denied by gateway safety policy.
 - Session transcripts are persisted with the existing session-store format, but active in-memory runtime history does not auto-resume after process restart.

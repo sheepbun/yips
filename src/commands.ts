@@ -3,6 +3,7 @@
 import { loadCommandCatalog } from "./command-catalog";
 import type { CommandDescriptor, CommandKind } from "./command-catalog";
 import { saveConfig } from "./config";
+import { listMemories, readMemory, saveMemory } from "./memory-store";
 import { listLocalModels, findMatchingModel } from "./model-manager";
 import {
   downloadModelFile,
@@ -253,6 +254,14 @@ export function createDefaultRegistry(): CommandRegistry {
     }
   };
 
+  const memorizeUsage = [
+    "Memory commands:",
+    "  /memorize <fact>              Save a memory",
+    "  /memorize list [limit]        List recent memories (default 10)",
+    "  /memorize read <memory_id>    Read a saved memory",
+    "  /memorize help                Show this help"
+  ].join("\n");
+
   registry.register(
     "help",
     () => ({
@@ -388,6 +397,63 @@ export function createDefaultRegistry(): CommandRegistry {
   registry.register("download", (args) => handleDownload(args), "Open the model downloader");
 
   registry.register("dl", (args) => handleDownload(args), "Alias for /download");
+
+  registry.register(
+    "memorize",
+    async (args) => {
+      const trimmed = args.trim();
+      if (trimmed.length === 0 || trimmed.toLowerCase() === "help") {
+        return { output: memorizeUsage, action: "continue" };
+      }
+
+      const tokens = trimmed.split(/\s+/u);
+      const subcommand = (tokens[0] ?? "").toLowerCase();
+
+      try {
+        if (subcommand === "list") {
+          const limitRaw = tokens[1] ?? "10";
+          const limit = Number.parseInt(limitRaw, 10);
+          if (!Number.isInteger(limit) || limit <= 0) {
+            return { output: "Usage: /memorize list [positive_limit]", action: "continue" };
+          }
+
+          const memories = await listMemories(limit);
+          if (memories.length === 0) {
+            return { output: "No saved memories yet.", action: "continue" };
+          }
+
+          const lines = ["Saved memories:"];
+          for (const memory of memories) {
+            lines.push(`- ${memory.id}: ${memory.preview}`);
+          }
+          return { output: lines.join("\n"), action: "continue" };
+        }
+
+        if (subcommand === "read") {
+          const memoryId = tokens.slice(1).join(" ").trim();
+          if (memoryId.length === 0) {
+            return { output: "Usage: /memorize read <memory_id>", action: "continue" };
+          }
+
+          const memory = await readMemory(memoryId);
+          return {
+            output: [`Memory ${memory.id}:`, memory.content].join("\n\n"),
+            action: "continue"
+          };
+        }
+
+        const saved = await saveMemory(trimmed);
+        return {
+          output: `Saved memory: ${saved.id}`,
+          action: "continue"
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return { output: `Memorize command failed: ${message}`, action: "continue" };
+      }
+    },
+    "Save, list, and read long-term memories"
+  );
 
   registry.register(
     "nick",

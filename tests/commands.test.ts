@@ -10,6 +10,7 @@ import { loadConfig } from "../src/config";
 import { getDefaultConfig } from "../src/config";
 
 const originalConfigPath = process.env["YIPS_CONFIG_PATH"];
+const originalMemoriesDir = process.env["YIPS_MEMORIES_DIR"];
 
 function createContext(): SessionContext {
   return {
@@ -24,6 +25,12 @@ afterEach(() => {
     delete process.env["YIPS_CONFIG_PATH"];
   } else {
     process.env["YIPS_CONFIG_PATH"] = originalConfigPath;
+  }
+
+  if (originalMemoriesDir === undefined) {
+    delete process.env["YIPS_MEMORIES_DIR"];
+  } else {
+    process.env["YIPS_MEMORIES_DIR"] = originalMemoriesDir;
   }
 });
 
@@ -336,6 +343,66 @@ describe("createDefaultRegistry", () => {
     const result = await registry.dispatch("dl", "", createContext());
     expect(result.action).toBe("continue");
     expect(result.uiAction).toEqual({ type: "open-downloader" });
+  });
+
+  it("/memorize saves a memory with free-form text", async () => {
+    const root = await mkdtemp(join(tmpdir(), "yips-command-memorize-save-"));
+    process.env["YIPS_MEMORIES_DIR"] = root;
+
+    try {
+      const registry = createDefaultRegistry();
+      const result = await registry.dispatch(
+        "memorize",
+        "Remember to run lint before push",
+        createContext()
+      );
+      expect(result.action).toBe("continue");
+      expect(result.output).toContain("Saved memory:");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("/memorize list shows saved memories", async () => {
+    const root = await mkdtemp(join(tmpdir(), "yips-command-memorize-list-"));
+    process.env["YIPS_MEMORIES_DIR"] = root;
+
+    try {
+      const registry = createDefaultRegistry();
+      await registry.dispatch("memorize", "First memory item", createContext());
+      const result = await registry.dispatch("memorize", "list 5", createContext());
+      expect(result.action).toBe("continue");
+      expect(result.output).toContain("Saved memories:");
+      expect(result.output).toContain("First memory item");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("/memorize read returns saved memory content", async () => {
+    const root = await mkdtemp(join(tmpdir(), "yips-command-memorize-read-"));
+    process.env["YIPS_MEMORIES_DIR"] = root;
+
+    try {
+      const registry = createDefaultRegistry();
+      const saveResult = await registry.dispatch(
+        "memorize",
+        "Track GPU temp trend daily",
+        createContext()
+      );
+      const idMatch = saveResult.output?.match(/Saved memory:\s+([^\s]+)/u);
+      expect(idMatch).not.toBeNull();
+
+      const result = await registry.dispatch(
+        "memorize",
+        `read ${idMatch?.[1] ?? ""}`,
+        createContext()
+      );
+      expect(result.action).toBe("continue");
+      expect(result.output).toContain("Track GPU temp trend daily");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 
   it("/nick persists nickname to config", async () => {

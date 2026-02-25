@@ -1,0 +1,225 @@
+{
+  "main": {
+    "id": "960edb676ea11041",
+    "type": "split",
+    "children": [
+      {
+        "id": "0bdffe8bc5b23590",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "66a5c6357b1957bd",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "docs/roadmap.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "roadmap"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "bf4304eba6f86925",
+    "type": "split",
+    "children": [
+      {
+        "id": "751fa0aec457964a",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "6e88b14f8818297b",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false
+              },
+              "icon": "lucide-folder-closed",
+              "title": "Files"
+            }
+          },
+          {
+            "id": "1350b33021010408",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "Search"
+            }
+          },
+          {
+            "id": "513e111ab7c83c53",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {},
+              "icon": "lucide-bookmark",
+              "title": "Bookmarks"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300
+  },
+  "right": {
+    "id": "51a8f43fb0133ef1",
+    "type": "split",
+    "children": [
+      {
+        "id": "ec0a7ce56dd1328a",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "84a42ea7357edf8d",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "file": "docs/roadmap.md",
+                "collapseAll": false,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "Backlinks for roadmap"
+            }
+          },
+          {
+            "id": "c797645513f4adf7",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "file": "docs/roadmap.md",
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "Outgoing links from roadmap"
+            }
+          },
+          {
+            "id": "442e47279294ac57",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "Tags"
+            }
+          },
+          {
+            "id": "b45326f5da661411",
+            "type": "leaf",
+            "state": {
+              "type": "all-properties",
+              "state": {
+                "sortOrder": "frequency",
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-archive",
+              "title": "All properties"
+            }
+          },
+          {
+            "id": "d5ea476ebe50f12c",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "file": "docs/roadmap.md",
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "Outline of roadmap"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 300,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "switcher:Open quick switcher": false,
+      "graph:Open graph view": false,
+      "canvas:Create new canvas": false,
+      "daily-notes:Open today's daily note": false,
+      "templates:Insert template": false,
+      "command-palette:Open command palette": false,
+      "bases:Create new base": false
+    }
+  },
+  "active": "6e88b14f8818297b",
+  "lastOpenFiles": [
+    "tests/tui-resize-render.test.ts",
+    "dist/gateway/headless-conductor.js",
+    "tests/gateway/headless-conductor.test.ts",
+    "src/gateway/headless-conductor.ts",
+    "dist/gateway/adapters/formatting.js",
+    "tests/gateway/adapters/formatting.test.ts",
+    "src/gateway/adapters/formatting.ts",
+    "dist/gateway/auth-policy.js",
+    "tests/gateway/auth-policy.test.ts",
+    "src/gateway/auth-policy.ts",
+    "dist/gateway/runtime/discord-main.js",
+    "node_modules/discord.js/README.md",
+    "node_modules/@discordjs/ws/README.md",
+    "node_modules/@discordjs/formatters/README.md",
+    "node_modules/@discordjs/util/README.md",
+    "node_modules/@discordjs/rest/node_modules/@discordjs/collection/README.md",
+    "node_modules/@sapphire/snowflake/README.md",
+    "node_modules/@sapphire/snowflake/CHANGELOG.md",
+    "node_modules/undici/types/README.md",
+    "node_modules/undici/README.md",
+    "node_modules/undici/docs/docs/best-practices/writing-tests.md",
+    "node_modules/undici/docs/docs/best-practices/proxy.md",
+    "node_modules/undici/docs/docs/best-practices/mocking-request.md",
+    "node_modules/undici/docs/docs/best-practices/client-certificate.md",
+    "node_modules/undici/docs/docs/api/api-lifecycle.md",
+    "node_modules/undici/docs/docs/api/WebSocket.md",
+    "node_modules/undici/docs/docs/api/Util.md",
+    "node_modules/undici/docs/docs/api/RetryHandler.md",
+    "node_modules/undici/docs/docs/api/RetryAgent.md",
+    "node_modules/undici/docs/docs/api/RedirectHandler.md",
+    "node_modules/undici/docs/docs/api/ProxyAgent.md",
+    "node_modules/undici/docs/docs/api/PoolStats.md",
+    "node_modules/undici/docs/docs/api/Pool.md",
+    "node_modules/undici/docs/docs/api/MockPool.md",
+    "node_modules/undici/docs/docs/api/MockErrors.md",
+    "node_modules/undici/docs/docs/api/MockClient.md"
+  ]
+}

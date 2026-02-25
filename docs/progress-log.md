@@ -3263,3 +3263,128 @@ Validation:
 Next:
 
 - Optional: run `npm test` for a full-suite confirmation after the launcher/cwd + version behavior changes.
+
+## 2026-02-25 04:35 UTC — Exchange 105
+
+Summary: Implemented Milestone 3 hooks with config-driven lifecycle scripts, session/file hook integration, and soft-fail reporting.
+Changed:
+
+- Added `src/hooks.ts`:
+  - `runHook(...)` for config-driven shell hook execution (`sh -lc <command>`)
+  - JSON payload delivery on stdin with envelope metadata (`hook`, `eventId`, `timestamp`, `cwd`, `sessionName`, `data`)
+  - `YIPS_HOOK_*` env var injection (`NAME`, `EVENT_ID`, `TIMESTAMP`, `CWD`, `SESSION_NAME`, `FILE_PATH`)
+  - timeout handling and non-throwing result statuses (`ok`, `error`, `timeout`, `skipped`)
+  - `formatHookFailure(...)` helper for warning text
+- Extended config/types for hooks:
+  - `src/types.ts`: added `HookName`, `HookConfig`, and `AppConfig.hooks`
+  - `src/config.ts`: added hook defaults and normalization (timeout default `10000`, max `120000`)
+- Integrated hooks in runtime:
+  - `src/tool-executor.ts`: invokes `on-file-write` after successful `write_file`/`edit_file`, appends warning text on hook failures, and stores hook diagnostics in result metadata without failing the tool call
+  - `src/tui.ts`: added session lifecycle hook execution for `on-session-start` and `on-session-end`
+  - added shared shutdown path to run session-end hook once across exit/restart/cancel/unmount flows
+  - added exported `runOnceGuarded(...)` helper used by session hook idempotence
+- Added/updated tests:
+  - new `tests/hooks.test.ts` for stdin/env payloads, skipped behavior, and timeout behavior
+  - expanded `tests/tool-executor.test.ts` for file-write hook success/failure soft-fail behavior
+  - expanded `tests/tui-startup-reset.test.ts` with `runOnceGuarded` coverage
+  - updated `tests/config.test.ts` for hooks normalization
+  - updated `tests/tui-busy-indicator.test.ts` for `AppConfig.hooks` compatibility
+- Updated docs:
+  - `docs/roadmap.md`: marked Milestone 3 `Hooks` complete
+  - `docs/guides/hooks.md`: replaced planned notes with implemented config/payload/failure-contract docs
+  - `docs/changelog.md`: added unreleased hooks implementation notes
+
+Validation:
+
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+- `npm test -- tests/hooks.test.ts tests/tool-executor.test.ts tests/config.test.ts tests/tui-startup-reset.test.ts` — clean
+- `npm test` — clean (36 files, 331 tests)
+
+Next:
+
+- Implement Milestone 3 MCP client (`server registration, tool discovery, context injection`) as the next unchecked roadmap item.
+
+## 2026-02-25 04:41 UTC — Exchange 106
+
+Summary: Updated roadmap and docs to explicitly skip MCP integration by product decision.
+Changed:
+
+- Updated `docs/roadmap.md`:
+  - marked Milestone 3 MCP item as skipped (`~~...~~`) and checked off to prevent future scheduling
+  - added Decision Log entry: `MCP integration` with status `Rejected`
+- Replaced `docs/guides/mcp.md` content with a short status note documenting MCP rejection and rationale/date.
+- Updated `docs/README.md` guide map description for MCP to indicate it is intentionally skipped.
+
+Validation:
+
+- Docs-only change; no code/test commands were required.
+
+Next:
+
+- Continue Milestone 3 work on remaining unchecked item: `Skills: search, fetch, build, todos, virtual terminal`.
+
+## 2026-02-25 11:38 UTC — Exchange 10
+
+Summary: Refactored `src/tui.ts` into a thin facade (<500 lines) and extracted implementation/startup logic into focused `src/tui/` modules while preserving existing `src/tui` exports for compatibility.
+Changed:
+
+- Added `src/tui/app.ts` containing the extracted TUI runtime implementation (previous `createInkApp` and helper surface used by tests).
+- Added `src/tui/startup.ts` containing startup-only concerns:
+  - `applyHardwareAwareStartupModelSelection`
+  - `ensureFreshLlamaSessionOnStartup`
+- Replaced `src/tui.ts` with a small entrypoint/compat layer:
+  - keeps `startTui(...)`
+  - re-exports prior helper APIs from extracted modules so existing imports remain valid.
+- Ensured `src/tui.ts` line count is now 56 (well under 500).
+
+Validation:
+
+- `npm run typecheck` — clean
+- `npm test` — 331 tests pass (36 files)
+- `npm run lint` — clean
+- `npm run build` — clean
+- `wc -l src/tui.ts` — `56`
+
+Next:
+
+- Optionally continue the modularization by splitting `src/tui/app.ts` into narrower feature modules (`layout`, `runtime state`, mode handlers) while keeping behavior parity.
+
+## 2026-02-25 04:50 UTC — Exchange 107
+
+Summary: Completed Milestone 3 skills by adding first-class skill-call execution (search/fetch/build/todos/virtual-terminal) and implementing `/search` + `/fetch` command handlers.
+Changed:
+
+- Added `src/skills.ts`:
+  - `executeSkillCall(...)` runtime for skill names: `search`, `fetch`, `build`, `todos`, `virtual_terminal`.
+  - `executeSearchSkill(...)` using DuckDuckGo HTML endpoint parsing.
+  - `executeFetchSkill(...)` with URL validation and HTML-to-text normalization/truncation.
+  - build/VT command execution via existing `VirtualTerminalSession.runCommand(...)`.
+  - TODO scanning via `rg` with no-match handling.
+- Extended protocol/types/conductor for skill chaining:
+  - `src/types.ts`: added `SkillName`, `SkillCall`, `SkillResult`, and `SkillExecutionStatus`.
+  - `src/tool-protocol.ts`: added `skill_calls` parsing and validation.
+  - `src/conductor.ts`: added `executeSkillCalls` dependency and history injection (`Skill results: ...`) with fallback warning when unavailable.
+- Integrated skill execution into the TUI runtime:
+  - `src/tui/app.ts`: added `executeSkillCalls` callback and passed it into top-level and subagent `runConductorTurn(...)` calls.
+- Implemented user-facing command handlers:
+  - `src/commands.ts`: `/search <query>` and `/fetch <url>` now execute real skill-backed behavior instead of recognized-not-implemented fallback.
+- Added tests:
+  - new `tests/skills.test.ts` for search/fetch behavior and skill execution paths.
+  - expanded `tests/tool-protocol.test.ts` for `skill_calls` parsing.
+  - expanded `tests/conductor.test.ts` for skill-call execution + unavailable-runner fallback.
+  - expanded `tests/commands.test.ts` for `/search` and `/fetch` command behavior.
+- Updated docs:
+  - `docs/roadmap.md`: marked Milestone 3 `Skills: search, fetch, build, todos, virtual terminal` complete.
+  - `docs/changelog.md`: added unreleased notes for skill-call protocol/runtime and command handlers.
+
+Validation:
+
+- `npm run typecheck` — clean
+- `npm test -- tests/tool-protocol.test.ts tests/conductor.test.ts tests/skills.test.ts tests/commands.test.ts` — clean (58 passing)
+- `npm run lint` — clean
+
+Next:
+
+- Add explicit system prompt guidance so llama outputs `skill_calls` for web/build/todo workflows before defaulting to raw `run_command`/`grep` tool calls.
+- Optionally add a bounded summary mode for `/fetch` and `fetch` skill output to reduce oversized page content in long sessions.

@@ -15,6 +15,7 @@ describe("tool-protocol", () => {
     expect(parsed.assistantText).toContain("Working on it.");
     expect(parsed.toolCalls).toHaveLength(1);
     expect(parsed.subagentCalls).toHaveLength(0);
+    expect(parsed.skillCalls).toHaveLength(0);
     expect(parsed.toolCalls[0]?.name).toBe("write_file");
   });
 
@@ -22,6 +23,7 @@ describe("tool-protocol", () => {
     const parsed = parseToolProtocol("```yips-tools\nnot-json\n```");
     expect(parsed.toolCalls).toHaveLength(0);
     expect(parsed.subagentCalls).toHaveLength(0);
+    expect(parsed.skillCalls).toHaveLength(0);
   });
 
   it("ignores unknown tool names", () => {
@@ -29,6 +31,7 @@ describe("tool-protocol", () => {
       '```yips-tools\n{"tool_calls":[{"id":"1","name":"unknown_tool","arguments":{}}]}\n```';
     const parsed = parseToolProtocol(input);
     expect(parsed.toolCalls).toHaveLength(0);
+    expect(parsed.skillCalls).toHaveLength(0);
   });
 
   it("parses valid subagent delegation calls", () => {
@@ -47,6 +50,24 @@ describe("tool-protocol", () => {
       context: "focus on exports",
       allowedTools: ["read_file", "grep"],
       maxRounds: 3
+    });
+    expect(parsed.skillCalls).toHaveLength(0);
+  });
+
+  it("parses valid skill calls", () => {
+    const input = [
+      "Use skills.",
+      "```yips-tools",
+      '{"skill_calls":[{"id":"sk-1","name":"search","arguments":{"query":"llama.cpp latest"}}]}',
+      "```"
+    ].join("\n");
+
+    const parsed = parseToolProtocol(input);
+    expect(parsed.skillCalls).toHaveLength(1);
+    expect(parsed.skillCalls[0]).toEqual({
+      id: "sk-1",
+      name: "search",
+      arguments: { query: "llama.cpp latest" }
     });
   });
 });

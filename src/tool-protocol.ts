@@ -1,4 +1,4 @@
-import type { SubagentCall, ToolCall, ToolName } from "./types";
+import type { SkillCall, SkillName, SubagentCall, ToolCall, ToolName } from "./types";
 
 const TOOL_BLOCK_REGEX = /```yips-tools\s*\n([\s\S]*?)```/u;
 const ALLOWED_TOOLS: ReadonlySet<ToolName> = new Set([
@@ -8,6 +8,13 @@ const ALLOWED_TOOLS: ReadonlySet<ToolName> = new Set([
   "list_dir",
   "grep",
   "run_command"
+]);
+const ALLOWED_SKILLS: ReadonlySet<SkillName> = new Set([
+  "search",
+  "fetch",
+  "build",
+  "todos",
+  "virtual_terminal"
 ]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -55,12 +62,16 @@ function normalizeSubagentCall(value: unknown): SubagentCall | null {
   }
 
   const contextRaw = value["context"];
-  const context = typeof contextRaw === "string" && contextRaw.trim().length > 0 ? contextRaw : undefined;
+  const context =
+    typeof contextRaw === "string" && contextRaw.trim().length > 0 ? contextRaw : undefined;
 
   const allowedToolsRaw = value["allowed_tools"];
   const allowedTools = Array.isArray(allowedToolsRaw)
     ? allowedToolsRaw
-        .filter((item): item is ToolName => typeof item === "string" && ALLOWED_TOOLS.has(item as ToolName))
+        .filter(
+          (item): item is ToolName =>
+            typeof item === "string" && ALLOWED_TOOLS.has(item as ToolName)
+        )
         .map((item) => item as ToolName)
     : undefined;
 
@@ -79,10 +90,36 @@ function normalizeSubagentCall(value: unknown): SubagentCall | null {
   };
 }
 
+function normalizeSkillCall(value: unknown): SkillCall | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const id = value["id"];
+  const name = value["name"];
+  const args = value["arguments"];
+  if (typeof id !== "string" || id.trim().length === 0) {
+    return null;
+  }
+  if (typeof name !== "string" || !ALLOWED_SKILLS.has(name as SkillName)) {
+    return null;
+  }
+  if (!isRecord(args)) {
+    return null;
+  }
+
+  return {
+    id: id.trim(),
+    name: name as SkillName,
+    arguments: args
+  };
+}
+
 export interface ParsedToolProtocol {
   assistantText: string;
   toolCalls: ToolCall[];
   subagentCalls: SubagentCall[];
+  skillCalls: SkillCall[];
 }
 
 export function parseToolProtocol(input: string): ParsedToolProtocol {
@@ -91,7 +128,8 @@ export function parseToolProtocol(input: string): ParsedToolProtocol {
     return {
       assistantText: input,
       toolCalls: [],
-      subagentCalls: []
+      subagentCalls: [],
+      skillCalls: []
     };
   }
 
@@ -100,7 +138,8 @@ export function parseToolProtocol(input: string): ParsedToolProtocol {
     return {
       assistantText: input,
       toolCalls: [],
-      subagentCalls: []
+      subagentCalls: [],
+      skillCalls: []
     };
   }
 
@@ -111,7 +150,8 @@ export function parseToolProtocol(input: string): ParsedToolProtocol {
     return {
       assistantText: input,
       toolCalls: [],
-      subagentCalls: []
+      subagentCalls: [],
+      skillCalls: []
     };
   }
 
@@ -119,7 +159,8 @@ export function parseToolProtocol(input: string): ParsedToolProtocol {
     return {
       assistantText: input,
       toolCalls: [],
-      subagentCalls: []
+      subagentCalls: [],
+      skillCalls: []
     };
   }
 
@@ -134,12 +175,18 @@ export function parseToolProtocol(input: string): ParsedToolProtocol {
         .map((item) => normalizeSubagentCall(item))
         .filter((call): call is SubagentCall => call !== null)
     : [];
+  const normalizedSkills = Array.isArray(parsed["skill_calls"])
+    ? parsed["skill_calls"]
+        .map((item) => normalizeSkillCall(item))
+        .filter((call): call is SkillCall => call !== null)
+    : [];
 
   const assistantText = input.replace(match[0], "").trim();
 
   return {
     assistantText,
     toolCalls: normalizedTools,
-    subagentCalls: normalizedSubagents
+    subagentCalls: normalizedSubagents,
+    skillCalls: normalizedSkills
   };
 }

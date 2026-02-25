@@ -45,9 +45,9 @@ Features that make daily use productive.
 - [x] Hardware detection: GPU/VRAM-aware model selection
 - [x] Session management: save, list, load, rename sessions
 - [x] Memory system: save/read/list conversation memories
-- [ ] Hooks: user-defined scripts at lifecycle points
-- [ ] MCP client: server registration, tool discovery, context injection
-- [ ] Skills: search, fetch, build, todos, virtual terminal
+- [x] Hooks: user-defined scripts at lifecycle points
+- [x] ~~MCP client: server registration, tool discovery, context injection~~ (skipped by product decision)
+- [x] Skills: search, fetch, build, todos, virtual terminal
 - [x] Tab autocompletion for slash commands
 - [x] Configuration file support (format TBD)
 
@@ -75,17 +75,18 @@ Packaging and installation.
 
 ## Decision Log
 
-| Decision        | Status  | Choice                     | Alternatives Considered | Notes                                                                             |
-| --------------- | ------- | -------------------------- | ----------------------- | --------------------------------------------------------------------------------- |
-| Language        | Decided | TypeScript (strict mode)   | Rust, Go, Python        | Type safety + ecosystem; Rust considered too slow for iteration                   |
-| Runtime         | Decided | Node.js                    | Deno, Bun               | Broadest ecosystem support; Bun may be revisited                                  |
-| LLM backend     | Decided | llama.cpp (primary)        | Ollama                  | Direct control over model lifecycle; OpenAI-compatible API                        |
-| TUI framework   | Decided | Ink                        | terminal-kit, blessed   | React component model, portable input handling, and maintainable render lifecycle |
-| Config format   | Decided | JSON (`.yips_config.json`) | TOML, YAML              | Chosen for zero dependencies during bootstrap; comments may be revisited later    |
-| Distribution    | Open    | —                          | npm, binary, Homebrew   | See [Tech Stack](./stack.md) for evaluation criteria                              |
-| Package manager | Decided | npm                        | pnpm, bun               | Pragmatic default for bootstrapping                                               |
-| Formatter       | Decided | Prettier                   | Biome                   | Widest editor/tooling compatibility                                               |
-| Test framework  | Decided | Vitest                     | Jest, node:test         | Fast TypeScript test loop and simple setup                                        |
+| Decision        | Status   | Choice                     | Alternatives Considered | Notes                                                                             |
+| --------------- | -------- | -------------------------- | ----------------------- | --------------------------------------------------------------------------------- |
+| Language        | Decided  | TypeScript (strict mode)   | Rust, Go, Python        | Type safety + ecosystem; Rust considered too slow for iteration                   |
+| Runtime         | Decided  | Node.js                    | Deno, Bun               | Broadest ecosystem support; Bun may be revisited                                  |
+| LLM backend     | Decided  | llama.cpp (primary)        | Ollama                  | Direct control over model lifecycle; OpenAI-compatible API                        |
+| TUI framework   | Decided  | Ink                        | terminal-kit, blessed   | React component model, portable input handling, and maintainable render lifecycle |
+| Config format   | Decided  | JSON (`.yips_config.json`) | TOML, YAML              | Chosen for zero dependencies during bootstrap; comments may be revisited later    |
+| MCP integration | Rejected | Not pursuing MCP client    | MCP client architecture | Explicitly removed from roadmap by product direction (2026-02-25)                 |
+| Distribution    | Open     | —                          | npm, binary, Homebrew   | See [Tech Stack](./stack.md) for evaluation criteria                              |
+| Package manager | Decided  | npm                        | pnpm, bun               | Pragmatic default for bootstrapping                                               |
+| Formatter       | Decided  | Prettier                   | Biome                   | Widest editor/tooling compatibility                                               |
+| Test framework  | Decided  | Vitest                     | Jest, node:test         | Fast TypeScript test loop and simple setup                                        |
 
 ---
 

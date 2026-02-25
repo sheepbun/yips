@@ -1,5 +1,13 @@
 import { parseToolProtocol } from "./tool-protocol";
-import type { ChatMessage, SubagentCall, SubagentResult, ToolCall, ToolResult } from "./types";
+import type {
+  ChatMessage,
+  SkillCall,
+  SkillResult,
+  SubagentCall,
+  SubagentResult,
+  ToolCall,
+  ToolResult
+} from "./types";
 
 export interface ConductorAssistantReply {
   text: string;
@@ -13,6 +21,7 @@ export interface ConductorDependencies {
   history: ChatMessage[];
   requestAssistant: () => Promise<ConductorAssistantReply>;
   executeToolCalls: (toolCalls: readonly ToolCall[]) => Promise<ToolResult[]>;
+  executeSkillCalls?: (skillCalls: readonly SkillCall[]) => Promise<SkillResult[]>;
   executeSubagentCalls?: (subagentCalls: readonly SubagentCall[]) => Promise<SubagentResult[]>;
   onAssistantText: (assistantText: string, rendered: boolean) => void;
   onWarning: (message: string) => void;
@@ -75,7 +84,11 @@ export async function runConductorTurn(
         ? reply.totalTokens
         : dependencies.estimateHistoryTokens(dependencies.history);
 
-    if (parsed.toolCalls.length === 0 && parsed.subagentCalls.length === 0) {
+    if (
+      parsed.toolCalls.length === 0 &&
+      parsed.subagentCalls.length === 0 &&
+      parsed.skillCalls.length === 0
+    ) {
       finished = true;
       break;
     }
@@ -104,9 +117,33 @@ export async function runConductorTurn(
       }
     }
 
+    if (parsed.skillCalls.length > 0) {
+      if (!dependencies.executeSkillCalls) {
+        dependencies.onWarning("Skill invocation requested, but no skill runner is configured.");
+        const fallbackResults: SkillResult[] = parsed.skillCalls.map((call) => ({
+          callId: call.id,
+          skill: call.name,
+          status: "error",
+          output: "Skill invocation is unavailable in this runtime."
+        }));
+        dependencies.history.push({
+          role: "system",
+          content: `Skill results: ${JSON.stringify(fallbackResults)}`
+        });
+      } else {
+        const skillResults = await dependencies.executeSkillCalls(parsed.skillCalls);
+        dependencies.history.push({
+          role: "system",
+          content: `Skill results: ${JSON.stringify(skillResults)}`
+        });
+      }
+    }
+
     if (parsed.subagentCalls.length > 0) {
       if (!dependencies.executeSubagentCalls) {
-        dependencies.onWarning("Subagent delegation requested, but no subagent runner is configured.");
+        dependencies.onWarning(
+          "Subagent delegation requested, but no subagent runner is configured."
+        );
         const fallbackResults: SubagentResult[] = parsed.subagentCalls.map((call) => ({
           callId: call.id,
           status: "error",

@@ -23,6 +23,7 @@ import type { ChatResult } from "./llama-client";
 import {
   ensureLlamaReady,
   formatLlamaStartupFailure,
+  isLocalLlamaEndpoint,
   resetLlamaForFreshSession,
   stopLlamaServer
 } from "./llama-server";
@@ -129,6 +130,7 @@ interface AssistantReply {
 
 interface RuntimeState {
   outputLines: string[];
+  outputScrollOffset: number;
   running: boolean;
   config: AppConfig;
   messageCount: number;
@@ -195,6 +197,20 @@ function resolveLoadedModel(model: string): string | null {
     return null;
   }
   return trimmed;
+}
+
+export function resolveModelLoadTarget(config: AppConfig): "GPU" | "CPU" {
+  return config.llamaGpuLayers > 0 ? "GPU" : "CPU";
+}
+
+export function formatModelLoadingLabel(
+  config: AppConfig,
+  nicknames: Record<string, string>
+): string {
+  const loadedModel = resolveLoadedModel(config.model);
+  const modelLabel = loadedModel ? getFriendlyModelName(loadedModel, nicknames) : "model";
+  const target = resolveModelLoadTarget(config);
+  return `Loading ${modelLabel} into ${target}...`;
 }
 
 function charLength(text: string): number {
@@ -377,7 +393,11 @@ export function buildPromptStatusText(state: RuntimeState): string {
       parts.push(formatTokensPerSecond(state.latestOutputTokensPerSecond));
     }
   }
-  return parts.join(" · ");
+  const status = parts.join(" · ");
+  if (state.outputScrollOffset > 0) {
+    return `${status} · scroll +${state.outputScrollOffset}`;
+  }
+  return status;
 }
 
 export function composeOutputLines(options: {
@@ -392,11 +412,89 @@ export function composeOutputLines(options: {
   return lines;
 }
 
+function shiftOutputScrollOffset(state: RuntimeState, delta: number): void {
+  const maxOffset = Math.max(0, state.outputLines.length - 1);
+  const next = state.outputScrollOffset + delta;
+  state.outputScrollOffset = Math.max(0, Math.min(maxOffset, next));
+}
+
 function appendOutput(state: RuntimeState, text: string): void {
   const lines = text.split("\n");
   for (const line of lines) {
     state.outputLines.push(line);
   }
+  state.outputScrollOffset = 0;
+}
+
+function stripAnsi(text: string): string {
+  return text.replace(/\u001b\[[0-9;]*m/g, "");
+}
+
+function isVisuallyEmptyLine(line: string): boolean {
+  return stripAnsi(line).trim().length === 0;
+}
+
+const TITLE_OUTPUT_GAP_ROWS = 1;
+
+function visibleCharLength(line: string): number {
+  return Array.from(stripAnsi(line)).length;
+}
+
+function inferRenderWidth(titleLines: readonly string[], promptLines: readonly string[]): number {
+  const candidates = [...titleLines, ...promptLines]
+    .map((line) => visibleCharLength(line))
+    .filter((length) => length > 0);
+  if (candidates.length === 0) {
+    return 80;
+  }
+  return Math.max(1, ...candidates);
+}
+
+function lineDisplayRows(line: string, width: number): number {
+  const safeWidth = Math.max(1, width);
+  const length = visibleCharLength(line);
+  if (length <= 0) {
+    return 1;
+  }
+  return Math.max(1, Math.ceil(length / safeWidth));
+}
+
+function countDisplayRows(lines: readonly string[], width: number): number {
+  return lines.reduce((total, line) => total + lineDisplayRows(line, width), 0);
+}
+
+function dropLeadingByDisplayRows(lines: readonly string[], rowsToDrop: number, width: number): string[] {
+  if (rowsToDrop <= 0 || lines.length === 0) {
+    return [...lines];
+  }
+  let index = 0;
+  let remaining = rowsToDrop;
+  while (index < lines.length && remaining > 0) {
+    remaining -= lineDisplayRows(lines[index] ?? "", width);
+    index += 1;
+  }
+  return lines.slice(index);
+}
+
+function pruneModelSwitchStatusArtifacts(state: RuntimeState): void {
+  const keep: string[] = [];
+  for (const line of state.outputLines) {
+    const plain = stripAnsi(line).trim();
+    const isArtifact =
+      plain.startsWith("Model set to: ") ||
+      plain === "Model preload complete." ||
+      /^Loading .+ into (GPU|CPU)\.\.\.$/.test(plain);
+    if (!isArtifact) {
+      keep.push(line);
+    }
+  }
+
+  while (keep.length > 0 && keep[keep.length - 1]?.trim().length === 0) {
+    keep.pop();
+  }
+
+  state.outputLines = keep;
+  state.outputScrollOffset = 0;
 }
 
 function replaceOutputBlock(
@@ -407,11 +505,13 @@ function replaceOutputBlock(
 ): number {
   const lines = text.split("\n");
   state.outputLines.splice(start, count, ...lines);
+  state.outputScrollOffset = 0;
   return lines.length;
 }
 
 function resetSession(state: RuntimeState): void {
   state.outputLines = [];
+  state.outputScrollOffset = 0;
   state.messageCount = 0;
   state.history = [];
   state.sessionFilePath = null;
@@ -424,11 +524,13 @@ function resetSession(state: RuntimeState): void {
 
 function replayOutputFromHistory(state: RuntimeState): void {
   state.outputLines = [];
+  state.outputScrollOffset = 0;
   let userCount = 0;
   for (const entry of state.history) {
     if (entry.role === "user") {
       userCount += 1;
       appendOutput(state, formatUserMessage(entry.content));
+      appendOutput(state, "");
       continue;
     }
     if (entry.role === "assistant") {
@@ -450,6 +552,7 @@ function createRuntimeState(options: TuiOptions): RuntimeState {
 
   return {
     outputLines: [],
+    outputScrollOffset: 0,
     running: true,
     config: runtimeConfig,
     messageCount: 0,
@@ -573,12 +676,14 @@ export function computeVisibleLayoutSlices(
   rows: number,
   titleLines: string[],
   outputLines: string[],
-  promptLines: string[]
+  promptLines: string[],
+  outputScrollOffset = 0
 ): VisibleLayoutSlices {
   const safeRows = Math.max(1, rows);
   const promptCount = Math.min(promptLines.length, safeRows);
   const visiblePrompt = promptLines.slice(-promptCount);
   const upperRowCount = Math.max(0, safeRows - visiblePrompt.length);
+  const renderWidth = inferRenderWidth(titleLines, visiblePrompt);
 
   if (upperRowCount === 0) {
     return {
@@ -592,8 +697,25 @@ export function computeVisibleLayoutSlices(
   // Once that gap is exhausted, additional output lines start pushing the title up.
   const baseHiddenTitle = Math.max(0, titleLines.length - upperRowCount);
   const initiallyVisibleTitleCount = titleLines.length - baseHiddenTitle;
-  const initialGap = Math.max(0, upperRowCount - initiallyVisibleTitleCount);
-  const outputCount = outputLines.length;
+  const reservedTitleGap = initiallyVisibleTitleCount > 0 ? TITLE_OUTPUT_GAP_ROWS : 0;
+  const initialGap = Math.max(0, upperRowCount - initiallyVisibleTitleCount - reservedTitleGap);
+  const clampedOffset = Math.max(0, Math.min(outputScrollOffset, outputLines.length));
+  const visibleRangeEnd = Math.max(0, outputLines.length - clampedOffset);
+  const scrollWindow = outputLines.slice(0, visibleRangeEnd);
+  const firstContentIndex = scrollWindow.findIndex((line) => !isVisuallyEmptyLine(line));
+  const contentWindow = firstContentIndex === -1 ? [] : scrollWindow.slice(firstContentIndex);
+  let lastContentIndex = -1;
+  for (let index = contentWindow.length - 1; index >= 0; index -= 1) {
+    if (!isVisuallyEmptyLine(contentWindow[index] ?? "")) {
+      lastContentIndex = index;
+      break;
+    }
+  }
+  const pressureWindow =
+    lastContentIndex === -1 ? [] : contentWindow.slice(0, lastContentIndex + 1);
+  const trailingSpacerRows =
+    lastContentIndex === -1 ? [] : contentWindow.slice(lastContentIndex + 1);
+  const outputCount = countDisplayRows(pressureWindow, renderWidth);
 
   const outputConsumedByGap = Math.min(outputCount, initialGap);
   const outputAfterGap = outputCount - outputConsumedByGap;
@@ -602,15 +724,38 @@ export function computeVisibleLayoutSlices(
   const totalHiddenTitle = baseHiddenTitle + outputConsumedByTitle;
   const visibleTitle = titleLines.slice(totalHiddenTitle);
 
-  const hiddenOutput = Math.max(0, outputAfterGap - initiallyVisibleTitleCount);
-  const visibleOutput = outputLines.slice(hiddenOutput);
+  const hiddenOutputRows = Math.max(0, outputAfterGap - initiallyVisibleTitleCount);
+  const visibleCoreOutput = dropLeadingByDisplayRows(pressureWindow, hiddenOutputRows, renderWidth);
 
   const outputRowsAvailable = Math.max(0, upperRowCount - visibleTitle.length);
-  if (visibleOutput.length < outputRowsAvailable) {
-    const outputPadding = new Array<string>(outputRowsAvailable - visibleOutput.length).fill("");
+  const visibleOutput = [...visibleCoreOutput];
+  let usedOutputRows = countDisplayRows(visibleOutput, renderWidth);
+  for (const spacerRow of trailingSpacerRows) {
+    const nextRows = usedOutputRows + lineDisplayRows(spacerRow, renderWidth);
+    if (nextRows > outputRowsAvailable) {
+      break;
+    }
+    visibleOutput.push(spacerRow);
+    usedOutputRows = nextRows;
+  }
+
+  if (usedOutputRows < outputRowsAvailable) {
+    const outputPadding = new Array<string>(outputRowsAvailable - usedOutputRows).fill("");
     return {
       titleLines: visibleTitle,
       outputLines: [...outputPadding, ...visibleOutput],
+      promptLines: visiblePrompt
+    };
+  }
+
+  if (usedOutputRows > outputRowsAvailable) {
+    return {
+      titleLines: visibleTitle,
+      outputLines: dropLeadingByDisplayRows(
+        visibleOutput,
+        usedOutputRows - outputRowsAvailable,
+        renderWidth
+      ),
       promptLines: visiblePrompt
     };
   }
@@ -749,6 +894,8 @@ function formatInputAction(action: InputAction): string {
       return `insert(${JSON.stringify(action.text)})`;
     case "submit":
     case "newline":
+    case "scroll-page-up":
+    case "scroll-page-down":
     case "backspace":
     case "delete":
     case "move-left":
@@ -797,6 +944,9 @@ function applyInputAction(
       return null;
     case "newline":
       return composer.handleKey("CTRL_ENTER");
+    case "scroll-page-up":
+    case "scroll-page-down":
+      return null;
     case "submit":
       return composer.handleKey("ENTER");
     case "backspace":
@@ -1367,6 +1517,41 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
       [forceRender, startBusyIndicator, stopBusyIndicator]
     );
 
+    const preloadConfiguredModel = useCallback(async (forceReloadLocal = false): Promise<void> => {
+      const currentState = stateRef.current;
+      if (!currentState) {
+        return;
+      }
+      if (currentState.config.backend !== "llamacpp") {
+        return;
+      }
+      if (!resolveLoadedModel(currentState.config.model)) {
+        return;
+      }
+
+      startBusyIndicator(formatModelLoadingLabel(currentState.config, currentState.config.nicknames));
+      try {
+        if (forceReloadLocal && isLocalLlamaEndpoint(currentState.config)) {
+          const resetResult = await resetLlamaForFreshSession(currentState.config);
+          if (resetResult.failure) {
+            throw new Error(formatLlamaStartupFailure(resetResult.failure, currentState.config));
+          }
+          return;
+        }
+
+        const readyResult = await ensureLlamaReady(currentState.config);
+        if (!readyResult.ready) {
+          throw new Error(
+            readyResult.failure
+              ? formatLlamaStartupFailure(readyResult.failure, currentState.config)
+              : "llama.cpp is unavailable."
+          );
+        }
+      } finally {
+        stopBusyIndicator();
+      }
+    }, [startBusyIndicator, stopBusyIndicator]);
+
     const assessToolCallRisk = useCallback((call: ToolCall, workingZone: string): ToolRisk => {
       if (call.name === "run_command") {
         const command =
@@ -1838,6 +2023,7 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
 
         currentState.messageCount += 1;
         appendOutput(currentState, formatUserMessage(text));
+        appendOutput(currentState, "");
         currentState.history.push({ role: "user", content: text });
         currentState.usedTokensExact = estimateConversationTokens(currentState.history);
         forceRender();
@@ -1866,12 +2052,14 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
 
           while (!finished && rounds < maxRounds) {
             rounds += 1;
-            const reply = await requestAssistantFromLlama(false);
+            const reply = await requestAssistantFromLlama();
             const parsed = parseToolProtocol(reply.text);
             const assistantText = parsed.assistantText.trim();
 
             if (assistantText.length > 0) {
-              appendOutput(currentState, formatAssistantMessage(assistantText));
+              if (!reply.rendered) {
+                appendOutput(currentState, formatAssistantMessage(assistantText));
+              }
               appendOutput(currentState, "");
               currentState.history.push({ role: "assistant", content: assistantText });
             }
@@ -1948,9 +2136,25 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
             void refreshModelAutocomplete();
           }
 
-          if (result.output) {
+          const suppressModelSetOutput =
+            parsed.command === "model" && parsed.args.trim().length > 0;
+
+          if (result.output && !suppressModelSetOutput) {
             appendOutput(currentState, formatDimMessage(result.output));
             appendOutput(currentState, "");
+          }
+
+          if (parsed.command === "model" && parsed.args.trim().length > 0) {
+            try {
+              pruneModelSwitchStatusArtifacts(currentState);
+              await preloadConfiguredModel(true);
+            } catch (error) {
+              appendOutput(
+                currentState,
+                formatErrorMessage(`Model preload failed: ${formatError(error)}`)
+              );
+              appendOutput(currentState, "");
+            }
           }
 
           if (result.action === "clear") {
@@ -2038,7 +2242,8 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
         refreshModelManagerModels,
         scheduleDownloaderSearch,
         getVtSession,
-        onRestartRequested
+        onRestartRequested,
+        preloadConfiguredModel
       ]
     );
 
@@ -2312,15 +2517,12 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
               if (!selected) {
                 continue;
               }
-
-              currentState.modelManager = setModelManagerLoading(
-                currentState.modelManager,
-                "Saving selected model..."
-              );
+              currentState.uiMode = "chat";
+              composerRef.current = createComposer();
               forceRender();
               void (async () => {
                 const state = stateRef.current;
-                if (!state || !state.modelManager) {
+                if (!state) {
                   return;
                 }
 
@@ -2329,15 +2531,11 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
 
                 try {
                   await saveConfig(state.config);
-                  appendOutput(state, formatDimMessage(`Model set to: ${selected.id}`));
-                  appendOutput(state, "");
-                  state.uiMode = "chat";
-                  composerRef.current = createComposer();
+                  pruneModelSwitchStatusArtifacts(state);
+                  await preloadConfiguredModel(true);
                 } catch (error) {
-                  state.modelManager = setModelManagerError(
-                    state.modelManager,
-                    `Failed to save model selection: ${formatError(error)}`
-                  );
+                  appendOutput(state, formatErrorMessage(`Model preload failed: ${formatError(error)}`));
+                  appendOutput(state, "");
                 }
                 forceRender();
               })();
@@ -2525,6 +2723,20 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
             return;
           }
 
+          if (action.type === "scroll-page-up") {
+            const pageSize = Math.max(1, dimensionsRef.current.rows - 6);
+            shiftOutputScrollOffset(currentState, pageSize);
+            shouldRender = true;
+            continue;
+          }
+
+          if (action.type === "scroll-page-down") {
+            const pageSize = Math.max(1, dimensionsRef.current.rows - 6);
+            shiftOutputScrollOffset(currentState, -pageSize);
+            shouldRender = true;
+            continue;
+          }
+
           if (currentState.busy) {
             continue;
           }
@@ -2686,7 +2898,8 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
       dimensions.rows,
       titleLines,
       outputLines,
-      promptLines
+      promptLines,
+      state.outputScrollOffset
     );
 
     titleNodes = visible.titleLines.map((line, index) =>

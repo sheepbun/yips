@@ -362,7 +362,8 @@ export function createDefaultRegistry(): CommandRegistry {
 
       const guidance = [
         "Update options:",
-        "  npm global: npm install -g yips@latest",
+        "  npm global (canonical): npm install -g @sheepbun/yips@latest",
+        "  npm global (legacy/unscoped): npm install -g yips@latest (may be unavailable)",
         "  local source: git pull --ff-only && ./install.sh",
         "  docs: https://yips.dev"
       ];

@@ -53,7 +53,7 @@ How users install and update Yips.
 
 **Primary channel (current decision)**:
 
-- **npm package** for distribution and versioning.
+- **Scoped npm package** `@sheepbun/yips` for distribution and versioning.
 - **`install.sh`** for local-first setup (llama.cpp build/wiring + launcher flow).
 - **Guided update UX** via `/update` (checks npm latest and prints explicit upgrade commands).
 - **`yips.dev`** is the docs/download hub, not the authoritative package registry.

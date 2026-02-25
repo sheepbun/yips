@@ -3,6 +3,19 @@ import { describe, expect, it, vi } from "vitest";
 import { checkForUpdates } from "#app/update-check";
 
 describe("checkForUpdates", () => {
+  it("uses local package.json name by default", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ version: "0.1.1" }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    );
+
+    const result = await checkForUpdates("0.1.1", { fetchImpl });
+    expect(result.status).toBe("up-to-date");
+    expect(fetchImpl).toHaveBeenCalledWith("https://registry.npmjs.org/%40sheepbun%2Fyips/latest");
+  });
+
   it("returns update-available when registry version is newer", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ version: "0.2.0" }), {

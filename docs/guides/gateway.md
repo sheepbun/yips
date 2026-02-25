@@ -85,6 +85,7 @@ Current implementation status in TypeScript:
 - `src/gateway/adapters/formatting.ts`: shared outbound text normalization (line endings, markdown stripping, mention sanitization, chunking).
 - `src/gateway/runtime/discord-bot.ts`: discord.js event loop that routes messages through `GatewayCore` and emits outbound requests.
 - `src/gateway/runtime/discord-main.ts`: executable Discord runtime entrypoint (`npm run gateway:discord`).
+- `src/gateway/headless-conductor.ts`: headless Conductor runtime that executes llama.cpp-backed turns, tool/skill/subagent chains, and session transcript persistence for gateway sessions.
 
 Discord runtime environment variables:
 
@@ -112,6 +113,13 @@ Outbound formatting behavior:
 ### Headless Conductor
 
 The same Conductor used by the TUI, running without terminal display. It receives messages from the Gateway Core, processes them through the agent system (context loading, LLM call, tool execution, response chaining), and returns the final response.
+
+Current implementation behavior:
+
+- Backend scope is currently `llamacpp` only in gateway headless mode.
+- Gateway turns run non-streaming assistant requests and return the final assistant answer for each user message.
+- The full tool/skill/subagent path is enabled, but calls that would require confirmation in TUI (destructive commands or out-of-zone paths/cwd) are auto-denied by gateway safety policy.
+- Session transcripts are persisted with the existing session-store format, but active in-memory runtime history does not auto-resume after process restart.
 
 ## Self-Hosting Requirements
 

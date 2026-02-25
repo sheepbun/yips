@@ -30,6 +30,7 @@ src/
     config.ts
     hooks.ts
   gateway/
+    headless-conductor.ts
     auth-policy.ts
     adapters/
       discord.ts

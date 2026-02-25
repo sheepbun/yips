@@ -109,6 +109,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
   - Discord, Telegram, and WhatsApp adapters now normalize outbound text with conservative mention-safe plain-text policy
   - Telegram and WhatsApp adapters now support outbound multi-request chunking parity with per-platform caps
   - added coverage in `tests/gateway/adapters/formatting.test.ts` and expanded gateway adapter tests for chunking/sanitization
+- Milestone 4 headless Conductor mode:
+  - added `src/gateway/headless-conductor.ts` to run Conductor turns without TUI for gateway sessions
+  - wired `src/gateway/runtime/discord-main.ts` to use the headless handler instead of echo responses
+  - gateway headless runtime uses llama.cpp-only assistant turns, final-answer response output, and auto-deny safety behavior for risky tool calls
+  - gateway sessions now persist transcript snapshots via existing session-store APIs
+  - added coverage in `tests/gateway/headless-conductor.test.ts`
 
 ### Changed
 

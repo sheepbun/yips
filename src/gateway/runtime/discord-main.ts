@@ -1,5 +1,7 @@
 import { GatewayCore } from "#gateway/core";
 import { createDiscordGatewayRuntime } from "#gateway/runtime/discord-bot";
+import { loadConfig } from "#config/config";
+import { createGatewayHeadlessMessageHandler } from "#gateway/headless-conductor";
 
 function readRequiredEnv(name: string): string {
   const value = process.env[name]?.trim();
@@ -29,13 +31,21 @@ async function main(): Promise<void> {
   const botToken = readRequiredEnv("YIPS_DISCORD_BOT_TOKEN");
   const allowedSenderIds = readAllowedSenders();
   const passphrase = readOptionalEnv("YIPS_GATEWAY_PASSPHRASE");
+  const configResult = await loadConfig();
+
+  if (configResult.warning) {
+    console.error(`[warning] ${configResult.warning}`);
+  }
+
+  const headless = await createGatewayHeadlessMessageHandler({
+    config: configResult.config,
+    username: "Gateway User"
+  });
 
   const gateway = new GatewayCore({
     allowedSenderIds: allowedSenderIds.length > 0 ? allowedSenderIds : undefined,
     passphrase,
-    handleMessage: async (context) => ({
-      text: context.message.text
-    })
+    handleMessage: headless.handleMessage
   });
 
   const runtime = createDiscordGatewayRuntime({
@@ -46,6 +56,7 @@ async function main(): Promise<void> {
   await runtime.start();
   const shutdown = async () => {
     await runtime.stop();
+    headless.dispose();
     process.exit(0);
   };
 

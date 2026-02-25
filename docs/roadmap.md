@@ -61,7 +61,7 @@ Self-hosted messaging platform bridge.
 - [x] Discord adapter (Bot SDK)
 - [x] Authentication and access control
 - [x] Platform-specific message formatting
-- [ ] Headless Conductor mode (no TUI, API-driven)
+- [x] Headless Conductor mode (no TUI, API-driven)
 
 ## Milestone 5: Distribution _(planned)_
 

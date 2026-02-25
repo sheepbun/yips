@@ -94,3 +94,16 @@ export interface SubagentResult {
   output: string;
   metadata?: Record<string, unknown>;
 }
+
+export type HookEvent =
+  | "on-session-start"
+  | "on-session-end"
+  | "on-file-write"
+  | "on-file-read"
+  | "pre-commit";
+
+export interface HookRunResult {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+}

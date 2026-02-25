@@ -70,6 +70,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
   - added `src/memory-store.ts` with save/list/read APIs for markdown memories under `~/.yips/memories`
   - implemented `/memorize` command (`/memorize <fact>`, `/memorize list [limit]`, `/memorize read <id>`)
   - added tests in `tests/memory-store.test.ts` and expanded `/memorize` command coverage in `tests/commands.test.ts`
+- Hooks system (Milestone 3):
+  - added `src/hook-runner.ts` with `findHookScript`, `runHook`, and `listHooks` APIs
+  - hooks are directory-based: executable scripts in `~/.yips/hooks/` named after lifecycle events (e.g., `on-file-write.sh`)
+  - override directory via `YIPS_HOOKS_DIR` environment variable
+  - supported lifecycle events: `on-session-start`, `on-session-end`, `on-file-write`, `on-file-read`, `pre-commit`
+  - `on-file-write` fires after agent `write_file` and `edit_file` tool calls with the file path as `$1`
+  - `on-file-read` fires after agent `read_file` tool calls with the file path as `$1`
+  - `on-session-start` and `on-session-end` fire in `startTui` around the ink session lifecycle
+  - non-zero hook exit code appends stderr to the tool result output so the agent can react
+  - added `/hooks` command to list registered hook scripts
+  - added tests in `tests/hook-runner.test.ts` and expanded hook coverage in `tests/tool-executor.test.ts`
+  - updated `docs/guides/hooks.md` with full configuration and interface documentation
 
 ### Changed
 

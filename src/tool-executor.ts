@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-import type { ToolCall, ToolResult } from "./types";
+import type { HookEvent, HookRunResult, ToolCall, ToolResult } from "./types";
 import { resolveToolPath } from "./tool-safety";
 import type { VirtualTerminalSession } from "./vt-session";
 
@@ -89,6 +89,7 @@ function buildDiffPreview(before: string, after: string, maxBodyLines = 80): str
 export interface ToolExecutorContext {
   workingDirectory: string;
   vtSession: VirtualTerminalSession;
+  runHook?: (event: HookEvent, args: string[]) => Promise<HookRunResult | null>;
 }
 
 async function executeReadFile(call: ToolCall, context: ToolExecutorContext): Promise<ToolResult> {
@@ -109,11 +110,16 @@ async function executeReadFile(call: ToolCall, context: ToolExecutorContext): Pr
     const content = await readFile(absolutePath, "utf8");
     const clipped = content.slice(0, maxBytes);
     const truncated = clipped.length < content.length;
+    let output = truncated ? `${clipped}\n\n[truncated at ${maxBytes} bytes]` : clipped;
+    const hookResult = await context.runHook?.("on-file-read", [absolutePath]);
+    if (hookResult && hookResult.exitCode !== 0) {
+      output += `\nHook (on-file-read) exited ${hookResult.exitCode}: ${hookResult.stderr.trim()}`;
+    }
     return {
       callId: call.id,
       tool: call.name,
       status: "ok",
-      output: truncated ? `${clipped}\n\n[truncated at ${maxBytes} bytes]` : clipped,
+      output,
       metadata: { path: absolutePath, maxBytes, truncated }
     };
   } catch (error) {
@@ -161,11 +167,16 @@ async function executeWriteFile(call: ToolCall, context: ToolExecutorContext): P
     await mkdir(parentDir, { recursive: true });
     await writeFile(absolutePath, content, "utf8");
     const diffPreview = buildDiffPreview(before, content);
+    let output = `Wrote ${absolutePath}\n${diffPreview}`;
+    const hookResult = await context.runHook?.("on-file-write", [absolutePath]);
+    if (hookResult && hookResult.exitCode !== 0) {
+      output += `\nHook (on-file-write) exited ${hookResult.exitCode}: ${hookResult.stderr.trim()}`;
+    }
     return {
       callId: call.id,
       tool: call.name,
       status: "ok",
-      output: `Wrote ${absolutePath}\n${diffPreview}`,
+      output,
       metadata: {
         path: absolutePath,
         bytes: content.length,
@@ -234,11 +245,16 @@ async function executeEditFile(call: ToolCall, context: ToolExecutorContext): Pr
   try {
     await writeFile(absolutePath, after, "utf8");
     const diffPreview = buildDiffPreview(before, after);
+    let output = `Edited ${absolutePath}\n${diffPreview}`;
+    const hookResult = await context.runHook?.("on-file-write", [absolutePath]);
+    if (hookResult && hookResult.exitCode !== 0) {
+      output += `\nHook (on-file-write) exited ${hookResult.exitCode}: ${hookResult.stderr.trim()}`;
+    }
     return {
       callId: call.id,
       tool: call.name,
       status: "ok",
-      output: `Edited ${absolutePath}\n${diffPreview}`,
+      output,
       metadata: {
         path: absolutePath,
         replaceAll,

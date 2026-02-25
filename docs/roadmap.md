@@ -45,7 +45,7 @@ Features that make daily use productive.
 - [x] Hardware detection: GPU/VRAM-aware model selection
 - [x] Session management: save, list, load, rename sessions
 - [x] Memory system: save/read/list conversation memories
-- [ ] Hooks: user-defined scripts at lifecycle points
+- [x] Hooks: user-defined scripts at lifecycle points
 - [ ] MCP client: server registration, tool discovery, context injection
 - [ ] Skills: search, fetch, build, todos, virtual terminal
 - [x] Tab autocompletion for slash commands

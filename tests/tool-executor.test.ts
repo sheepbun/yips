@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { executeToolCall } from "../src/tool-executor";
-import type { ToolCall } from "../src/types";
+import type { HookEvent, HookRunResult, ToolCall } from "../src/types";
 import type { VirtualTerminalSession } from "../src/vt-session";
 
 async function makeTempDir(): Promise<string> {
@@ -116,5 +116,98 @@ describe("tool-executor", () => {
     expect(runCommand).toHaveBeenCalledOnce();
     expect(result.status).toBe("ok");
     expect(result.output).toBe("ok");
+  });
+
+  it("invokes on-file-write hook after write_file succeeds", async () => {
+    const dir = await makeTempDir();
+    const runHook = vi.fn<(event: HookEvent, args: string[]) => Promise<HookRunResult | null>>()
+      .mockResolvedValue({ exitCode: 0, stdout: "", stderr: "" });
+
+    const call: ToolCall = {
+      id: "5",
+      name: "write_file",
+      arguments: { path: "hook-test.txt", content: "data" }
+    };
+
+    const result = await executeToolCall(call, {
+      workingDirectory: dir,
+      vtSession: {} as VirtualTerminalSession,
+      runHook
+    });
+
+    expect(result.status).toBe("ok");
+    expect(runHook).toHaveBeenCalledOnce();
+    expect(runHook).toHaveBeenCalledWith("on-file-write", [join(dir, "hook-test.txt")]);
+  });
+
+  it("invokes on-file-write hook after edit_file succeeds", async () => {
+    const dir = await makeTempDir();
+    const path = join(dir, "edit-hook.txt");
+    await writeFile(path, "before", "utf8");
+
+    const runHook = vi.fn<(event: HookEvent, args: string[]) => Promise<HookRunResult | null>>()
+      .mockResolvedValue({ exitCode: 0, stdout: "", stderr: "" });
+
+    const call: ToolCall = {
+      id: "6",
+      name: "edit_file",
+      arguments: { path: "edit-hook.txt", oldText: "before", newText: "after" }
+    };
+
+    const result = await executeToolCall(call, {
+      workingDirectory: dir,
+      vtSession: {} as VirtualTerminalSession,
+      runHook
+    });
+
+    expect(result.status).toBe("ok");
+    expect(runHook).toHaveBeenCalledOnce();
+    expect(runHook).toHaveBeenCalledWith("on-file-write", [path]);
+  });
+
+  it("invokes on-file-read hook after read_file succeeds", async () => {
+    const dir = await makeTempDir();
+    const path = join(dir, "read-hook.txt");
+    await writeFile(path, "contents", "utf8");
+
+    const runHook = vi.fn<(event: HookEvent, args: string[]) => Promise<HookRunResult | null>>()
+      .mockResolvedValue(null);
+
+    const call: ToolCall = {
+      id: "7",
+      name: "read_file",
+      arguments: { path: "read-hook.txt" }
+    };
+
+    const result = await executeToolCall(call, {
+      workingDirectory: dir,
+      vtSession: {} as VirtualTerminalSession,
+      runHook
+    });
+
+    expect(result.status).toBe("ok");
+    expect(runHook).toHaveBeenCalledOnce();
+    expect(runHook).toHaveBeenCalledWith("on-file-read", [path]);
+  });
+
+  it("appends hook stderr to output when hook exits non-zero", async () => {
+    const dir = await makeTempDir();
+    const runHook = vi.fn<(event: HookEvent, args: string[]) => Promise<HookRunResult | null>>()
+      .mockResolvedValue({ exitCode: 1, stdout: "", stderr: "lint failed" });
+
+    const call: ToolCall = {
+      id: "8",
+      name: "write_file",
+      arguments: { path: "lint-fail.ts", content: "const x = 1" }
+    };
+
+    const result = await executeToolCall(call, {
+      workingDirectory: dir,
+      vtSession: {} as VirtualTerminalSession,
+      runHook
+    });
+
+    expect(result.status).toBe("ok");
+    expect(result.output).toContain("Hook (on-file-write) exited 1: lint failed");
   });
 });

@@ -3,6 +3,7 @@
 import { loadCommandCatalog } from "./command-catalog";
 import type { CommandDescriptor, CommandKind } from "./command-catalog";
 import { saveConfig } from "./config";
+import { listHooks } from "./hook-runner";
 import { listMemories, readMemory, saveMemory } from "./memory-store";
 import { listLocalModels, findMatchingModel } from "./model-manager";
 import {
@@ -491,6 +492,27 @@ export function createDefaultRegistry(): CommandRegistry {
       }
     },
     "Set a custom nickname for a model"
+  );
+
+  registry.register(
+    "hooks",
+    async () => {
+      try {
+        const hooks = await listHooks();
+        if (hooks.length === 0) {
+          return { output: "No hooks registered.", action: "continue" };
+        }
+        const lines = hooks.map(({ event, path }) => `  ${event.padEnd(20)} ${path}`);
+        return {
+          output: ["Registered hooks:", ...lines].join("\n"),
+          action: "continue"
+        };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return { output: `Hooks command failed: ${message}`, action: "continue" };
+      }
+    },
+    "List registered lifecycle hook scripts"
   );
 
   return registry;

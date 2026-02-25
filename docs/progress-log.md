@@ -3199,3 +3199,52 @@ Validation:
 Next:
 
 - Implement Milestone 3 hooks system (`user-defined scripts at lifecycle points`).
+
+## 2026-02-25 — Exchange 102
+
+Summary: Implemented Milestone 3 hooks system with directory-based lifecycle scripts and `/hooks` command.
+Changed:
+
+- Added hook types to `src/types.ts`:
+  - `HookEvent` union type: `"on-session-start" | "on-session-end" | "on-file-write" | "on-file-read" | "pre-commit"`.
+  - `HookRunResult` interface: `{ exitCode, stdout, stderr }`.
+- Added new module `src/hook-runner.ts`:
+  - `resolveHooksDir()`: returns `~/.yips/hooks` (overridable via `YIPS_HOOKS_DIR`).
+  - `findHookScript(event)`: checks `{dir}/{event}` then `{dir}/{event}.sh` for executable access.
+  - `runHook(event, args?)`: spawns script as subprocess, captures stdout/stderr, returns `HookRunResult | null`.
+  - `listHooks()`: scans hooks dir, returns `{ event, path }[]` for all discovered executable hooks.
+- Updated `src/tool-executor.ts`:
+  - added optional `runHook` callback to `ToolExecutorContext`.
+  - `read_file` invokes `runHook("on-file-read", [absolutePath])` after successful read.
+  - `write_file` and `edit_file` invoke `runHook("on-file-write", [absolutePath])` after successful write.
+  - non-zero hook exit appends `Hook ({event}) exited {code}: {stderr}` to tool output.
+- Updated `src/tui.ts`:
+  - imported `runHook` from `./hook-runner`.
+  - `startTui` awaits `runHook("on-session-start")` before ink render and `runHook("on-session-end")` after `waitUntilExit`.
+  - `executeToolCall` context now includes `runHook`.
+- Updated `src/commands.ts`:
+  - added `/hooks` command: calls `listHooks()` and prints event/path table or "No hooks registered.".
+- Updated `src/command-catalog.ts`:
+  - registered `hooks` descriptor in `RESTORED_COMMAND_DEFAULTS`.
+- Added `tests/hook-runner.test.ts`:
+  - covers `findHookScript`: extensionless, `.sh`, not found, non-executable, missing dir.
+  - covers `runHook`: success (exit 0), failure (non-zero + stderr), null for missing, argument passing.
+  - covers `listHooks`: empty dir, found scripts, filters non-executable and unknown events.
+- Updated `tests/tool-executor.test.ts`:
+  - added tests verifying `runHook` is called with correct event/args for `write_file`, `edit_file`, `read_file`.
+  - added test verifying hook stderr is appended to tool output on non-zero exit.
+- Updated docs:
+  - `docs/guides/hooks.md`: filled in configuration format (directory-based + env override), hook interface (args, exit codes, stdin), and examples.
+  - `docs/roadmap.md`: marked Milestone 3 `Hooks` complete.
+  - `docs/changelog.md`: added hooks system entry under Unreleased.
+
+Validation:
+
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+- `npm test -- tests/hook-runner.test.ts tests/tool-executor.test.ts` — clean
+- `npm test` — clean (36 files, 337 tests)
+
+Next:
+
+- Implement Milestone 3 MCP client (`server registration, tool discovery, context injection`).

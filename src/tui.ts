@@ -120,6 +120,7 @@ import type {
 } from "./types";
 import { assessCommandRisk, assessPathRisk, resolveToolPath, type ToolRisk } from "./tool-safety";
 import { executeToolCall } from "./tool-executor";
+import { runHook } from "./hook-runner";
 import { VirtualTerminalSession } from "./vt-session";
 import { loadCodeContext, toCodeContextSystemMessage } from "./code-context";
 import { decideConfirmationAction, routeVtInput } from "./tui-input-routing";
@@ -1794,7 +1795,8 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
 
           const result = await executeToolCall(call, {
             workingDirectory: workingZone,
-            vtSession: getVtSession()
+            vtSession: getVtSession(),
+            runHook
           });
           results.push(result);
 
@@ -3245,6 +3247,7 @@ export async function startTui(options: TuiOptions): Promise<"exit" | "restart">
   let restartRequested = false;
   await applyHardwareAwareStartupModelSelection(options);
   await ensureFreshLlamaSessionOnStartup(options);
+  await runHook("on-session-start");
   const version = await getVersion();
   const ink = (await import("ink")) as unknown as InkModule;
   const App = createInkApp(ink);
@@ -3262,6 +3265,7 @@ export async function startTui(options: TuiOptions): Promise<"exit" | "restart">
   );
 
   await instance.waitUntilExit();
+  await runHook("on-session-end");
   return restartRequested ? "restart" : "exit";
 }
 

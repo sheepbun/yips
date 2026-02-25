@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
-const DEFAULT_PACKAGE_NAME = "yips";
+const DEFAULT_PACKAGE_NAME = "@sheepbun/yips";
 const DEFAULT_REGISTRY_BASE_URL = "https://registry.npmjs.org";
 const FALLBACK_VERSION = "0.1.0";
 const PACKAGE_JSON_PATH = resolve(__dirname, "../..", "package.json");
@@ -24,6 +24,11 @@ export interface UpdateCheckOptions {
   packageName?: string;
   registryBaseUrl?: string;
   fetchImpl?: typeof fetch;
+}
+
+interface InstalledPackageMetadata {
+  name?: unknown;
+  version?: unknown;
 }
 
 function normalizeSemverInput(version: string): string {
@@ -74,8 +79,7 @@ function compareSemver(left: string, right: string): number | null {
 
 export async function getInstalledPackageVersion(): Promise<string> {
   try {
-    const raw = await readFile(PACKAGE_JSON_PATH, "utf8");
-    const parsed = JSON.parse(raw) as { version?: unknown };
+    const parsed = await readInstalledPackageMetadata();
     if (typeof parsed.version === "string" && parsed.version.trim().length > 0) {
       return parsed.version.trim();
     }
@@ -85,11 +89,28 @@ export async function getInstalledPackageVersion(): Promise<string> {
   return FALLBACK_VERSION;
 }
 
+async function getInstalledPackageName(): Promise<string> {
+  try {
+    const parsed = await readInstalledPackageMetadata();
+    if (typeof parsed.name === "string" && parsed.name.trim().length > 0) {
+      return parsed.name.trim();
+    }
+  } catch {
+    // Fallback below.
+  }
+  return DEFAULT_PACKAGE_NAME;
+}
+
+async function readInstalledPackageMetadata(): Promise<InstalledPackageMetadata> {
+  const raw = await readFile(PACKAGE_JSON_PATH, "utf8");
+  return JSON.parse(raw) as InstalledPackageMetadata;
+}
+
 export async function checkForUpdates(
   currentVersion: string,
   options: UpdateCheckOptions = {}
 ): Promise<UpdateCheckResult> {
-  const packageName = options.packageName ?? DEFAULT_PACKAGE_NAME;
+  const packageName = options.packageName ?? (await getInstalledPackageName());
   const registryBaseUrl = (options.registryBaseUrl ?? DEFAULT_REGISTRY_BASE_URL).replace(/\/+$/u, "");
   const fetchImpl = options.fetchImpl ?? globalThis.fetch;
 

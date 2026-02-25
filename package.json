@@ -1,6 +1,6 @@
 {
-  "name": "yips",
-  "version": "0.1.0",
+  "name": "@sheepbun/yips",
+  "version": "0.1.1",
   "description": "Local-first AI code editor and self-hosted gateway (TypeScript rewrite).",
   "license": "UNLICENSED",
   "homepage": "https://yips.dev",

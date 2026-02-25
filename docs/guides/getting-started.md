@@ -11,15 +11,20 @@
 ### npm package (quick CLI install)
 
 ```sh
-npm install -g yips
+npm install -g @sheepbun/yips
 yips
 ```
 
 If you prefer no global install:
 
 ```sh
-npx yips
+npx @sheepbun/yips
 ```
+
+Legacy/unscoped package note:
+
+- `npm install -g yips` may be unavailable due to npm package-name policy.
+- The canonical package is `@sheepbun/yips`.
 
 For local llama.cpp lifecycle setup (models directory, launcher, env wiring), use the installer flow below.
 

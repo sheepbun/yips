@@ -223,7 +223,8 @@ describe("createDefaultRegistry", () => {
     const result = await registry.dispatch("update", "", createContext());
     expect(result.action).toBe("continue");
     expect(result.output).toContain("Update available:");
-    expect(result.output).toContain("npm install -g yips@latest");
+    expect(result.output).toContain("npm install -g @sheepbun/yips@latest");
+    expect(result.output).toContain("npm install -g yips@latest (may be unavailable)");
     expect(result.output).toContain("https://yips.dev");
   });
 

@@ -179,6 +179,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Distribution metadata and CLI packaging:
   - `package.json` now includes `bin`, publish `files`, `homepage`, `repository`, and issue tracker metadata
   - `src/app/index.ts` now includes a Node shebang for npm global-bin execution
+- Scoped npm release pivot:
+  - package identity updated to `@sheepbun/yips` with version bumped to `0.1.1`
+  - `/update` now resolves the npm package name from local `package.json` metadata by default
+  - `/update` guidance now prefers scoped install commands and includes legacy unscoped caveats
 - Removed stale duplicate legacy test file `tests/tui-resize-render.test.ts` to restore full-suite baseline (`tests/ui/tui/tui-resize-render.test.ts` remains canonical)
 
 ## Legacy (yips-cli)

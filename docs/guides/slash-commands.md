@@ -26,7 +26,7 @@ Slash commands are user-facing commands typed directly into the Yips TUI input. 
 | `/tokens`                  | Show current token counter mode                                                |
 | `/tokens auto`             | Use automatic max token calculation from available RAM after model load        |
 | `/tokens <value>`          | Set manual max token value (supports `k` suffix, for example `32k`)            |
-| `/update`                  | Check latest npm version and print guided upgrade commands                     |
+| `/update`                  | Check latest npm version and print guided upgrade commands (`@sheepbun/yips`) |
 
 `/download` usage:
 
@@ -76,6 +76,11 @@ All commands recognized by yips-cli, carried forward to the TypeScript rewrite:
 /memorize list [limit]
 /memorize read <memory_id>
 ```
+
+`/update` currently prints dual-path npm guidance:
+
+- Canonical: `npm install -g @sheepbun/yips@latest`
+- Legacy/unscoped: `npm install -g yips@latest` (may be unavailable)
 
 ## Tab Autocompletion
 

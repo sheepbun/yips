@@ -95,7 +95,7 @@ describe("TelegramAdapter", () => {
     };
 
     const request = adapter.formatOutbound(context, {
-      text: "  pong  "
+      text: "  **pong** @everyone  "
     });
 
     expect(request).toEqual({
@@ -106,10 +106,62 @@ describe("TelegramAdapter", () => {
       },
       body: {
         chat_id: "11",
-        text: "pong",
+        text: "pong @\u200Beveryone",
         reply_to_message_id: 777
       }
     });
+  });
+
+  it("splits outbound text into multiple requests when above max length", () => {
+    const adapter = new TelegramAdapter({ botToken: "secret-token", maxMessageLength: 12 });
+    const context: GatewayMessageContext = {
+      session: {
+        id: "telegram.1.11",
+        platform: "telegram",
+        senderId: "1",
+        channelId: "11",
+        createdAt: new Date("2026-02-25T12:00:00.000Z"),
+        updatedAt: new Date("2026-02-25T12:00:00.000Z"),
+        messageCount: 1
+      },
+      message: {
+        platform: "telegram",
+        senderId: "1",
+        channelId: "11",
+        text: "ping",
+        messageId: "777"
+      }
+    };
+
+    const request = adapter.formatOutbound(context, {
+      text: "alpha beta gamma delta"
+    });
+
+    expect(request).toEqual([
+      {
+        method: "POST",
+        endpoint: "https://api.telegram.org/botsecret-token/sendMessage",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: {
+          chat_id: "11",
+          text: "alpha beta",
+          reply_to_message_id: 777
+        }
+      },
+      {
+        method: "POST",
+        endpoint: "https://api.telegram.org/botsecret-token/sendMessage",
+        headers: {
+          "content-type": "application/json"
+        },
+        body: {
+          chat_id: "11",
+          text: "gamma delta"
+        }
+      }
+    ]);
   });
 
   it("returns null for empty outbound text", () => {

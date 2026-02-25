@@ -186,7 +186,7 @@ describe("WhatsAppAdapter", () => {
     };
 
     const request = adapter.formatOutbound(context, {
-      text: "  pong  "
+      text: "  **pong** @everyone  "
     });
 
     expect(request).toEqual({
@@ -202,10 +202,76 @@ describe("WhatsAppAdapter", () => {
         to: "15550001111",
         type: "text",
         text: {
-          body: "pong"
+          body: "pong @\u200Beveryone"
         }
       }
     });
+  });
+
+  it("splits outbound content into multiple requests when above max length", () => {
+    const adapter = new WhatsAppAdapter({
+      accessToken: "secret-token",
+      phoneNumberId: "1234567890",
+      maxMessageLength: 12
+    });
+    const context: GatewayMessageContext = {
+      session: {
+        id: "whatsapp.15550001111.1234567890",
+        platform: "whatsapp",
+        senderId: "15550001111",
+        channelId: "1234567890",
+        createdAt: new Date("2026-02-25T12:00:00.000Z"),
+        updatedAt: new Date("2026-02-25T12:00:00.000Z"),
+        messageCount: 1
+      },
+      message: {
+        platform: "whatsapp",
+        senderId: "15550001111",
+        channelId: "1234567890",
+        text: "ping"
+      }
+    };
+
+    const request = adapter.formatOutbound(context, {
+      text: "alpha beta gamma delta"
+    });
+
+    expect(request).toEqual([
+      {
+        method: "POST",
+        endpoint: "https://graph.facebook.com/v21.0/1234567890/messages",
+        headers: {
+          authorization: "Bearer secret-token",
+          "content-type": "application/json"
+        },
+        body: {
+          messaging_product: "whatsapp",
+          recipient_type: "individual",
+          to: "15550001111",
+          type: "text",
+          text: {
+            body: "alpha beta"
+          }
+        }
+      },
+      {
+        method: "POST",
+        endpoint: "https://graph.facebook.com/v21.0/1234567890/messages",
+        headers: {
+          authorization: "Bearer secret-token",
+          "content-type": "application/json"
+        },
+        body: {
+          messaging_product: "whatsapp",
+          recipient_type: "individual",
+          to: "15550001111",
+          type: "text",
+          text: {
+            body: "gamma delta"
+          }
+        }
+      }
+    ]);
   });
 
   it("returns null for empty outbound text", () => {

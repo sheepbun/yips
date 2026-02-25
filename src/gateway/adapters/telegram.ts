@@ -1,5 +1,6 @@
 import type { GatewayIncomingMessage, GatewayMessageContext, GatewayMessageResponse } from "#gateway/types";
 
+import { chunkOutboundText, normalizeOutboundText } from "#gateway/adapters/formatting";
 import type { GatewayAdapter, GatewayAdapterOutboundRequest } from "#gateway/adapters/types";
 
 interface TelegramUser {
@@ -39,9 +40,11 @@ export interface TelegramSendMessageBody {
 export interface TelegramAdapterOptions {
   botToken: string;
   apiBaseUrl?: string;
+  maxMessageLength?: number;
 }
 
 const DEFAULT_API_BASE_URL = "https://api.telegram.org";
+const DEFAULT_MAX_MESSAGE_LENGTH = 4000;
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
@@ -114,10 +117,12 @@ export class TelegramAdapter
 
   private readonly botToken: string;
   private readonly apiBaseUrl: string;
+  private readonly maxMessageLength: number;
 
   constructor(options: TelegramAdapterOptions) {
     this.botToken = options.botToken.trim();
     this.apiBaseUrl = (options.apiBaseUrl ?? DEFAULT_API_BASE_URL).replace(/\/+$/, "");
+    this.maxMessageLength = Math.max(1, Math.trunc(options.maxMessageLength ?? DEFAULT_MAX_MESSAGE_LENGTH));
   }
 
   parseInbound(payload: unknown): GatewayIncomingMessage[] {
@@ -130,32 +135,39 @@ export class TelegramAdapter
   formatOutbound(
     context: GatewayMessageContext,
     response: GatewayMessageResponse
-  ): GatewayAdapterOutboundRequest<TelegramSendMessageBody> | null {
-    const trimmed = response.text.trim();
-    if (trimmed.length === 0) {
+  ):
+    | GatewayAdapterOutboundRequest<TelegramSendMessageBody>
+    | GatewayAdapterOutboundRequest<TelegramSendMessageBody>[]
+    | null {
+    const normalizedText = normalizeOutboundText(response.text);
+    const chunks = chunkOutboundText(normalizedText, this.maxMessageLength);
+    if (chunks.length === 0) {
       return null;
     }
 
     const chatId =
       context.session.channelId.trim() || context.message.channelId?.trim() || context.message.senderId;
 
-    const body: TelegramSendMessageBody = {
-      chat_id: chatId,
-      text: trimmed
-    };
-
     const replyToMessageId = parseReplyMessageId(context.message.messageId);
-    if (replyToMessageId !== undefined) {
-      body.reply_to_message_id = replyToMessageId;
-    }
+    const requests = chunks.map((chunk, index) => {
+      const body: TelegramSendMessageBody = {
+        chat_id: chatId,
+        text: chunk
+      };
+      if (index === 0 && replyToMessageId !== undefined) {
+        body.reply_to_message_id = replyToMessageId;
+      }
 
-    return {
-      method: "POST",
-      endpoint: `${this.apiBaseUrl}/bot${this.botToken}/sendMessage`,
-      headers: {
-        "content-type": "application/json"
-      },
-      body
-    };
+      return {
+        method: "POST" as const,
+        endpoint: `${this.apiBaseUrl}/bot${this.botToken}/sendMessage`,
+        headers: {
+          "content-type": "application/json"
+        },
+        body
+      };
+    });
+
+    return requests.length === 1 ? (requests[0] ?? null) : requests;
   }
 }

@@ -105,7 +105,7 @@ describe("DiscordAdapter", () => {
       }
     };
 
-    const request = adapter.formatOutbound(context, { text: "  pong  " });
+    const request = adapter.formatOutbound(context, { text: "  **pong** @everyone  " });
     expect(request).toEqual({
       method: "POST",
       endpoint: "https://discord.com/api/v10/channels/c1/messages",
@@ -114,7 +114,7 @@ describe("DiscordAdapter", () => {
         "content-type": "application/json"
       },
       body: {
-        content: "pong"
+        content: "pong @\u200Beveryone"
       }
     });
   });

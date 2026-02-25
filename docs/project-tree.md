@@ -33,6 +33,7 @@ src/
     auth-policy.ts
     adapters/
       discord.ts
+      formatting.ts
       whatsapp.ts
       telegram.ts
       types.ts

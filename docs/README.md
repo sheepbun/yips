@@ -36,7 +36,7 @@ Yips is a local-first AI code editor and self-hosted gateway. It runs language m
 | [CODE.md](./guides/code-md.md) | Project brief format for the AI agent |
 | [Slash Commands](./guides/slash-commands.md) | Command reference and tab completion |
 | [Hooks](./guides/hooks.md) | Lifecycle hooks and custom scripts |
-| [MCP Integration](./guides/mcp.md) | Model Context Protocol support |
+| [MCP Integration](./guides/mcp.md) | Status note: MCP integration is intentionally skipped |
 | [Gateway](./guides/gateway.md) | Self-hosted messaging gateway |
 
 ### Community
@@ -47,4 +47,4 @@ Yips is a local-first AI code editor and self-hosted gateway. It runs language m
 
 ---
 
-> Last updated: 2026-02-22
+> Last updated: 2026-02-25

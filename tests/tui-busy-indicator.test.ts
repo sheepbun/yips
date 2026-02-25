@@ -147,7 +147,8 @@ describe("model preload label", () => {
         streaming: true,
         verbose: false,
         tokensMode: "auto",
-        tokensManualMax: 8192
+        tokensManualMax: 8192,
+        hooks: {}
       },
       {}
     );
@@ -173,7 +174,8 @@ describe("model preload label", () => {
         streaming: true,
         verbose: false,
         tokensMode: "auto",
-        tokensManualMax: 8192
+        tokensManualMax: 8192,
+        hooks: {}
       },
       {}
     );

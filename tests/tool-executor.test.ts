@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import type { HookRunResult } from "../src/hooks";
 import { executeToolCall } from "../src/tool-executor";
 import type { ToolCall } from "../src/types";
 import type { VirtualTerminalSession } from "../src/vt-session";
@@ -17,6 +18,25 @@ afterEach(() => {
 });
 
 describe("tool-executor", () => {
+  function makeHookResult(overrides: Partial<HookRunResult> = {}): HookRunResult {
+    return {
+      hook: "on-file-write",
+      status: "ok",
+      command: "echo hook",
+      cwd: "/tmp",
+      message: "Hook completed successfully.",
+      durationMs: 1,
+      eventId: "evt-1",
+      timestamp: new Date().toISOString(),
+      stdout: "",
+      stderr: "",
+      exitCode: 0,
+      signal: null,
+      timedOut: false,
+      ...overrides
+    };
+  }
+
   it("write_file creates files and returns diff preview", async () => {
     const dir = await makeTempDir();
     const call: ToolCall = {
@@ -116,5 +136,59 @@ describe("tool-executor", () => {
     expect(runCommand).toHaveBeenCalledOnce();
     expect(result.status).toBe("ok");
     expect(result.output).toBe("ok");
+  });
+
+  it("runs on-file-write hook after write_file success", async () => {
+    const dir = await makeTempDir();
+    const runHook = vi.fn().mockResolvedValue(makeHookResult());
+    const call: ToolCall = {
+      id: "5",
+      name: "write_file",
+      arguments: {
+        path: "hooked.txt",
+        content: "hook me"
+      }
+    };
+
+    const result = await executeToolCall(call, {
+      workingDirectory: dir,
+      vtSession: {} as VirtualTerminalSession,
+      runHook
+    });
+
+    expect(runHook).toHaveBeenCalledOnce();
+    expect(runHook.mock.calls[0]?.[0]).toBe("on-file-write");
+    expect(result.status).toBe("ok");
+    expect(result.output).not.toContain("[hook:on-file-write]");
+    expect((result.metadata?.["hook"] as { status: string }).status).toBe("ok");
+  });
+
+  it("keeps write_file successful when hook fails and appends warning", async () => {
+    const dir = await makeTempDir();
+    const runHook = vi.fn().mockResolvedValue(
+      makeHookResult({
+        status: "error",
+        message: "Hook exited with a non-zero status.",
+        exitCode: 2
+      })
+    );
+    const call: ToolCall = {
+      id: "6",
+      name: "write_file",
+      arguments: {
+        path: "hook-fail.txt",
+        content: "content"
+      }
+    };
+
+    const result = await executeToolCall(call, {
+      workingDirectory: dir,
+      vtSession: {} as VirtualTerminalSession,
+      runHook
+    });
+
+    expect(result.status).toBe("ok");
+    expect(result.output).toContain("[hook:on-file-write]");
+    expect((result.metadata?.["hook"] as { status: string }).status).toBe("error");
   });
 });

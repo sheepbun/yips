@@ -3,7 +3,13 @@ import { access, readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 
-import type { AppConfig, Backend, LlamaPortConflictPolicy } from "./types";
+import type {
+  AppConfig,
+  Backend,
+  HookConfig,
+  HookName,
+  LlamaPortConflictPolicy
+} from "./types";
 
 type ConfigSource = "default" | "file";
 
@@ -20,6 +26,15 @@ const PORT_CONFLICT_POLICIES: ReadonlySet<LlamaPortConflictPolicy> = new Set([
   "kill-llama",
   "kill-user"
 ]);
+const SUPPORTED_HOOKS: readonly HookName[] = [
+  "on-session-start",
+  "on-session-end",
+  "on-file-write",
+  "on-file-read",
+  "pre-commit"
+];
+const DEFAULT_HOOK_TIMEOUT_MS = 10_000;
+const MAX_HOOK_TIMEOUT_MS = 120_000;
 export const DEFAULT_CONFIG_PATH = ".yips_config.json";
 export const CONFIG_PATH_ENV_VAR = "YIPS_CONFIG_PATH";
 
@@ -42,7 +57,8 @@ export function getDefaultConfig(): AppConfig {
     model: "default",
     tokensMode: "auto",
     tokensManualMax: 8192,
-    nicknames: {}
+    nicknames: {},
+    hooks: {}
   };
 }
 
@@ -155,6 +171,11 @@ function normalizePositiveInt(value: unknown, fallback: number): number {
   return fallback;
 }
 
+function normalizePositiveIntWithMax(value: unknown, fallback: number, max: number): number {
+  const normalized = normalizePositiveInt(value, fallback);
+  return Math.min(normalized, max);
+}
+
 function normalizePortConflictPolicy(
   value: unknown,
   fallback: LlamaPortConflictPolicy
@@ -219,6 +240,51 @@ function normalizeNicknames(
   return next;
 }
 
+function normalizeHookConfig(value: unknown): HookConfig | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const command = normalizeString(value.command, "");
+  if (command.length === 0) {
+    return null;
+  }
+
+  const timeoutMs = normalizePositiveIntWithMax(
+    value.timeoutMs,
+    DEFAULT_HOOK_TIMEOUT_MS,
+    MAX_HOOK_TIMEOUT_MS
+  );
+  return { command, timeoutMs };
+}
+
+function normalizeHooks(
+  value: unknown,
+  fallback: Partial<Record<HookName, HookConfig>>
+): Partial<Record<HookName, HookConfig>> {
+  const next: Partial<Record<HookName, HookConfig>> = {};
+
+  for (const hookName of SUPPORTED_HOOKS) {
+    const existing = fallback[hookName];
+    if (existing) {
+      next[hookName] = { ...existing };
+    }
+  }
+
+  if (!isRecord(value)) {
+    return next;
+  }
+
+  for (const hookName of SUPPORTED_HOOKS) {
+    const normalized = normalizeHookConfig(value[hookName]);
+    if (normalized) {
+      next[hookName] = normalized;
+    }
+  }
+
+  return next;
+}
+
 function applyEnvOverrides(config: AppConfig): AppConfig {
   const envHost = normalizeHost(process.env["YIPS_LLAMA_HOST"], config.llamaHost);
   const envPort = normalizePort(process.env["YIPS_LLAMA_PORT"], config.llamaPort);
@@ -247,7 +313,8 @@ function applyEnvOverrides(config: AppConfig): AppConfig {
     ),
     model: normalizeModel(process.env["YIPS_MODEL"], config.model),
     tokensMode: normalizeTokensMode(process.env["YIPS_TOKENS_MODE"], config.tokensMode),
-    tokensManualMax: normalizePositiveInt(process.env["YIPS_TOKENS_MANUAL_MAX"], config.tokensManualMax)
+    tokensManualMax: normalizePositiveInt(process.env["YIPS_TOKENS_MANUAL_MAX"], config.tokensManualMax),
+    hooks: normalizeHooks(config.hooks, config.hooks)
   };
 }
 
@@ -280,7 +347,8 @@ export function mergeConfig(defaults: AppConfig, candidate: unknown): AppConfig 
     model: normalizeModel(candidate.model, defaults.model),
     tokensMode: normalizeTokensMode(candidate.tokensMode, defaults.tokensMode),
     tokensManualMax: normalizePositiveInt(candidate.tokensManualMax, defaults.tokensManualMax),
-    nicknames: normalizeNicknames(candidate.nicknames, defaults.nicknames)
+    nicknames: normalizeNicknames(candidate.nicknames, defaults.nicknames),
+    hooks: normalizeHooks(candidate.hooks, defaults.hooks)
   };
 }
 

@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
+import { formatHookFailure, type HookRunResult } from "./hooks";
 import type { ToolCall, ToolResult } from "./types";
 import { resolveToolPath } from "./tool-safety";
 import type { VirtualTerminalSession } from "./vt-session";
@@ -89,6 +90,50 @@ function buildDiffPreview(before: string, after: string, maxBodyLines = 80): str
 export interface ToolExecutorContext {
   workingDirectory: string;
   vtSession: VirtualTerminalSession;
+  runHook?: (name: "on-file-write", payload: Record<string, unknown>) => Promise<HookRunResult>;
+}
+
+function summarizeHookResult(hookResult: HookRunResult): Record<string, unknown> {
+  return {
+    status: hookResult.status,
+    message: hookResult.message,
+    eventId: hookResult.eventId,
+    durationMs: hookResult.durationMs,
+    exitCode: hookResult.exitCode,
+    timedOut: hookResult.timedOut,
+    stdout: hookResult.stdout,
+    stderr: hookResult.stderr
+  };
+}
+
+async function runFileWriteHook(
+  context: ToolExecutorContext,
+  payload: Record<string, unknown>
+): Promise<HookRunResult | null> {
+  if (!context.runHook) {
+    return null;
+  }
+
+  try {
+    return await context.runHook("on-file-write", payload);
+  } catch (error) {
+    const message = toErrorMessage(error);
+    return {
+      hook: "on-file-write",
+      status: "error",
+      command: null,
+      cwd: context.workingDirectory,
+      message: `Hook execution failed: ${message}`,
+      durationMs: 0,
+      eventId: "unknown",
+      timestamp: new Date().toISOString(),
+      stdout: "",
+      stderr: message,
+      exitCode: null,
+      signal: null,
+      timedOut: false
+    };
+  }
 }
 
 async function executeReadFile(call: ToolCall, context: ToolExecutorContext): Promise<ToolResult> {
@@ -161,15 +206,25 @@ async function executeWriteFile(call: ToolCall, context: ToolExecutorContext): P
     await mkdir(parentDir, { recursive: true });
     await writeFile(absolutePath, content, "utf8");
     const diffPreview = buildDiffPreview(before, content);
+    const hookResult = await runFileWriteHook(context, {
+      operation: "write_file",
+      path: absolutePath,
+      bytesAfter: content.length
+    });
+    const hookWarning =
+      hookResult && hookResult.status !== "ok" && hookResult.status !== "skipped"
+        ? `\n${formatHookFailure(hookResult)}`
+        : "";
     return {
       callId: call.id,
       tool: call.name,
       status: "ok",
-      output: `Wrote ${absolutePath}\n${diffPreview}`,
+      output: `Wrote ${absolutePath}\n${diffPreview}${hookWarning}`,
       metadata: {
         path: absolutePath,
         bytes: content.length,
-        diffPreview
+        diffPreview,
+        hook: hookResult ? summarizeHookResult(hookResult) : undefined
       }
     };
   } catch (error) {
@@ -234,15 +289,26 @@ async function executeEditFile(call: ToolCall, context: ToolExecutorContext): Pr
   try {
     await writeFile(absolutePath, after, "utf8");
     const diffPreview = buildDiffPreview(before, after);
+    const hookResult = await runFileWriteHook(context, {
+      operation: "edit_file",
+      path: absolutePath,
+      replaced: replaceAll ? "all" : "first",
+      bytesAfter: after.length
+    });
+    const hookWarning =
+      hookResult && hookResult.status !== "ok" && hookResult.status !== "skipped"
+        ? `\n${formatHookFailure(hookResult)}`
+        : "";
     return {
       callId: call.id,
       tool: call.name,
       status: "ok",
-      output: `Edited ${absolutePath}\n${diffPreview}`,
+      output: `Edited ${absolutePath}\n${diffPreview}${hookWarning}`,
       metadata: {
         path: absolutePath,
         replaceAll,
-        diffPreview
+        diffPreview,
+        hook: hookResult ? summarizeHookResult(hookResult) : undefined
       }
     };
   } catch (error) {

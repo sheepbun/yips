@@ -156,7 +156,8 @@ describe("loadConfig", () => {
       llamaHost: "localhost",
       llamaPort: 9000,
       model: "qwen3",
-      nicknames: {}
+      nicknames: {},
+      hooks: {}
     });
   });
 
@@ -187,7 +188,8 @@ describe("loadConfig", () => {
       llamaHost: "127.0.0.1",
       llamaPort: 8080,
       model: "default",
-      nicknames: {}
+      nicknames: {},
+      hooks: {}
     });
   });
 
@@ -242,6 +244,53 @@ describe("loadConfig", () => {
     expect(result.config.llamaPortConflictPolicy).toBe("fail");
     expect(result.config.tokensMode).toBe("manual");
     expect(result.config.tokensManualMax).toBe(32000);
+  });
+
+  it("normalizes hooks config entries and timeout bounds", async () => {
+    const dir = await createTempDir();
+    const configPath = join(dir, "hooks-config.json");
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        hooks: {
+          "on-session-start": {
+            command: "echo start",
+            timeoutMs: 5000
+          },
+          "on-file-write": {
+            command: "echo file"
+          },
+          "on-session-end": {
+            command: "echo end",
+            timeoutMs: 999_999
+          },
+          "not-a-hook": {
+            command: "echo invalid"
+          },
+          "pre-commit": {
+            command: "   "
+          }
+        }
+      }),
+      "utf8"
+    );
+
+    const result = await loadConfig(configPath);
+
+    expect(result.config.hooks["on-session-start"]).toEqual({
+      command: "echo start",
+      timeoutMs: 5000
+    });
+    expect(result.config.hooks["on-file-write"]).toEqual({
+      command: "echo file",
+      timeoutMs: 10000
+    });
+    expect(result.config.hooks["on-session-end"]).toEqual({
+      command: "echo end",
+      timeoutMs: 120000
+    });
+    expect(result.config.hooks["pre-commit"]).toBeUndefined();
+    expect((result.config.hooks as Record<string, unknown>)["not-a-hook"]).toBeUndefined();
   });
 
   it("persists config with saveConfig and updates with updateConfig", async () => {

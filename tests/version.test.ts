@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { generateVersion, getGitInfo, getVersion } from "../src/version";
 
@@ -14,6 +14,10 @@ import { execFile as execFileCb } from "node:child_process";
 
 const mockExecFile = vi.mocked(execFileCb);
 
+beforeEach(() => {
+  mockExecFile.mockReset();
+});
+
 function stubExecFile(timestampOut: string, shaOut: string): void {
   mockExecFile.mockImplementation(((
     _cmd: string,
@@ -22,8 +26,7 @@ function stubExecFile(timestampOut: string, shaOut: string): void {
     cb: unknown
   ) => {
     const callback = cb as (err: Error | null, result: { stdout: string }) => void;
-    const firstArg = args?.[0] ?? "";
-    if (firstArg === "log") {
+    if (args?.includes("log")) {
       callback(null, { stdout: timestampOut });
     } else {
       callback(null, { stdout: shaOut });
@@ -83,6 +86,21 @@ describe("getGitInfo", () => {
 
     const result = await getGitInfo();
     expect(result).toBeNull();
+  });
+
+  it("targets git commands at the yips repository root", async () => {
+    stubExecFile("1740268800\n", "a1b2c3d\n");
+
+    await getGitInfo();
+
+    const calls = mockExecFile.mock.calls;
+    expect(calls).toHaveLength(2);
+    expect(calls[0]?.[1]).toEqual(
+      expect.arrayContaining(["-C", expect.stringMatching(/software[\\/]+yips$/), "log"])
+    );
+    expect(calls[1]?.[1]).toEqual(
+      expect.arrayContaining(["-C", expect.stringMatching(/software[\\/]+yips$/), "rev-parse"])
+    );
   });
 });
 

@@ -377,11 +377,13 @@ describe("shouldConsumeSubmitForAutocomplete", () => {
 });
 
 describe("formatTitleCwd", () => {
-  it("returns ~/current-folder for normal paths", () => {
-    expect(formatTitleCwd("/home/katherine/workspace/software/yips")).toBe("~/yips");
+  it("returns the full cwd path for normal paths", () => {
+    expect(formatTitleCwd("/home/katherine/workspace/software/yips")).toBe(
+      "/home/katherine/workspace/software/yips"
+    );
   });
 
-  it("returns ~ for root paths", () => {
-    expect(formatTitleCwd("/")).toBe("~");
+  it("returns root for root paths", () => {
+    expect(formatTitleCwd("/")).toBe("/");
   });
 });

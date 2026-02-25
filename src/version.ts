@@ -1,6 +1,7 @@
 /** Git-derived date-based versioning in the format vYYYY.M.D-SHORTHASH. */
 
 import { execFile as execFileCb } from "node:child_process";
+import { resolve } from "node:path";
 import { promisify } from "node:util";
 
 const execFile = promisify(execFileCb);
@@ -8,6 +9,7 @@ const execFile = promisify(execFileCb);
 const EXEC_TIMEOUT_MS = 5000;
 const SHORT_SHA_LENGTH = 7;
 const FALLBACK_VERSION = "1.0.0";
+const REPO_ROOT = resolve(__dirname, "..");
 
 export interface GitInfo {
   commitDate: Date;
@@ -17,8 +19,10 @@ export interface GitInfo {
 export async function getGitInfo(): Promise<GitInfo | null> {
   try {
     const [timestampResult, shaResult] = await Promise.all([
-      execFile("git", ["log", "-1", "--format=%ct"], { timeout: EXEC_TIMEOUT_MS }),
-      execFile("git", ["rev-parse", `--short=${SHORT_SHA_LENGTH}`, "HEAD"], {
+      execFile("git", ["-C", REPO_ROOT, "log", "-1", "--format=%ct"], {
+        timeout: EXEC_TIMEOUT_MS
+      }),
+      execFile("git", ["-C", REPO_ROOT, "rev-parse", `--short=${SHORT_SHA_LENGTH}`, "HEAD"], {
         timeout: EXEC_TIMEOUT_MS
       })
     ]);

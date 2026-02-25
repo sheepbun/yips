@@ -3199,3 +3199,67 @@ Validation:
 Next:
 
 - Implement Milestone 3 hooks system (`user-defined scripts at lifecycle points`).
+
+## 2026-02-25 11:15 UTC — Exchange 102
+
+Summary: Updated title-box directory display to use the actual launch cwd path instead of a `~/basename` shortcut.
+Changed:
+
+- Updated `src/tui.ts`:
+  - `formatTitleCwd(...)` now returns the full trimmed cwd path (falling back to `/` only if empty), so the directory shown in the title box matches the real cwd at launch.
+- Updated `tests/tui-resize-render.test.ts`:
+  - adjusted `formatTitleCwd` expectations to assert full-path output for normal paths and `/` for root.
+
+Validation:
+
+- `npm test -- tests/tui-resize-render.test.ts` — clean (26 passing)
+
+Next:
+
+- Optional: run `npm test` for the full suite if you want an additional broad regression pass for this small UI behavior change.
+
+## 2026-02-25 11:19 UTC — Exchange 103
+
+Summary: Fixed incorrect launch cwd behavior by updating the generated `yips` launcher to preserve caller working directory instead of forcing repo root.
+Changed:
+
+- Updated `install.sh` (`install_yips_launcher`):
+  - removed `cd "${REPO_ROOT}"` from the generated launcher.
+  - dist mode now executes via absolute path: `node "${REPO_ROOT}/dist/index.js"`.
+  - source mode now executes via absolute `tsx` CLI path: `node "${REPO_ROOT}/node_modules/tsx/dist/cli.mjs" "${REPO_ROOT}/src/index.ts"`.
+  - added explicit launcher error when local `tsx` runtime is missing with remediation hint.
+  - retained `REPO_ROOT` existence guard.
+- Updated `install.sh` summary output (`print_summary`):
+  - replaced repo-root-only next steps with `Run: yips` and note that launch cwd is preserved.
+
+Validation:
+
+- `bash -n install.sh` — clean
+- `npm test -- tests/tui-resize-render.test.ts` — clean (26 passing)
+
+Next:
+
+- Re-run `./install.sh` (or reinstall the launcher) to regenerate `~/.local/bin/yips` with the new no-`cd` behavior.
+
+## 2026-02-25 11:22 UTC — Exchange 104
+
+Summary: Fixed title-box version regression after cwd-preserving launcher change by making git version lookups target the Yips repo root explicitly.
+Changed:
+
+- Updated `src/version.ts`:
+  - added repo-root resolution (`resolve(__dirname, "..")`).
+  - `getGitInfo()` now executes git with `-C <repo_root>` for both commit timestamp and short SHA queries.
+  - this decouples version generation from launch cwd.
+- Updated `tests/version.test.ts`:
+  - adjusted git command stub routing to handle `-C` argument prefix.
+  - added regression test asserting `getGitInfo()` includes `-C <repo_root>` for both git invocations.
+  - added `beforeEach` mock reset to avoid cross-test call accumulation.
+
+Validation:
+
+- `npm test -- tests/version.test.ts` — clean (9 passing)
+- `npm test -- tests/tui-resize-render.test.ts` — clean (26 passing)
+
+Next:
+
+- Optional: run `npm test` for a full-suite confirmation after the launcher/cwd + version behavior changes.

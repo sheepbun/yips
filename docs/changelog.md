@@ -85,6 +85,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
   - added `src/gateway/core.ts` dispatch orchestration for validation, auth allowlists, rate limiting, session management, and handler delegation
   - added `src/gateway/message-router.ts`, `src/gateway/session-manager.ts`, `src/gateway/rate-limiter.ts`, and `src/gateway/types.ts`
   - added coverage in `tests/gateway/core.test.ts`, `tests/gateway/message-router.test.ts`, `tests/gateway/session-manager.test.ts`, and `tests/gateway/rate-limiter.test.ts`
+- Milestone 4 Telegram adapter bootstrap:
+  - added `src/gateway/adapters/types.ts` adapter contract for platform inbound/outbound translation
+  - added `src/gateway/adapters/telegram.ts` Telegram Bot API adapter for webhook/poll update parsing and `sendMessage` request formatting
+  - added coverage in `tests/gateway/adapters/telegram.test.ts`
 
 ### Changed
 

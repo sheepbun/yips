@@ -3823,3 +3823,58 @@ Validation:
 Next:
 
 - Cut and test a tagged release (`v*`) with configured `NPM_TOKEN` to validate end-to-end publish/release automation in GitHub Actions.
+
+## 2026-02-25 13:56 UTC — Exchange 119
+
+Summary: Attempted first unscoped npm publish for `yips` under new `sheepbun` account; dry-run succeeded but real publish was blocked by npm 2FA policy.
+Changed:
+
+- Kept package identity unscoped as `yips` (reverted temporary scoped fallback edits).
+- Repaired local npm cache permissions to unblock publish commands:
+  - fixed `~/.npm` ownership after `EACCES` cache error.
+- Ran publish readiness/auth probes:
+  - confirmed `npm whoami` resolves to `sheepbun`.
+  - confirmed unscoped package lookup returned `404 Not Found` for `yips` (name appears unclaimed/available from current registry view).
+- Ran unscoped publish flow:
+  - `npm publish --access public --dry-run` succeeded for `yips@0.1.0`.
+  - `npm publish --access public` failed with `E403` requiring either one-time password (`--otp`) or a granular access token with 2FA bypass for publish.
+
+Validation:
+
+- `npm run build` — clean
+- `npm run typecheck` — clean
+- `npm test -- tests/app/update-check.test.ts tests/agent/commands/commands.test.ts` — clean
+- `npm publish --access public --dry-run` — clean
+- `npm publish --access public` — blocked by npm registry policy (`E403` 2FA/token requirement)
+
+Next:
+
+- Complete first unscoped publish by either:
+  - running `npm publish --access public --otp <current_2fa_code>`, or
+  - creating a granular npm access token with publish permission + 2FA bypass and publishing with that token.
+
+## 2026-02-25 14:05 UTC — Exchange 120
+
+Summary: Isolated npm publish failure root cause for unscoped `yips` by forcing token-based auth path; registry now returns a package-name policy rejection.
+Changed:
+
+- Verified auth/token state and publish capability inputs:
+  - `npm whoami` resolves to `sheepbun`.
+  - `npm token list --json` confirms active token has `package:write` and `bypass_2fa: true`.
+  - `npm profile get --json` confirms account-level `tfa: false`.
+- Forced explicit token auth via temporary user config (`NPM_CONFIG_USERCONFIG=/tmp/npm-publishrc` + `NODE_AUTH_TOKEN`) to remove ambient npm auth ambiguity.
+- Re-ran publish with forced token path and captured definitive registry response:
+  - `E403`: package name `yips` rejected as too similar to existing packages.
+  - npm response guidance suggests scoped fallback (`@sheepbun/yips`) for successful publish.
+- User chose to keep unscoped path and proceed via npm support exception request.
+
+Validation:
+
+- `npx -y npm@10 --version` — `10.9.4`
+- `npx -y npm@10 publish --access public --dry-run` — clean
+- `npm publish --access public` with forced `NODE_AUTH_TOKEN` config — blocked by registry name-policy `E403`
+
+Next:
+
+- Open npm support request for unscoped `yips` name-policy exception.
+- Keep package name unscoped in repo until support outcome is decided.

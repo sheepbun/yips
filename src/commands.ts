@@ -11,6 +11,7 @@ import {
   parseHfDownloadUrl,
   resolveDefaultModelsDir
 } from "./model-downloader";
+import { executeFetchSkill, executeSearchSkill } from "./skills";
 import type { AppConfig } from "./types";
 
 export interface CommandResult {
@@ -397,6 +398,44 @@ export function createDefaultRegistry(): CommandRegistry {
   registry.register("download", (args) => handleDownload(args), "Open the model downloader");
 
   registry.register("dl", (args) => handleDownload(args), "Alias for /download");
+
+  registry.register(
+    "search",
+    async (args) => {
+      const query = args.trim();
+      if (query.length === 0) {
+        return { action: "continue", output: "Usage: /search <query>" };
+      }
+
+      try {
+        const output = await executeSearchSkill({ query });
+        return { action: "continue", output };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return { action: "continue", output: `Search command failed: ${message}` };
+      }
+    },
+    "Search the web (DuckDuckGo)"
+  );
+
+  registry.register(
+    "fetch",
+    async (args) => {
+      const url = args.trim();
+      if (url.length === 0) {
+        return { action: "continue", output: "Usage: /fetch <url>" };
+      }
+
+      try {
+        const output = await executeFetchSkill({ url });
+        return { action: "continue", output };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return { action: "continue", output: `Fetch command failed: ${message}` };
+      }
+    },
+    "Retrieve and display content from a URL"
+  );
 
   registry.register(
     "memorize",

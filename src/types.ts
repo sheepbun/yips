@@ -1,5 +1,16 @@
 export type Backend = "llamacpp" | "claude";
 export type LlamaPortConflictPolicy = "fail" | "kill-llama" | "kill-user";
+export type HookName =
+  | "on-session-start"
+  | "on-session-end"
+  | "on-file-write"
+  | "on-file-read"
+  | "pre-commit";
+
+export interface HookConfig {
+  command: string;
+  timeoutMs?: number;
+}
 
 export interface AppConfig {
   streaming: boolean;
@@ -18,6 +29,7 @@ export interface AppConfig {
   tokensMode: "auto" | "manual";
   tokensManualMax: number;
   nicknames: Record<string, string>;
+  hooks: Partial<Record<HookName, HookConfig>>;
 }
 
 export interface SessionState {
@@ -76,6 +88,14 @@ export interface SubagentCall {
   maxRounds?: number;
 }
 
+export type SkillName = "search" | "fetch" | "build" | "todos" | "virtual_terminal";
+
+export interface SkillCall {
+  id: string;
+  name: SkillName;
+  arguments: Record<string, unknown>;
+}
+
 export type ToolExecutionStatus = "ok" | "error" | "denied" | "timeout";
 
 export interface ToolResult {
@@ -91,6 +111,16 @@ export type SubagentExecutionStatus = "ok" | "error" | "timeout";
 export interface SubagentResult {
   callId: string;
   status: SubagentExecutionStatus;
+  output: string;
+  metadata?: Record<string, unknown>;
+}
+
+export type SkillExecutionStatus = "ok" | "error" | "timeout";
+
+export interface SkillResult {
+  callId: string;
+  skill: SkillName;
+  status: SkillExecutionStatus;
   output: string;
   metadata?: Record<string, unknown>;
 }

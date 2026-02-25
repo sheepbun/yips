@@ -70,6 +70,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
   - added `src/memory-store.ts` with save/list/read APIs for markdown memories under `~/.yips/memories`
   - implemented `/memorize` command (`/memorize <fact>`, `/memorize list [limit]`, `/memorize read <id>`)
   - added tests in `tests/memory-store.test.ts` and expanded `/memorize` command coverage in `tests/commands.test.ts`
+- Hooks system:
+  - added `src/hooks.ts` hook runner with shell command execution, JSON stdin payloads, `YIPS_HOOK_*` env vars, timeout handling, and soft-fail status reporting
+  - added config-level hook support in `AppConfig.hooks` for lifecycle hook commands and per-hook timeouts
+  - integrated `on-session-start`, `on-session-end`, and `on-file-write` hook points
+  - added tests in `tests/hooks.test.ts`, expanded `tests/tool-executor.test.ts`, and added run-once guard coverage in `tests/tui-startup-reset.test.ts`
+- Milestone 3 skills runtime:
+  - added `skill_calls` support to the `yips-tools` protocol and conductor loop (`search`, `fetch`, `build`, `todos`, `virtual_terminal`)
+  - added `src/skills.ts` skill executor with DuckDuckGo search, URL fetch/text extraction, build command execution, TODO scanning, and VT command execution
+  - wired skill execution into TUI conductor and subagent flows
+  - implemented user-facing `/search` and `/fetch` command handlers
+  - added coverage in `tests/skills.test.ts`, `tests/tool-protocol.test.ts`, `tests/conductor.test.ts`, and `tests/commands.test.ts`
 
 ### Changed
 
@@ -111,6 +122,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Milestone 2 recovery behavior now includes automatic pivoting when tool executions fail repeatedly, so the assistant is steered toward alternate approaches instead of repeating failing calls
 - Milestone 2 now includes Conductor-managed subagent delegation, scoped context execution, and lifecycle result chaining
 - Milestone 3 hardware detection now includes GPU/VRAM-aware startup model auto-selection from local GGUF inventory
+- Tool executor now runs `on-file-write` hooks after successful `write_file`/`edit_file`; hook failures are surfaced as warnings in tool output while preserving successful file operations
 
 ## Legacy (yips-cli)
 

@@ -3,7 +3,10 @@ import { describe, expect, it, vi } from "vitest";
 import { runConductorTurn, type ConductorAssistantReply } from "../src/conductor";
 import type { ChatMessage, ToolResult } from "../src/types";
 
-function makeReply(text: string, overrides?: Partial<ConductorAssistantReply>): ConductorAssistantReply {
+function makeReply(
+  text: string,
+  overrides?: Partial<ConductorAssistantReply>
+): ConductorAssistantReply {
   return {
     text,
     rendered: false,
@@ -40,13 +43,13 @@ describe("runConductorTurn", () => {
   it("chains tool calls and feeds tool results back into history", async () => {
     const history: ChatMessage[] = [{ role: "user", content: "inspect project" }];
     const executeToolCalls = vi.fn().mockResolvedValue([
-        {
-          callId: "c1",
-          tool: "list_dir",
-          status: "ok",
-          output: "src\ntests"
-        } as ToolResult
-      ]);
+      {
+        callId: "c1",
+        tool: "list_dir",
+        status: "ok",
+        output: "src\ntests"
+      } as ToolResult
+    ]);
     const onRoundComplete = vi.fn();
 
     const requestAssistant = vi
@@ -79,20 +82,22 @@ describe("runConductorTurn", () => {
     expect(result.rounds).toBe(2);
     expect(executeToolCalls).toHaveBeenCalledTimes(1);
     expect(onRoundComplete).toHaveBeenCalledTimes(1);
-    expect(history.some((entry) => entry.role === "system" && entry.content.includes("Tool results:"))).toBe(true);
+    expect(
+      history.some((entry) => entry.role === "system" && entry.content.includes("Tool results:"))
+    ).toBe(true);
     expect(history[history.length - 1]).toEqual({ role: "assistant", content: "Found it." });
   });
 
   it("continues after denied tool results and stops cleanly", async () => {
     const history: ChatMessage[] = [{ role: "user", content: "delete file?" }];
     const executeToolCalls = vi.fn().mockResolvedValue([
-        {
-          callId: "rm1",
-          tool: "run_command",
-          status: "denied",
-          output: "Action denied by user confirmation policy."
-        } as ToolResult
-      ]);
+      {
+        callId: "rm1",
+        tool: "run_command",
+        status: "denied",
+        output: "Action denied by user confirmation policy."
+      } as ToolResult
+    ]);
 
     const requestAssistant = vi
       .fn()
@@ -127,16 +132,18 @@ describe("runConductorTurn", () => {
   it("warns and stops when max depth is reached", async () => {
     const history: ChatMessage[] = [{ role: "user", content: "loop tools" }];
     const onWarning = vi.fn();
-    const requestAssistant = vi.fn().mockResolvedValue(
-      makeReply(
-        [
-          "Looping.",
-          "```yips-tools",
-          '{"tool_calls":[{"id":"c1","name":"list_dir","arguments":{"path":"."}}]}',
-          "```"
-        ].join("\n")
-      )
-    );
+    const requestAssistant = vi
+      .fn()
+      .mockResolvedValue(
+        makeReply(
+          [
+            "Looping.",
+            "```yips-tools",
+            '{"tool_calls":[{"id":"c1","name":"list_dir","arguments":{"path":"."}}]}',
+            "```"
+          ].join("\n")
+        )
+      );
 
     const result = await runConductorTurn({
       history,
@@ -206,7 +213,8 @@ describe("runConductorTurn", () => {
     expect(
       history.some(
         (entry) =>
-          entry.role === "system" && entry.content.startsWith("Automatic pivot: consecutive tool failures detected.")
+          entry.role === "system" &&
+          entry.content.startsWith("Automatic pivot: consecutive tool failures detected.")
       )
     ).toBe(true);
   });
@@ -251,7 +259,95 @@ describe("runConductorTurn", () => {
     expect(result.rounds).toBe(2);
     expect(executeSubagentCalls).toHaveBeenCalledTimes(1);
     expect(
-      history.some((entry) => entry.role === "system" && entry.content.includes("Subagent results:"))
+      history.some(
+        (entry) => entry.role === "system" && entry.content.includes("Subagent results:")
+      )
+    ).toBe(true);
+  });
+
+  it("executes skill calls and injects skill results into history", async () => {
+    const history: ChatMessage[] = [{ role: "user", content: "find release notes" }];
+    const executeSkillCalls = vi.fn().mockResolvedValue([
+      {
+        callId: "sk-1",
+        skill: "search",
+        status: "ok",
+        output: "1. Release notes"
+      }
+    ]);
+
+    const requestAssistant = vi
+      .fn()
+      .mockResolvedValueOnce(
+        makeReply(
+          [
+            "Running skill.",
+            "```yips-tools",
+            '{"skill_calls":[{"id":"sk-1","name":"search","arguments":{"query":"release notes"}}]}',
+            "```"
+          ].join("\n")
+        )
+      )
+      .mockResolvedValueOnce(makeReply("Done."));
+
+    const result = await runConductorTurn({
+      history,
+      requestAssistant,
+      executeToolCalls: vi.fn(),
+      executeSkillCalls,
+      onAssistantText: vi.fn(),
+      onWarning: vi.fn(),
+      estimateCompletionTokens: vi.fn().mockReturnValue(10),
+      estimateHistoryTokens: vi.fn().mockReturnValue(75),
+      computeTokensPerSecond: vi.fn().mockReturnValue(10)
+    });
+
+    expect(result.finished).toBe(true);
+    expect(result.rounds).toBe(2);
+    expect(executeSkillCalls).toHaveBeenCalledTimes(1);
+    expect(
+      history.some((entry) => entry.role === "system" && entry.content.includes("Skill results:"))
+    ).toBe(true);
+  });
+
+  it("warns and reports fallback results when skill runner is unavailable", async () => {
+    const history: ChatMessage[] = [{ role: "user", content: "do a search" }];
+    const onWarning = vi.fn();
+    const requestAssistant = vi
+      .fn()
+      .mockResolvedValueOnce(
+        makeReply(
+          [
+            "Trying skill.",
+            "```yips-tools",
+            '{"skill_calls":[{"id":"sk-1","name":"search","arguments":{"query":"test"}}]}',
+            "```"
+          ].join("\n")
+        )
+      )
+      .mockResolvedValueOnce(makeReply("Unable to run skill."));
+
+    await runConductorTurn({
+      history,
+      requestAssistant,
+      executeToolCalls: vi.fn(),
+      onAssistantText: vi.fn(),
+      onWarning,
+      estimateCompletionTokens: vi.fn().mockReturnValue(10),
+      estimateHistoryTokens: vi.fn().mockReturnValue(70),
+      computeTokensPerSecond: vi.fn().mockReturnValue(10)
+    });
+
+    expect(onWarning).toHaveBeenCalledWith(
+      "Skill invocation requested, but no skill runner is configured."
+    );
+    expect(
+      history.some(
+        (entry) =>
+          entry.role === "system" &&
+          entry.content.includes('"status":"error"') &&
+          entry.content.includes("Skill invocation is unavailable")
+      )
     ).toBe(true);
   });
 

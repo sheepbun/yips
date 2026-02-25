@@ -345,6 +345,41 @@ describe("createDefaultRegistry", () => {
     expect(result.uiAction).toEqual({ type: "open-downloader" });
   });
 
+  it("/search executes duckduckgo search", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response('<a class="result__a" href="https://example.com">Example</a>', {
+            status: 200
+          })
+        )
+    );
+    const registry = createDefaultRegistry();
+    const result = await registry.dispatch("search", "example query", createContext());
+    expect(result.action).toBe("continue");
+    expect(result.output).toContain("Search results for: example query");
+    expect(result.output).toContain("Example");
+  });
+
+  it("/fetch retrieves and formats URL content", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response("<html><body>Hello fetch world</body></html>", {
+          status: 200,
+          headers: { "content-type": "text/html" }
+        })
+      )
+    );
+    const registry = createDefaultRegistry();
+    const result = await registry.dispatch("fetch", "https://example.com", createContext());
+    expect(result.action).toBe("continue");
+    expect(result.output).toContain("Fetched: https://example.com/");
+    expect(result.output).toContain("Hello fetch world");
+  });
+
   it("/memorize saves a memory with free-form text", async () => {
     const root = await mkdtemp(join(tmpdir(), "yips-command-memorize-save-"));
     process.env["YIPS_MEMORIES_DIR"] = root;

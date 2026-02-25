@@ -107,6 +107,7 @@ import { parseToolProtocol } from "./tool-protocol";
 import { assessCommandRisk, assessPathRisk, resolveToolPath, type ToolRisk } from "./tool-safety";
 import { executeToolCall } from "./tool-executor";
 import { VirtualTerminalSession } from "./vt-session";
+import { loadCodeContext, toCodeContextSystemMessage } from "./code-context";
 
 const PROMPT_PREFIX = ">>> ";
 const CURSOR_MARKER = "▌";
@@ -149,6 +150,8 @@ interface RuntimeState {
   latestOutputTokensPerSecond: number | null;
   modelAutocompleteCandidates: ModelAutocompleteCandidate[];
   pendingConfirmation: PendingConfirmation | null;
+  codeContextPath: string | null;
+  codeContextMessage: string | null;
 }
 
 interface PendingConfirmation {
@@ -467,8 +470,20 @@ function createRuntimeState(options: TuiOptions): RuntimeState {
     usedTokensExact: null,
     latestOutputTokensPerSecond: null,
     modelAutocompleteCandidates: [],
-    pendingConfirmation: null
+    pendingConfirmation: null,
+    codeContextPath: null,
+    codeContextMessage: null
   };
+}
+
+export function composeChatRequestMessages(
+  history: readonly ChatMessage[],
+  codeContextMessage: string | null
+): readonly ChatMessage[] {
+  if (!codeContextMessage) {
+    return history;
+  }
+  return [{ role: "system", content: codeContextMessage }, ...history];
 }
 
 export function buildModelAutocompleteCandidates(
@@ -1098,6 +1113,37 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
     }, [refreshSessionActivity]);
 
     useEffect(() => {
+      void (async () => {
+        const currentState = stateRef.current;
+        if (!currentState) {
+          return;
+        }
+
+        const loaded = await loadCodeContext(process.cwd());
+        const state = stateRef.current;
+        if (!state) {
+          return;
+        }
+
+        if (!loaded) {
+          state.codeContextPath = null;
+          state.codeContextMessage = null;
+          return;
+        }
+
+        state.codeContextPath = loaded.path;
+        state.codeContextMessage = toCodeContextSystemMessage(loaded);
+
+        if (state.config.verbose) {
+          const suffix = loaded.truncated ? " (truncated)" : "";
+          appendOutput(state, formatDimMessage(`Loaded CODE.md: ${loaded.path}${suffix}`));
+          appendOutput(state, "");
+          forceRender();
+        }
+      })();
+    }, [forceRender]);
+
+    useEffect(() => {
       void refreshModelAutocomplete();
     }, [refreshModelAutocomplete]);
 
@@ -1208,6 +1254,10 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
         }
 
         llamaClient.setModel(currentState.config.model);
+        const requestMessages = composeChatRequestMessages(
+          currentState.history,
+          currentState.codeContextMessage
+        );
 
         const shouldStream = streamingOverride ?? currentState.config.streaming;
 
@@ -1216,7 +1266,7 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
           startBusyIndicator("Thinking...");
 
           try {
-            const result = await llamaClient.chat(currentState.history, currentState.config.model);
+            const result = await llamaClient.chat(requestMessages, currentState.config.model);
             return {
               text: result.text,
               rendered: false,
@@ -1241,7 +1291,7 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
 
         try {
           const streamResult: ChatResult = await llamaClient.streamChat(
-            currentState.history,
+            requestMessages,
             {
               onToken: (token: string): void => {
                 if (!receivedFirstToken) {
@@ -1288,7 +1338,7 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
 
           try {
             const fallbackResult = await llamaClient.chat(
-              currentState.history,
+              requestMessages,
               currentState.config.model
             );
             const fallbackText = fallbackResult.text;

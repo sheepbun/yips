@@ -81,6 +81,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
   - wired skill execution into TUI conductor and subagent flows
   - implemented user-facing `/search` and `/fetch` command handlers
   - added coverage in `tests/skills.test.ts`, `tests/tool-protocol.test.ts`, `tests/conductor.test.ts`, and `tests/commands.test.ts`
+- Milestone 4 gateway core bootstrap:
+  - added `src/gateway/core.ts` dispatch orchestration for validation, auth allowlists, rate limiting, session management, and handler delegation
+  - added `src/gateway/message-router.ts`, `src/gateway/session-manager.ts`, `src/gateway/rate-limiter.ts`, and `src/gateway/types.ts`
+  - added coverage in `tests/gateway/core.test.ts`, `tests/gateway/message-router.test.ts`, `tests/gateway/session-manager.test.ts`, and `tests/gateway/rate-limiter.test.ts`
 
 ### Changed
 
@@ -129,6 +133,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Milestone 2 now includes Conductor-managed subagent delegation, scoped context execution, and lifecycle result chaining
 - Milestone 3 hardware detection now includes GPU/VRAM-aware startup model auto-selection from local GGUF inventory
 - Tool executor now runs `on-file-write` hooks after successful `write_file`/`edit_file`; hook failures are surfaced as warnings in tool output while preserving successful file operations
+- Added runtime import alias mapping for `#gateway/*` in `package.json` and `tsconfig.json`
 
 ## Legacy (yips-cli)
 

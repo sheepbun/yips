@@ -20,6 +20,7 @@
       "#agent/tools/*": ["./src/agent/tools/*"],
       "#agent/skills/*": ["./src/agent/skills/*"],
       "#config/*": ["./src/config/*"],
+      "#gateway/*": ["./src/gateway/*"],
       "#llm/*": ["./src/llm/*"],
       "#models/*": ["./src/models/*"],
       "#types/*": ["./src/types/*"],

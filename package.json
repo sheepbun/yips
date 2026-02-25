@@ -36,6 +36,10 @@
       "development": "./src/config/*.ts",
       "default": "./dist/config/*.js"
     },
+    "#gateway/*": {
+      "development": "./src/gateway/*.ts",
+      "default": "./dist/gateway/*.js"
+    },
     "#llm/*": {
       "development": "./src/llm/*.ts",
       "default": "./dist/llm/*.js"

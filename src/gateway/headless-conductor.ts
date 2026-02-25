@@ -106,6 +106,7 @@ export class GatewayHeadlessConductor {
   private readonly maxRounds: number | undefined;
   private readonly deps: GatewayHeadlessConductorDeps;
   private readonly sessionStates = new Map<string, HeadlessSessionState>();
+  private readonly startupWarningsSeen = new Set<string>();
   private readonly llamaClient: LlamaClient;
   private readonly vtSession: VirtualTerminalSession;
   private codeContextMessage: string | null = null;
@@ -144,6 +145,20 @@ export class GatewayHeadlessConductor {
     state.history.push({ role: "user", content: context.message.text });
 
     let latestAssistantText = "";
+    const startupWarningsForResponse: string[] = [];
+    const recordStartupWarnings = (warnings: readonly string[] | undefined): void => {
+      if (!warnings || warnings.length === 0) {
+        return;
+      }
+      for (const warning of warnings) {
+        const trimmed = warning.trim();
+        if (trimmed.length === 0 || this.startupWarningsSeen.has(trimmed)) {
+          continue;
+        }
+        this.startupWarningsSeen.add(trimmed);
+        startupWarningsForResponse.push(trimmed);
+      }
+    };
 
     try {
       await this.deps.runConductor({
@@ -157,6 +172,7 @@ export class GatewayHeadlessConductor {
                 : "llama.cpp is unavailable."
             );
           }
+          recordStartupWarnings(readiness.warnings);
 
           this.llamaClient.setModel(this.config.model);
           const requestMessages = composeChatRequestMessages(state.history, this.codeContextMessage);
@@ -229,6 +245,7 @@ export class GatewayHeadlessConductor {
                         : "llama.cpp is unavailable."
                     );
                   }
+                  recordStartupWarnings(readiness.warnings);
 
                   this.llamaClient.setModel(this.config.model);
                   const requestMessages = composeChatRequestMessages(scopedHistory, null);
@@ -355,7 +372,16 @@ export class GatewayHeadlessConductor {
 
     const finalText = latestAssistantText.trim().length > 0 ? latestAssistantText : "(no response)";
     await this.persistSession(state);
-    return { text: finalText };
+    if (startupWarningsForResponse.length === 0) {
+      return { text: finalText };
+    }
+
+    return {
+      text: finalText,
+      metadata: {
+        startupWarnings: startupWarningsForResponse
+      }
+    };
   }
 
   dispose(): void {

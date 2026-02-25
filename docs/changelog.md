@@ -137,6 +137,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
   - added coverage in `tests/app/update-check.test.ts` and expanded command coverage in `tests/agent/commands/commands.test.ts`
 - Release workflow automation:
   - added `.github/workflows/release.yml` for tag-driven validation, npm publish, and GitHub release creation
+- Background Discord gateway runtime:
+  - added `src/gateway/background.ts` to run Discord gateway in-process during normal Yips app sessions
+  - app startup now auto-starts/stops Discord gateway lifecycle around TUI/REPL runtime
+  - Discord token resolution now supports env-first fallback to `config.channels.discord.botToken` for both app background mode and `gateway:discord`
+  - added coverage in `tests/gateway/background.test.ts`
+- Telegram runtime + background startup:
+  - added `src/gateway/runtime/telegram-bot.ts` long-poll runtime loop (`getUpdates`) wired into `GatewayCore`
+  - added `src/gateway/runtime/telegram-main.ts` executable runtime entrypoint and `npm run gateway:telegram` script
+  - Telegram runtime now emits best-effort UX signals during processing (`sendChatAction` typing heartbeat + `setMessageReaction` 👀 attempt)
+  - Telegram runtime now clears inbound 👀 reaction after at least one successful outbound send
+  - background launcher now auto-starts Telegram runtime when token is configured, including concurrent Discord+Telegram startup
+  - added coverage in `tests/gateway/runtime/telegram-bot.test.ts` and expanded `tests/gateway/background.test.ts`
 
 ### Changed
 

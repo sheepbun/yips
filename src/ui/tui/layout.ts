@@ -170,7 +170,7 @@ function computeUsefulOutputScrollCapRows(options: {
 }
 
 export interface PromptStatusState {
-  uiMode: "chat" | "downloader" | "model-manager" | "sessions" | "vt" | "confirm";
+  uiMode: "chat" | "downloader" | "model-manager" | "setup" | "sessions" | "vt" | "confirm";
   config: {
     backend: string;
     model: string;
@@ -192,6 +192,9 @@ export function buildPromptStatusText(state: PromptStatusState): string {
   }
   if (state.uiMode === "model-manager") {
     return "model-manager · search";
+  }
+  if (state.uiMode === "setup") {
+    return "setup · channels";
   }
   if (state.uiMode === "downloader") {
     return "model-downloader · search";

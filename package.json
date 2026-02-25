@@ -104,6 +104,7 @@
     "build": "tsc -p tsconfig.build.json",
     "dev": "tsx --conditions=development src/app/index.ts",
     "gateway:discord": "tsx --conditions=development src/gateway/runtime/discord-main.ts",
+    "gateway:telegram": "tsx --conditions=development src/gateway/runtime/telegram-main.ts",
     "start": "node dist/app/index.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",

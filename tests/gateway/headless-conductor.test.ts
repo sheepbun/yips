@@ -234,6 +234,45 @@ describe("gateway headless conductor", () => {
     expect(historiesA).toEqual([1, 3]);
     expect(historiesB).toEqual([1]);
   });
+
+  it("surfaces non-fatal startup warnings in response metadata once", async () => {
+    const config = getDefaultConfig();
+    const deps = createBaseDeps();
+    const ensureReady = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ready: true,
+        started: true,
+        warnings: ["GPU offload requested but no devices detected."]
+      })
+      .mockResolvedValueOnce({
+        ready: true,
+        started: false,
+        warnings: ["GPU offload requested but no devices detected."]
+      });
+    deps.ensureReady = ensureReady as never;
+    deps.runConductor = vi.fn(async (runtimeDeps) => {
+      await runtimeDeps.requestAssistant();
+      runtimeDeps.history.push({ role: "assistant", content: "ok" });
+      runtimeDeps.onAssistantText("ok", false);
+      return {
+        finished: true,
+        rounds: 1,
+        latestOutputTokensPerSecond: null,
+        usedTokensExact: 0
+      };
+    });
+
+    const handler = await createGatewayHeadlessMessageHandler(configureOptions(config), deps);
+    const first = await handler.handleMessage(createGatewayContext("one"));
+    const second = await handler.handleMessage(createGatewayContext("two"));
+
+    expect(first.text).toBe("ok");
+    expect(first.metadata?.["startupWarnings"]).toEqual([
+      "GPU offload requested but no devices detected."
+    ]);
+    expect(second.metadata).toBeUndefined();
+  });
 });
 
 function configureOptions(

@@ -85,14 +85,23 @@ Current implementation status in TypeScript:
 - `src/gateway/adapters/formatting.ts`: shared outbound text normalization (line endings, markdown stripping, mention sanitization, chunking).
 - `src/gateway/runtime/discord-bot.ts`: discord.js event loop that routes messages through `GatewayCore` and emits outbound requests.
 - `src/gateway/runtime/discord-main.ts`: executable Discord runtime entrypoint (`npm run gateway:discord`).
+- `src/gateway/runtime/telegram-bot.ts`: Telegram long-poll runtime loop (`getUpdates`) that routes messages through `GatewayCore` and emits outbound requests.
+- `src/gateway/runtime/telegram-main.ts`: executable Telegram runtime entrypoint (`npm run gateway:telegram`).
 - `src/gateway/headless-conductor.ts`: headless Conductor runtime that executes llama.cpp-backed turns, tool/skill/subagent chains, and session transcript persistence for gateway sessions.
+- `src/gateway/background.ts`: app-integrated background launcher that runs Discord gateway runtime alongside Yips when a Discord bot token is configured.
 
-Discord runtime environment variables:
+Gateway runtime environment variables:
 
-- `YIPS_DISCORD_BOT_TOKEN` (required): Discord bot token used for gateway and outbound message authorization.
+- `YIPS_DISCORD_BOT_TOKEN` (optional if config token is set): Discord bot token used for gateway and outbound message authorization.
+- `YIPS_TELEGRAM_BOT_TOKEN` (optional if config token is set): Telegram bot token used for gateway polling and outbound message authorization.
 - `YIPS_GATEWAY_ALLOWED_SENDERS` (optional): comma-delimited sender ID allowlist enforced by `GatewayCore`.
 - `YIPS_GATEWAY_PASSPHRASE` (optional): when set, senders must first send `/auth <passphrase>` before normal messages are processed.
 - `YIPS_GATEWAY_BACKEND` (optional): gateway backend selector. Defaults to `llamacpp`. Currently `llamacpp` is the only supported value; unsupported values fail startup.
+
+Background behavior:
+
+- Main Yips app startup attempts to launch Discord and Telegram gateway runtimes in-process when each platform token is available (env first, then `config.channels.<platform>.botToken`).
+- Background gateway automatically shuts down when Yips exits or restarts.
 
 Authentication behavior:
 
@@ -110,6 +119,12 @@ Outbound formatting behavior:
   - Discord: 2000
   - Telegram: 4000
   - WhatsApp: 4000
+
+Telegram runtime behavior:
+
+- Transport is long polling via Bot API `getUpdates` with in-memory offset tracking for the current process lifetime.
+- While processing inbound messages, Telegram runtime emits `sendChatAction` with `typing` on a heartbeat.
+- Telegram runtime attempts best-effort inbound 👀 reactions via `setMessageReaction` when message IDs are available, and clears that reaction after at least one successful outbound send.
 
 ### Headless Conductor
 

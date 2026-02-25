@@ -1,5 +1,5 @@
 import { GatewayCore } from "#gateway/core";
-import { createDiscordGatewayRuntime } from "#gateway/runtime/discord-bot";
+import { createTelegramGatewayRuntime } from "#gateway/runtime/telegram-bot";
 import { loadConfig } from "#config/config";
 import { createGatewayHeadlessMessageHandler } from "#gateway/headless-conductor";
 import { resolveGatewayBackendFromEnv } from "#gateway/runtime/backend-policy";
@@ -9,8 +9,8 @@ function readOptionalEnv(name: string): string | undefined {
   return value && value.length > 0 ? value : undefined;
 }
 
-function readRequiredDiscordToken(configToken: string): string {
-  const envToken = readOptionalEnv("YIPS_DISCORD_BOT_TOKEN");
+function readRequiredTelegramToken(configToken: string): string {
+  const envToken = readOptionalEnv("YIPS_TELEGRAM_BOT_TOKEN");
   if (envToken) {
     return envToken;
   }
@@ -19,7 +19,7 @@ function readRequiredDiscordToken(configToken: string): string {
     return savedToken;
   }
   throw new Error(
-    "Missing Discord bot token. Set YIPS_DISCORD_BOT_TOKEN or configure channels.discord.botToken."
+    "Missing Telegram bot token. Set YIPS_TELEGRAM_BOT_TOKEN or configure channels.telegram.botToken."
   );
 }
 
@@ -36,7 +36,7 @@ function readAllowedSenders(): string[] {
 
 async function main(): Promise<void> {
   const configResult = await loadConfig();
-  const botToken = readRequiredDiscordToken(configResult.config.channels.discord.botToken);
+  const botToken = readRequiredTelegramToken(configResult.config.channels.telegram.botToken);
   const allowedSenderIds = readAllowedSenders();
   const passphrase = readOptionalEnv("YIPS_GATEWAY_PASSPHRASE");
   const gatewayBackend = resolveGatewayBackendFromEnv(process.env.YIPS_GATEWAY_BACKEND);
@@ -57,7 +57,7 @@ async function main(): Promise<void> {
     handleMessage: headless.handleMessage
   });
 
-  const runtime = createDiscordGatewayRuntime({
+  const runtime = createTelegramGatewayRuntime({
     botToken,
     gateway
   });

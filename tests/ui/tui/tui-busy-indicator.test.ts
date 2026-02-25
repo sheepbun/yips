@@ -158,6 +158,11 @@ describe("model preload label", () => {
         verbose: false,
         tokensMode: "auto",
         tokensManualMax: 8192,
+        channels: {
+          whatsapp: { botToken: "" },
+          telegram: { botToken: "" },
+          discord: { botToken: "" }
+        },
         hooks: {}
       },
       {}
@@ -185,6 +190,11 @@ describe("model preload label", () => {
         verbose: false,
         tokensMode: "auto",
         tokensManualMax: 8192,
+        channels: {
+          whatsapp: { botToken: "" },
+          telegram: { botToken: "" },
+          discord: { botToken: "" }
+        },
         hooks: {}
       },
       {}

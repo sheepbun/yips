@@ -83,6 +83,13 @@ import {
   type ModelManagerState
 } from "#ui/model-manager/model-manager-state";
 import {
+  createSetupState,
+  getSelectedSetupChannel,
+  moveSetupSelection,
+  type SetupState
+} from "#ui/setup/setup-state";
+import { renderSetupLines } from "#ui/setup/setup-ui";
+import {
   downloadModelFile,
   listGgufModels,
   listModelFiles,
@@ -137,6 +144,7 @@ const DOWNLOADER_MIN_SEARCH_CHARS = 3;
 const DOWNLOADER_SEARCH_DEBOUNCE_MS = 400;
 const DOWNLOADER_PROGRESS_RENDER_INTERVAL_MS = 200;
 const BUSY_SPINNER_RENDER_INTERVAL_MS = 16;
+const STREAM_RENDER_INTERVAL_MS = 33;
 const MOUSE_SCROLL_LINE_STEP = 3;
 const ENABLE_MOUSE_REPORTING = "\u001b[?1000h\u001b[?1006h";
 const DISABLE_MOUSE_REPORTING = "\u001b[?1000l\u001b[?1006l";
@@ -154,9 +162,10 @@ interface RuntimeState {
   history: ChatMessage[];
   busy: boolean;
   busyLabel: string;
-  uiMode: "chat" | "downloader" | "model-manager" | "sessions" | "vt" | "confirm";
+  uiMode: "chat" | "downloader" | "model-manager" | "setup" | "sessions" | "vt" | "confirm";
   downloader: DownloaderState | null;
   modelManager: ModelManagerState | null;
+  setup: SetupState | null;
   sessionFilePath: string | null;
   sessionCreated: boolean;
   recentActivity: string[];
@@ -421,6 +430,9 @@ export function buildPromptStatusText(state: RuntimeState): string {
   }
   if (state.uiMode === "model-manager") {
     return "model-manager · search";
+  }
+  if (state.uiMode === "setup") {
+    return "setup · channels";
   }
   if (state.uiMode === "downloader") {
     return "model-downloader · search";
@@ -688,8 +700,9 @@ function extractBareEnvelopeAssistantText(rawText: string): string | null {
 export function renderAssistantStreamForDisplay(
   rawText: string,
   timestamp: Date,
-  _verbose: boolean
+  verbose: boolean
 ): string {
+  void verbose;
   const parsed = parseAgentEnvelope(rawText);
   if (!parsed.envelopeFound) {
     const bareAssistantText = extractBareEnvelopeAssistantText(rawText);
@@ -728,6 +741,18 @@ export function renderAssistantStreamForDisplay(
   }
 
   return lines.join("\n");
+}
+
+function renderAssistantStreamPreview(rawText: string, timestamp: Date): string {
+  if (hasEnvelopeStart(rawText)) {
+    const prefix = stripEnvelopeStart(rawText);
+    if (prefix.trim().length === 0) {
+      return "";
+    }
+    return formatAssistantMessage(prefix, timestamp);
+  }
+
+  return formatAssistantMessage(rawText, timestamp);
 }
 
 function resetSession(state: RuntimeState): void {
@@ -798,6 +823,7 @@ function createRuntimeState(options: TuiOptions): RuntimeState {
     uiMode: "chat",
     downloader: null,
     modelManager: null,
+    setup: null,
     sessionFilePath: null,
     sessionCreated: false,
     recentActivity: [],
@@ -1312,6 +1338,7 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
     const vtEscapePendingRef = useRef(false);
     const sessionStartHookRanRef = useRef(false);
     const sessionEndHookRanRef = useRef(false);
+    const startupWarningSeenRef = useRef(new Set<string>());
 
     const forceRender = useCallback(() => {
       setRenderVersion((value) => value + 1);
@@ -1545,6 +1572,30 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
         return result;
       },
       [maybeRenderHookFailure, state.config]
+    );
+
+    const renderStartupWarnings = useCallback(
+      (warnings: readonly string[]): void => {
+        const currentState = stateRef.current;
+        if (!currentState || warnings.length === 0) {
+          return;
+        }
+        let dirty = false;
+        for (const warning of warnings) {
+          const trimmed = warning.trim();
+          if (trimmed.length === 0 || startupWarningSeenRef.current.has(trimmed)) {
+            continue;
+          }
+          startupWarningSeenRef.current.add(trimmed);
+          appendOutput(currentState, formatWarningMessage(trimmed));
+          appendOutput(currentState, "");
+          dirty = true;
+        }
+        if (dirty) {
+          forceRender();
+        }
+      },
+      [forceRender]
     );
 
     const runSessionEndHookOnce = useCallback(
@@ -1818,6 +1869,7 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
               : "llama.cpp is unavailable."
           );
         }
+        renderStartupWarnings(readiness.warnings ?? []);
 
         llamaClient.setModel(currentState.config.model);
         const history = options?.historyOverride ?? currentState.history;
@@ -1855,6 +1907,26 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
         let streamStartedAtMs: number | null = null;
         const blockStart = currentState.outputLines.length;
         let blockLength = 0;
+        let lastRenderAtMs = 0;
+        let previewPending = false;
+
+        const renderStreamPreview = (force = false): void => {
+          const now = Date.now();
+          if (!force && now - lastRenderAtMs < STREAM_RENDER_INTERVAL_MS) {
+            previewPending = true;
+            return;
+          }
+          previewPending = false;
+          lastRenderAtMs = now;
+          blockLength = replaceOutputBlock(
+            currentState,
+            blockStart,
+            blockLength,
+            renderAssistantStreamPreview(streamText, timestamp)
+          );
+          forceRender();
+        };
+
         startBusyIndicator(busyLabel);
         forceRender();
 
@@ -1869,27 +1941,28 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
                   stopBusyIndicator();
                 }
                 streamText += token;
-                blockLength = replaceOutputBlock(
-                  currentState,
-                  blockStart,
-                  blockLength,
-                  renderAssistantStreamForDisplay(
-                    streamText,
-                    timestamp,
-                    currentState.config.verbose
-                  )
-                );
-                forceRender();
+                renderStreamPreview(false);
               }
             },
             currentState.config.model
           );
           streamText = streamResult.text;
+          if (previewPending) {
+            renderStreamPreview(true);
+          }
 
           if (streamText.length === 0) {
             stopBusyIndicator();
             throw new Error("Streaming response ended without assistant content.");
           }
+
+          blockLength = replaceOutputBlock(
+            currentState,
+            blockStart,
+            blockLength,
+            renderAssistantStreamForDisplay(streamText, timestamp, currentState.config.verbose)
+          );
+          forceRender();
 
           return {
             text: streamText,
@@ -1941,7 +2014,7 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
           }
         }
       },
-      [forceRender, startBusyIndicator, stopBusyIndicator]
+      [forceRender, renderStartupWarnings, startBusyIndicator, stopBusyIndicator]
     );
 
     const preloadConfiguredModel = useCallback(
@@ -1977,11 +2050,12 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
                 : "llama.cpp is unavailable."
             );
           }
+          renderStartupWarnings(readyResult.warnings ?? []);
         } finally {
           stopBusyIndicator();
         }
       },
-      [startBusyIndicator, stopBusyIndicator]
+      [renderStartupWarnings, startBusyIndicator, stopBusyIndicator]
     );
 
     const assessToolCallRisk = useCallback(
@@ -2874,6 +2948,16 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
             return;
           }
 
+          if (result.uiAction?.type === "open-setup") {
+            if (!currentState.setup) {
+              currentState.setup = createSetupState();
+            }
+            currentState.uiMode = "setup";
+            composerRef.current = createComposer();
+            forceRender();
+            return;
+          }
+
           if (result.uiAction?.type === "open-sessions") {
             await refreshSessionActivity();
             if (currentState.sessionList.length === 0) {
@@ -3014,6 +3098,106 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
             getVtSession().write(route.passthrough);
             forceRender();
           }
+          return;
+        }
+
+        if (currentState.uiMode === "setup") {
+          const setup = currentState.setup;
+          if (!setup) {
+            currentState.uiMode = "chat";
+            forceRender();
+            return;
+          }
+
+          for (const action of actions) {
+            if (action.type === "cancel") {
+              const latestSetup = currentState.setup;
+              if (latestSetup?.editingChannel) {
+                currentState.setup = { ...latestSetup, editingChannel: null };
+                composerRef.current = createComposer();
+              } else {
+                currentState.uiMode = "chat";
+                composerRef.current = createComposer();
+              }
+              forceRender();
+              return;
+            }
+
+            const editing = (currentState.setup?.editingChannel ?? null) !== null;
+            if (editing) {
+              if (
+                action.type === "insert" ||
+                action.type === "backspace" ||
+                action.type === "delete" ||
+                action.type === "home" ||
+                action.type === "end" ||
+                action.type === "move-left" ||
+                action.type === "move-right"
+              ) {
+                applyInputAction(composer, action);
+                forceRender();
+                continue;
+              }
+
+              if (action.type === "submit") {
+                const channel = currentState.setup?.editingChannel;
+                if (!channel) {
+                  continue;
+                }
+                const token = composer.getText().trim();
+                currentState.config.channels[channel].botToken = token;
+                const latestSetup = currentState.setup ?? setup;
+                currentState.setup = { ...latestSetup, editingChannel: null };
+                composerRef.current = createComposer();
+                forceRender();
+                void (async () => {
+                  const state = stateRef.current;
+                  if (!state) {
+                    return;
+                  }
+                  try {
+                    await saveConfig(state.config);
+                    appendOutput(
+                      state,
+                      formatDimMessage(`Saved ${channel} bot token in config.`)
+                    );
+                    appendOutput(state, "");
+                  } catch (error) {
+                    appendOutput(
+                      state,
+                      formatErrorMessage(`Setup save failed: ${formatError(error)}`)
+                    );
+                    appendOutput(state, "");
+                  }
+                  forceRender();
+                })();
+                return;
+              }
+
+              continue;
+            }
+
+            if (action.type === "move-up") {
+              const latestSetup = currentState.setup ?? setup;
+              currentState.setup = moveSetupSelection(latestSetup, -1);
+              continue;
+            }
+            if (action.type === "move-down") {
+              const latestSetup = currentState.setup ?? setup;
+              currentState.setup = moveSetupSelection(latestSetup, 1);
+              continue;
+            }
+            if (action.type === "submit") {
+              const latestSetup = currentState.setup ?? setup;
+              const channel = getSelectedSetupChannel(latestSetup);
+              currentState.setup = { ...latestSetup, editingChannel: channel };
+              composerRef.current = createComposer(currentState.config.channels[channel].botToken);
+              forceRender();
+              return;
+            }
+          }
+
+          forceRender();
           return;
         }
 
@@ -3522,6 +3706,7 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
     const autocompleteOverlay =
       state.uiMode === "downloader" ||
       state.uiMode === "model-manager" ||
+      state.uiMode === "setup" ||
       state.uiMode === "sessions" ||
       state.uiMode === "vt" ||
       state.uiMode === "confirm"
@@ -3550,6 +3735,18 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
           width: dimensions.columns,
           state: state.modelManager,
           currentModel: state.config.model
+        })
+      );
+    }
+    if (state.uiMode === "setup" && state.setup) {
+      outputLines.push("");
+      outputLines.push(
+        ...renderSetupLines({
+          width: dimensions.columns,
+          state: state.setup,
+          channels: state.config.channels,
+          draftToken:
+            state.setup.editingChannel !== null ? composer.getText() : ""
         })
       );
     }

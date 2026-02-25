@@ -22,6 +22,9 @@ const originalLlamaAutoStart = process.env["YIPS_LLAMA_AUTO_START"];
 const originalLlamaPortConflictPolicy = process.env["YIPS_LLAMA_PORT_CONFLICT_POLICY"];
 const originalTokensMode = process.env["YIPS_TOKENS_MODE"];
 const originalTokensManualMax = process.env["YIPS_TOKENS_MANUAL_MAX"];
+const originalWhatsappBotToken = process.env["YIPS_WHATSAPP_BOT_TOKEN"];
+const originalTelegramBotToken = process.env["YIPS_TELEGRAM_BOT_TOKEN"];
+const originalDiscordBotToken = process.env["YIPS_DISCORD_BOT_TOKEN"];
 const originalConfigPath = process.env["YIPS_CONFIG_PATH"];
 
 afterEach(() => {
@@ -95,6 +98,24 @@ afterEach(() => {
     delete process.env["YIPS_TOKENS_MANUAL_MAX"];
   } else {
     process.env["YIPS_TOKENS_MANUAL_MAX"] = originalTokensManualMax;
+  }
+
+  if (originalWhatsappBotToken === undefined) {
+    delete process.env["YIPS_WHATSAPP_BOT_TOKEN"];
+  } else {
+    process.env["YIPS_WHATSAPP_BOT_TOKEN"] = originalWhatsappBotToken;
+  }
+
+  if (originalTelegramBotToken === undefined) {
+    delete process.env["YIPS_TELEGRAM_BOT_TOKEN"];
+  } else {
+    process.env["YIPS_TELEGRAM_BOT_TOKEN"] = originalTelegramBotToken;
+  }
+
+  if (originalDiscordBotToken === undefined) {
+    delete process.env["YIPS_DISCORD_BOT_TOKEN"];
+  } else {
+    process.env["YIPS_DISCORD_BOT_TOKEN"] = originalDiscordBotToken;
   }
 
   if (originalConfigPath === undefined) {
@@ -230,6 +251,9 @@ describe("loadConfig", () => {
     process.env["YIPS_LLAMA_PORT_CONFLICT_POLICY"] = "fail";
     process.env["YIPS_TOKENS_MODE"] = "manual";
     process.env["YIPS_TOKENS_MANUAL_MAX"] = "32000";
+    process.env["YIPS_WHATSAPP_BOT_TOKEN"] = "wa-env-token";
+    process.env["YIPS_TELEGRAM_BOT_TOKEN"] = "tg-env-token";
+    process.env["YIPS_DISCORD_BOT_TOKEN"] = "dc-env-token";
 
     const result = await loadConfig(configPath);
 
@@ -244,6 +268,31 @@ describe("loadConfig", () => {
     expect(result.config.llamaPortConflictPolicy).toBe("fail");
     expect(result.config.tokensMode).toBe("manual");
     expect(result.config.tokensManualMax).toBe(32000);
+    expect(result.config.channels.whatsapp.botToken).toBe("wa-env-token");
+    expect(result.config.channels.telegram.botToken).toBe("tg-env-token");
+    expect(result.config.channels.discord.botToken).toBe("dc-env-token");
+  });
+
+  it("normalizes channels from file config", async () => {
+    const dir = await createTempDir();
+    const configPath = join(dir, "channels-config.json");
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        channels: {
+          whatsapp: { botToken: "  wa-file  " },
+          telegram: { botToken: "tg-file" },
+          discord: { botToken: "" }
+        }
+      }),
+      "utf8"
+    );
+
+    const result = await loadConfig(configPath);
+
+    expect(result.config.channels.whatsapp.botToken).toBe("wa-file");
+    expect(result.config.channels.telegram.botToken).toBe("tg-file");
+    expect(result.config.channels.discord.botToken).toBe("");
   });
 
   it("normalizes hooks config entries and timeout bounds", async () => {

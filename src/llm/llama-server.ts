@@ -29,6 +29,7 @@ interface PortOwnerInfo {
 interface LlamaRuntimeDeps {
   checkHealth: (baseUrl: string) => Promise<boolean>;
   inspectPortOwner: (host: string, port: number) => Promise<PortOwnerInfo | null>;
+  listDevices: (binaryPath: string) => number | null;
   sleep: (ms: number) => Promise<void>;
   spawnProcess: typeof spawn;
   sendSignal: (pid: number, signal: NodeJS.Signals) => void;
@@ -49,11 +50,13 @@ export interface LlamaServerFailure {
 export interface EnsureLlamaReadyResult {
   ready: boolean;
   started: boolean;
+  warnings?: string[];
   failure?: LlamaServerFailure;
 }
 
 export interface StartLlamaServerResult {
   started: boolean;
+  warnings?: string[];
   failure?: LlamaServerFailure;
 }
 
@@ -135,6 +138,7 @@ function buildDefaultDeps(overrides?: Partial<LlamaRuntimeDeps>): LlamaRuntimeDe
   return {
     checkHealth: checkLlamaHealth,
     inspectPortOwner: inspectPortOwner,
+    listDevices: detectDeviceCount,
     sleep,
     spawnProcess: spawn,
     sendSignal: (pid, signal) => {
@@ -153,6 +157,32 @@ function buildDefaultDeps(overrides?: Partial<LlamaRuntimeDeps>): LlamaRuntimeDe
     },
     ...overrides
   };
+}
+
+export function parseLlamaDeviceCount(output: string): number {
+  const lines = output
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+  if (lines.length === 0) {
+    return 0;
+  }
+  return lines.filter((line) => !/^available devices:?$/iu.test(line)).length;
+}
+
+function detectDeviceCount(binaryPath: string): number | null {
+  try {
+    const result = spawnSync(binaryPath, ["--list-devices"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"]
+    });
+    if (result.status !== 0) {
+      return null;
+    }
+    return parseLlamaDeviceCount(String(result.stdout ?? ""));
+  } catch {
+    return null;
+  }
 }
 
 async function resolveServerBinaryPath(config: AppConfig): Promise<string | null> {
@@ -656,7 +686,18 @@ export async function startLlamaServer(
   }
 
   const contextSize = config.llamaContextSize > 0 ? config.llamaContextSize : getOptimalContextSize();
-  const gpuLayers = config.llamaGpuLayers > 0 ? config.llamaGpuLayers : 999;
+  const warnings: string[] = [];
+  const configuredGpuLayers = config.llamaGpuLayers > 0 ? config.llamaGpuLayers : 999;
+  let effectiveGpuLayers = configuredGpuLayers;
+  if (configuredGpuLayers > 0) {
+    const deviceCount = deps.listDevices(context.binaryPath);
+    if (deviceCount === 0) {
+      effectiveGpuLayers = 0;
+      warnings.push(
+        `GPU offload requested (llamaGpuLayers=${configuredGpuLayers}) but llama-server reports no devices. Running CPU-only (-ngl 0). Rebuild llama.cpp with GGML_CUDA=ON.`
+      );
+    }
+  }
   const args = [
     "-m",
     context.modelPath,
@@ -668,7 +709,7 @@ export async function startLlamaServer(
     String(context.port),
     "--embedding",
     "-ngl",
-    String(gpuLayers)
+    String(effectiveGpuLayers)
   ];
 
   let process: ChildProcess;
@@ -724,7 +765,7 @@ export async function startLlamaServer(
       );
     }
     if (await deps.checkHealth(context.baseUrl)) {
-      return { started: true };
+      return warnings.length > 0 ? { started: true, warnings } : { started: true };
     }
     await deps.sleep(HEALTH_RETRY_INTERVAL_MS);
   }
@@ -753,7 +794,7 @@ export async function ensureLlamaReady(
   const deps = buildDefaultDeps(overrides);
   const baseUrl = buildBaseUrl(config);
   if (await deps.checkHealth(baseUrl)) {
-    return { ready: true, started: false };
+    return { ready: true, started: false, warnings: [] };
   }
 
   if (!config.llamaAutoStart) {
@@ -777,7 +818,11 @@ export async function ensureLlamaReady(
     };
   }
 
-  return { ready: true, started: started.started };
+  return {
+    ready: true,
+    started: started.started,
+    warnings: started.warnings ?? []
+  };
 }
 
 export function formatLlamaStartupFailure(failure: LlamaServerFailure, config: AppConfig): string {

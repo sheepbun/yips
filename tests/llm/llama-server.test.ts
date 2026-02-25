@@ -10,6 +10,7 @@ import {
   ensureLlamaReady,
   formatLlamaStartupFailure,
   isLocalLlamaEndpoint,
+  parseLlamaDeviceCount,
   resetLlamaForFreshSession,
   startLlamaServer,
   stopLlamaServer
@@ -262,6 +263,76 @@ describe("startLlamaServer", () => {
     expect(result.failure?.kind).toBe("port-unavailable");
     expect(result.failure?.details.join("\n")).toContain("couldn't bind");
     await rm(root, { recursive: true, force: true });
+  });
+
+  it("warns and forces -ngl 0 when GPU layers are requested but no devices are found", async () => {
+    const root = await mkdtemp(join(tmpdir(), "yips-llama-model-"));
+    const modelPath = join(root, "model.gguf");
+    await writeFile(modelPath, "binary", "utf8");
+
+    const { process: child } = createMockProcess(null);
+    const spawnProcess = vi.fn().mockReturnValue(child);
+    const result = await startLlamaServer(
+      withConfig({
+        model: modelPath,
+        llamaServerPath: "/bin/true",
+        llamaGpuLayers: 999
+      }),
+      {
+        inspectPortOwner: vi.fn().mockResolvedValue(null),
+        checkHealth: vi.fn().mockResolvedValue(true),
+        spawnProcess,
+        listDevices: vi.fn().mockReturnValue(0)
+      }
+    );
+
+    expect(result.started).toBe(true);
+    expect(result.warnings?.[0]).toContain("Running CPU-only (-ngl 0)");
+    const args = spawnProcess.mock.calls[0]?.[1] as string[];
+    expect(args).toContain("-ngl");
+    const nglIndex = args.indexOf("-ngl");
+    expect(args[nglIndex + 1]).toBe("0");
+    await rm(root, { recursive: true, force: true });
+  });
+
+  it("keeps configured gpu layers when devices are available", async () => {
+    const root = await mkdtemp(join(tmpdir(), "yips-llama-model-"));
+    const modelPath = join(root, "model.gguf");
+    await writeFile(modelPath, "binary", "utf8");
+
+    const { process: child } = createMockProcess(null);
+    const spawnProcess = vi.fn().mockReturnValue(child);
+    const result = await startLlamaServer(
+      withConfig({
+        model: modelPath,
+        llamaServerPath: "/bin/true",
+        llamaGpuLayers: 77
+      }),
+      {
+        inspectPortOwner: vi.fn().mockResolvedValue(null),
+        checkHealth: vi.fn().mockResolvedValue(true),
+        spawnProcess,
+        listDevices: vi.fn().mockReturnValue(1)
+      }
+    );
+
+    expect(result.started).toBe(true);
+    expect(result.warnings ?? []).toEqual([]);
+    const args = spawnProcess.mock.calls[0]?.[1] as string[];
+    const nglIndex = args.indexOf("-ngl");
+    expect(args[nglIndex + 1]).toBe("77");
+    await rm(root, { recursive: true, force: true });
+  });
+});
+
+describe("parseLlamaDeviceCount", () => {
+  it("returns 0 for header-only output", () => {
+    expect(parseLlamaDeviceCount("Available devices:\n")).toBe(0);
+  });
+
+  it("counts non-empty device lines", () => {
+    const output = ["Available devices:", "CUDA0: NVIDIA GeForce RTX 3080", ""].join("\n");
+    expect(parseLlamaDeviceCount(output)).toBe(1);
   });
 });
 

@@ -73,12 +73,20 @@ Rolling implementation handoff between exchanges, stored as one file per entry.
 - [13:03 — Exchange 178](./progress-log/2026/02/25/1303-exchange-178.md)
 - [13:09 — Exchange 179](./progress-log/2026/02/25/1309-exchange-179.md)
 - [13:25 — Exchange 180](./progress-log/2026/02/25/1325-exchange-180.md)
+- [13:36 — Exchange 181](./progress-log/2026/02/25/1336-exchange-181.md)
 - [13:40 — Exchange 134](./progress-log/2026/02/25/1340-exchange-134.md)
 - [13:45 — Exchange 135](./progress-log/2026/02/25/1345-exchange-135.md)
 - [13:48 — Exchange 136](./progress-log/2026/02/25/1348-exchange-136.md)
 - [13:58 — Exchange 137](./progress-log/2026/02/25/1358-exchange-137.md)
 - [14:42 — Exchange 140](./progress-log/2026/02/25/1442-exchange-140.md)
 - [14:45 — Exchange 141](./progress-log/2026/02/25/1445-exchange-141.md)
+- [14:47 — Exchange 182](./progress-log/2026/02/25/1447-exchange-182.md)
+- [15:21 — Exchange 183](./progress-log/2026/02/25/1521-exchange-183.md)
+- [15:41 — Exchange 184](./progress-log/2026/02/25/1541-exchange-184.md)
+- [16:03 — Exchange 185](./progress-log/2026/02/25/1603-exchange-185.md)
+- [16:07 — Exchange 186](./progress-log/2026/02/25/1607-exchange-186.md)
+- [16:18 — Exchange 187](./progress-log/2026/02/25/1618-exchange-187.md)
+- [16:24 — Exchange 188](./progress-log/2026/02/25/1624-exchange-188.md)
 
 ### 2026-02-24
 

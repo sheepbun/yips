@@ -40,6 +40,7 @@ const RESTORED_COMMAND_DEFAULTS: ReadonlyArray<{
   { name: "quit", description: "Exit Yips", kind: "builtin" },
   { name: "search", description: "Search the web (DuckDuckGo)", kind: "tool" },
   { name: "sessions", description: "Interactively select and load a session", kind: "builtin" },
+  { name: "setup", description: "Configure external chat channels", kind: "builtin" },
   { name: "stream", description: "Toggle streaming responses", kind: "builtin" },
   { name: "tokens", description: "Show or set token counter mode and max", kind: "builtin" },
   { name: "update", description: "Check for newer Yips versions and upgrade guidance", kind: "builtin" },

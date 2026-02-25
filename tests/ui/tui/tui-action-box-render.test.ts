@@ -129,6 +129,42 @@ describe("renderAssistantStreamForDisplay", () => {
     expect(plain).not.toContain("● Read(README.md)");
   });
 
+  it("keeps plain-text preview before envelope and converts to final assistant text when envelope completes", () => {
+    const preview = renderAssistantStreamForDisplay(
+      "Working on it...\n```yips-agent\n{\"actions\":[{\"type\":\"tool\"",
+      new Date(2026, 1, 25, 11, 40),
+      false
+    );
+    const previewPlain = stripMarkup(preview);
+    expect(previewPlain).toContain("Yips: Working on it...");
+    expect(previewPlain).not.toContain("```yips-agent");
+
+    const finalRendered = renderAssistantStreamForDisplay(
+      [
+        "Working on it...",
+        "```yips-agent",
+        JSON.stringify({
+          assistant_text: "Finished check. Running tool call now.",
+          actions: [
+            {
+              type: "tool",
+              id: "t1",
+              name: "read_file",
+              arguments: { path: "README.md" }
+            }
+          ]
+        }),
+        "```"
+      ].join("\n"),
+      new Date(2026, 1, 25, 11, 40),
+      false
+    );
+    const finalPlain = stripMarkup(finalRendered);
+    expect(finalPlain).toContain("Yips: Working on it...");
+    expect(finalPlain).toContain("Finished check. Running tool call now.");
+    expect(finalPlain).not.toContain("```yips-agent");
+  });
+
   it("renders assistant_text from unfenced raw envelope JSON instead of dumping JSON", () => {
     const rendered = renderAssistantStreamForDisplay(
       JSON.stringify({

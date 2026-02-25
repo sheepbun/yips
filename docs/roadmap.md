@@ -20,7 +20,7 @@ Terminal interface with LLM integration.
 - [x] Streaming display: token-by-token rendering
 - [x] Conversation history: in-memory message list and context assembly
 - [x] Slash command system: parse `/command args`, dispatch to handlers
-- [x] Built-in commands: `/exit`, `/clear`, `/model`, `/stream`, `/verbose`
+- [x] Built-in commands: `/exit`, `/clear`, `/model`, `/stream`, `/verbose`, `/setup`
 - [x] Loading indicators and error display
 
 ## Milestone 2: Agent System

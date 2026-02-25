@@ -12,6 +12,14 @@ export interface HookConfig {
   timeoutMs?: number;
 }
 
+export type GatewayChannel = "whatsapp" | "telegram" | "discord";
+
+export interface GatewayChannelConfig {
+  botToken: string;
+}
+
+export type GatewayChannelsConfig = Record<GatewayChannel, GatewayChannelConfig>;
+
 export interface AppConfig {
   streaming: boolean;
   verbose: boolean;
@@ -29,6 +37,7 @@ export interface AppConfig {
   tokensMode: "auto" | "manual";
   tokensManualMax: number;
   nicknames: Record<string, string>;
+  channels: GatewayChannelsConfig;
   hooks: Partial<Record<HookName, HookConfig>>;
 }
 

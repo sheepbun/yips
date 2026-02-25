@@ -22,7 +22,8 @@ export interface CommandResult {
     | { type: "open-downloader" }
     | { type: "open-model-manager" }
     | { type: "open-sessions" }
-    | { type: "open-vt" };
+    | { type: "open-vt" }
+    | { type: "open-setup" };
 }
 
 export interface SessionContext {
@@ -332,6 +333,12 @@ export function createDefaultRegistry(): CommandRegistry {
     "vt",
     async () => ({ action: "continue", uiAction: { type: "open-vt" } }),
     "Open Virtual Terminal"
+  );
+
+  registry.register(
+    "setup",
+    async () => ({ action: "continue", uiAction: { type: "open-setup" } }),
+    "Configure external chat channels"
   );
 
   registry.register(

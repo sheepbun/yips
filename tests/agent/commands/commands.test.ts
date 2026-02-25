@@ -130,6 +130,7 @@ describe("createDefaultRegistry", () => {
     expect(registry.has("backend")).toBe(true);
     expect(registry.has("sessions")).toBe(true);
     expect(registry.has("download")).toBe(true);
+    expect(registry.has("setup")).toBe(true);
     expect(registry.has("models")).toBe(false);
     expect(registry.has("search")).toBe(true);
     expect(registry.has("vt")).toBe(true);
@@ -313,6 +314,13 @@ describe("createDefaultRegistry", () => {
     const result = await registry.dispatch("sessions", "", createContext());
     expect(result.action).toBe("continue");
     expect(result.uiAction).toEqual({ type: "open-sessions" });
+  });
+
+  it("/setup opens channel setup mode", async () => {
+    const registry = createDefaultRegistry();
+    const result = await registry.dispatch("setup", "", createContext());
+    expect(result.action).toBe("continue");
+    expect(result.uiAction).toEqual({ type: "open-setup" });
   });
 
   it("/vt opens virtual terminal mode", async () => {

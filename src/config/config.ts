@@ -6,6 +6,8 @@ import { resolve } from "node:path";
 import type {
   AppConfig,
   Backend,
+  GatewayChannel,
+  GatewayChannelsConfig,
   HookConfig,
   HookName,
   LlamaPortConflictPolicy
@@ -37,6 +39,7 @@ const DEFAULT_HOOK_TIMEOUT_MS = 10_000;
 const MAX_HOOK_TIMEOUT_MS = 120_000;
 export const DEFAULT_CONFIG_PATH = ".yips_config.json";
 export const CONFIG_PATH_ENV_VAR = "YIPS_CONFIG_PATH";
+const SUPPORTED_GATEWAY_CHANNELS: readonly GatewayChannel[] = ["whatsapp", "telegram", "discord"];
 
 export function getDefaultConfig(): AppConfig {
   const llamaHost = "127.0.0.1";
@@ -58,6 +61,11 @@ export function getDefaultConfig(): AppConfig {
     tokensMode: "auto",
     tokensManualMax: 8192,
     nicknames: {},
+    channels: {
+      whatsapp: { botToken: "" },
+      telegram: { botToken: "" },
+      discord: { botToken: "" }
+    },
     hooks: {}
   };
 }
@@ -285,6 +293,39 @@ function normalizeHooks(
   return next;
 }
 
+function normalizeGatewayChannelConfig(
+  value: unknown,
+  fallback: GatewayChannelsConfig[GatewayChannel]
+): GatewayChannelsConfig[GatewayChannel] {
+  if (!isRecord(value)) {
+    return { ...fallback };
+  }
+  return {
+    botToken: normalizeString(value.botToken, fallback.botToken)
+  };
+}
+
+function normalizeGatewayChannels(
+  value: unknown,
+  fallback: GatewayChannelsConfig
+): GatewayChannelsConfig {
+  const next: GatewayChannelsConfig = {
+    whatsapp: { ...fallback.whatsapp },
+    telegram: { ...fallback.telegram },
+    discord: { ...fallback.discord }
+  };
+
+  if (!isRecord(value)) {
+    return next;
+  }
+
+  for (const channel of SUPPORTED_GATEWAY_CHANNELS) {
+    next[channel] = normalizeGatewayChannelConfig(value[channel], fallback[channel]);
+  }
+
+  return next;
+}
+
 function applyEnvOverrides(config: AppConfig): AppConfig {
   const envHost = normalizeHost(process.env["YIPS_LLAMA_HOST"], config.llamaHost);
   const envPort = normalizePort(process.env["YIPS_LLAMA_PORT"], config.llamaPort);
@@ -314,6 +355,26 @@ function applyEnvOverrides(config: AppConfig): AppConfig {
     model: normalizeModel(process.env["YIPS_MODEL"], config.model),
     tokensMode: normalizeTokensMode(process.env["YIPS_TOKENS_MODE"], config.tokensMode),
     tokensManualMax: normalizePositiveInt(process.env["YIPS_TOKENS_MANUAL_MAX"], config.tokensManualMax),
+    channels: {
+      whatsapp: {
+        botToken: normalizeString(
+          process.env["YIPS_WHATSAPP_BOT_TOKEN"],
+          config.channels.whatsapp.botToken
+        )
+      },
+      telegram: {
+        botToken: normalizeString(
+          process.env["YIPS_TELEGRAM_BOT_TOKEN"],
+          config.channels.telegram.botToken
+        )
+      },
+      discord: {
+        botToken: normalizeString(
+          process.env["YIPS_DISCORD_BOT_TOKEN"],
+          config.channels.discord.botToken
+        )
+      }
+    },
     hooks: normalizeHooks(config.hooks, config.hooks)
   };
 }
@@ -348,6 +409,7 @@ export function mergeConfig(defaults: AppConfig, candidate: unknown): AppConfig 
     tokensMode: normalizeTokensMode(candidate.tokensMode, defaults.tokensMode),
     tokensManualMax: normalizePositiveInt(candidate.tokensManualMax, defaults.tokensManualMax),
     nicknames: normalizeNicknames(candidate.nicknames, defaults.nicknames),
+    channels: normalizeGatewayChannels(candidate.channels, defaults.channels),
     hooks: normalizeHooks(candidate.hooks, defaults.hooks)
   };
 }

@@ -53,6 +53,8 @@ These commands invoke specialized capabilities. Some are agent-invocable (the ag
 | `/fetch <url>`     | Retrieve and display content from a URL                                   |
 | `/grab <file>`     | Read a file's content into context                                        |
 | `/memorize <fact>` | Save a fact to long-term memory                                           |
+| `/memorize list`   | List recent long-term memories                                            |
+| `/memorize read`   | Read a memory by id from `/memorize list`                                 |
 | `/vt`              | Open the modal Virtual Terminal (`Esc Esc` or `Ctrl+Q` to return to chat) |
 
 ### Complete List
@@ -64,6 +66,14 @@ All commands recognized by yips-cli, carried forward to the TypeScript rewrite:
 /fetch      /grab       /help       /memorize   /model
 /new        /nick       /quit       /search
 /sessions   /stream     /tokens     /verbose    /vt
+```
+
+`/memorize` usage:
+
+```text
+/memorize <fact>
+/memorize list [limit]
+/memorize read <memory_id>
 ```
 
 ## Tab Autocompletion
@@ -86,4 +96,4 @@ In a future milestone, Yips will support user-defined commands. Custom commands 
 
 ---
 
-> Last updated: 2026-02-24
+> Last updated: 2026-02-25

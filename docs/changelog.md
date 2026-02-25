@@ -51,6 +51,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Session persistence module (`src/session-store.ts`) with save/list/load support for markdown session files in `~/.yips/memory`
 - `/sessions` command implementation in the TypeScript rewrite (interactive session browser mode in TUI)
 - `/tokens` command implementation with `auto` and manual modes for title-box token max control
+- `src/conductor.ts` orchestration module for assistant response chaining, tool-call execution rounds, and depth-capped loop control
+- `src/tui-input-routing.ts` deterministic input routing helpers for confirmation decisions and VT escape handling
+- New tests:
+  - `tests/conductor.test.ts` for tool-chaining and max-depth behavior
+  - `tests/tui-input-routing.test.ts` for confirm and VT routing behavior
+- Conductor automatic-pivot guidance for repeated tool-failure rounds (injects recovery system context after consecutive all-failed tool rounds)
+- Subagent delegation system:
+  - `subagent_calls` support in `yips-tools` protocol parsing
+  - Conductor delegation hook for subagent lifecycle execution and result injection
+  - TUI runtime subagent runner with scoped history, per-call round caps, and optional allowed-tool filtering
+  - new delegation tests in `tests/conductor.test.ts` and parser coverage in `tests/tool-protocol.test.ts`
+- Hardware-aware startup model auto-selection:
+  - startup now selects a local runnable model when config model is unset (`default`)
+  - selection prefers the largest model that fits detected VRAM, with fallback to the largest runnable RAM+VRAM-fit model
+  - selected model is persisted to config before llama startup reset
+- Long-term memory system:
+  - added `src/memory-store.ts` with save/list/read APIs for markdown memories under `~/.yips/memories`
+  - implemented `/memorize` command (`/memorize <fact>`, `/memorize list [limit]`, `/memorize read <id>`)
+  - added tests in `tests/memory-store.test.ts` and expanded `/memorize` command coverage in `tests/commands.test.ts`
 
 ### Changed
 
@@ -88,6 +107,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - TUI now auto-creates and updates session files after exchanges, derives session names from first user prompt, and restores history from selected sessions
 - Title-box token usage now renders as `x.x/y.yk tks`, with auto max derived from RAM-after-model-load and manual override via `/tokens`
 - Ink TUI chat scrollback now supports mouse wheel input (with `PgUp`/`PgDn` fallback), including terminal mouse-reporting enable/disable during app lifetime
+- `src/tui.ts` now delegates chat/tool orchestration to the Conductor module and uses extracted confirm/VT routing helpers, reducing inline control-flow complexity without changing user-visible behavior
+- Milestone 2 recovery behavior now includes automatic pivoting when tool executions fail repeatedly, so the assistant is steered toward alternate approaches instead of repeating failing calls
+- Milestone 2 now includes Conductor-managed subagent delegation, scoped context execution, and lifecycle result chaining
+- Milestone 3 hardware detection now includes GPU/VRAM-aware startup model auto-selection from local GGUF inventory
 
 ## Legacy (yips-cli)
 

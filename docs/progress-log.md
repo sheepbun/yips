@@ -2509,7 +2509,7 @@ Changed:
 - Updated tests:
   - `tests/input-engine.test.ts` now covers page-key parsing and emitted scroll actions.
   - `tests/tui-resize-render.test.ts` now covers scrollback-offset viewport behavior.
-  Validation:
+    Validation:
 - `npm test -- tests/input-engine.test.ts tests/tui-resize-render.test.ts` — clean
 - `npm run typecheck` — clean
 - `npm test` — clean (31 files, 283 tests)
@@ -2531,7 +2531,7 @@ Changed:
   - `/model <arg>` command path now immediately preloads newly selected model and reports preload failure inline.
 - Updated tests:
   - `tests/tui-busy-indicator.test.ts` now verifies GPU/CPU loading label formatting.
-  Validation:
+    Validation:
 - `npm test -- tests/tui-busy-indicator.test.ts tests/tui-startup-reset.test.ts` — clean
 - `npm run typecheck` — clean
 - `npm test` — clean (31 files, 285 tests)
@@ -2574,7 +2574,7 @@ Changed:
     - appends loading line,
     - awaits preload,
     - appends completion line,
-    before returning to chat.
+      before returning to chat.
 - Kept forced local reload path (`resetLlamaForFreshSession`) for explicit model-switch preloads.
   Validation:
 - `npm run typecheck` — clean
@@ -2597,7 +2597,7 @@ Changed:
     - `Loading <model> into <GPU/CPU>...`
     - `Model preload complete.` (or error output on failure)
   - avoids showing preload inside manager-only loading state.
-  Validation:
+    Validation:
 - `npm run typecheck` — clean
 - `npm test -- tests/commands.test.ts tests/tui-busy-indicator.test.ts tests/tui-resize-render.test.ts` — clean
 - `npm test` — clean (31 files, 285 tests)
@@ -2612,7 +2612,7 @@ Changed:
 - Updated `src/tui.ts` chat loop:
   - after `requestAssistantFromLlama()`, assistant text is no longer appended again when `reply.rendered === true`.
   - streamed responses now render once (live token updates) while still recording assistant content to history.
-  Validation:
+    Validation:
 - `npm run typecheck` — clean
 - `npm test -- tests/tui-busy-indicator.test.ts tests/tui-resize-render.test.ts tests/commands.test.ts` — clean
 - `npm test` — clean (31 files, 285 tests)
@@ -2627,7 +2627,7 @@ Changed:
 - Updated `src/tui.ts` chat loop post-reply rendering:
   - always appends one trailing blank output line after assistant content is accepted.
   - preserves prior guard that avoids double-rendering streamed assistant message bodies.
-  Validation:
+    Validation:
 - `npm run typecheck` — clean
 - `npm test -- tests/commands.test.ts tests/tui-resize-render.test.ts tests/tui-busy-indicator.test.ts` — clean
   Next:
@@ -2644,7 +2644,7 @@ Changed:
   - this prevents accumulated leading blank spacer rows from counting as title-collision pressure.
 - Updated `tests/tui-resize-render.test.ts`:
   - added regression case verifying title remains fully visible when output window has many leading blank rows before first visible content line.
-  Validation:
+    Validation:
 - `npm test -- tests/tui-resize-render.test.ts` — clean
 - `npm run typecheck` — clean
 - `npm test` — clean (31 files, 286 tests)
@@ -2663,7 +2663,7 @@ Changed:
   - removed Model Manager submit path chat-output lines for the same preload status text.
   - removed startup `process.stdout.write(...)` preload banner before Ink mount.
   - preserved actual preload behavior and failure reporting (errors still surface).
-  Validation:
+    Validation:
 - `npm run typecheck` — clean
 - `npm test -- tests/commands.test.ts tests/tui-resize-render.test.ts tests/tui-busy-indicator.test.ts` — clean
   Next:
@@ -2678,7 +2678,7 @@ Changed:
   - `/model <arg>` command output is now suppressed in TUI render path (command still updates config/model and runs preload).
   - Model Manager submit path no longer appends `Model set to: ...` line before preload.
   - preserves error output when save/preload fails.
-  Validation:
+    Validation:
 - `npm run typecheck` — clean
 - `npm test -- tests/commands.test.ts tests/tui-resize-render.test.ts tests/tui-busy-indicator.test.ts` — clean
   Next:
@@ -2693,7 +2693,7 @@ Changed:
   - removed trailing blank append after successful Model Manager model switch preload.
   - with prior changes, successful model switches now add no persistent output lines in TUI.
   - errors still append visible diagnostics.
-  Validation:
+    Validation:
 - `npm run typecheck` — clean
 - `npm test -- tests/commands.test.ts tests/tui-resize-render.test.ts` — clean
   Next:
@@ -2710,12 +2710,12 @@ Changed:
     - `Model set to: ...`
     - `Loading ... into GPU/CPU...`
     - `Model preload complete.`
-    and trims trailing blank lines afterward.
+      and trims trailing blank lines afterward.
   - wired cleanup before preload in both model-switch paths:
     - `/model <arg>` command path
     - Model Manager `submit` selection path
   - ensures old status lines from earlier runs/flows do not keep affecting layout after switching models.
-  Validation:
+    Validation:
 - `npm run typecheck` — clean
 - `npm test -- tests/commands.test.ts tests/tui-resize-render.test.ts tests/tui-busy-indicator.test.ts` — clean
 - `npm test` — clean (31 files, 286 tests)
@@ -2735,7 +2735,7 @@ Changed:
   - output rendering still preserves trailing spacer rows, so visual spacing before prompt remains.
 - Updated `tests/tui-resize-render.test.ts`:
   - added regression test asserting trailing spacer rows do not push title early.
-  Validation:
+    Validation:
 - `npm test -- tests/tui-resize-render.test.ts` — clean
 - `npm run typecheck` — clean
 - `npm test` — clean (31 files, 287 tests)
@@ -2753,7 +2753,7 @@ Changed:
   - prevents whitespace-only/ANSI-styled blank lines from counting toward title collision pressure.
 - Updated `tests/tui-resize-render.test.ts`:
   - added regression test asserting whitespace-only rows (plain and ANSI-colored) do not push the title early.
-  Validation:
+    Validation:
 - `npm test -- tests/tui-resize-render.test.ts` — clean (21 passing)
 - `npm run typecheck` — clean
   Next:
@@ -2771,7 +2771,7 @@ Changed:
   - added explicit row-budget guard to keep rendered output within available rows.
 - Updated `tests/tui-resize-render.test.ts`:
   - strengthened trailing-spacer regression to assert spacer row is dropped when constrained and total rendered rows exactly match terminal height.
-  Validation:
+    Validation:
 - `npm test -- tests/tui-resize-render.test.ts` — clean (21 passing)
 - `npm run typecheck` — clean
   Next:
@@ -2789,7 +2789,7 @@ Changed:
   - trailing spacer rows are still only included when row budget remains.
 - Updated `tests/tui-resize-render.test.ts`:
   - added regression `counts wrapped output rows before displacing title` to lock wrapped-line collision behavior.
-  Validation:
+    Validation:
 - `npm test -- tests/tui-resize-render.test.ts` — clean (22 passing)
 - `npm run typecheck` — clean
   Next:
@@ -2808,7 +2808,7 @@ Changed:
 - Updated `tests/tui-resize-render.test.ts`:
   - adjusted layout expectations for the new reserved title gap behavior.
   - retained wrapped-row and spacer regressions under new policy.
-  Validation:
+    Validation:
 - `npm test -- tests/tui-resize-render.test.ts` — clean (22 passing)
 - `npm run typecheck` — clean
   Next:
@@ -2833,7 +2833,7 @@ Changed:
 - Updated docs:
   - `docs/guides/getting-started.md` now documents mouse-wheel chat scrollback and `PgUp`/`PgDn` fallback.
   - `docs/changelog.md` updated with the new scrollback behavior and refreshed last-updated date.
-  Validation:
+    Validation:
 - `npm run typecheck` — clean
 - `npm run lint` — clean
 - `npm test -- tests/input-engine.test.ts tests/tui-resize-render.test.ts` — clean
@@ -2853,7 +2853,7 @@ Changed:
 - Updated `tests/tui-resize-render.test.ts`:
   - adjusted existing scrollback expectation for scrolled underfill behavior.
   - added regression: top scrollback cap keeps first content line visible directly under title when a large offset is requested.
-  Validation:
+    Validation:
 - `npm run typecheck` — clean
 - `npm run lint` — clean
 - `npm test -- tests/tui-resize-render.test.ts` — clean
@@ -2876,7 +2876,7 @@ Changed:
 - Updated `tests/tui-resize-render.test.ts`:
   - retained/confirmed baseline intermediate scroll expectation.
   - kept top-scroll cap regression introduced in Exchange 92 to guard requested top-stop behavior.
-  Validation:
+    Validation:
 - `npm run typecheck` — clean
 - `npm run lint` — clean
 - `npm test` — clean (31 files, 293 tests)
@@ -2896,7 +2896,7 @@ Changed:
   - scroll offset is now clamped against that cap in the input path, preventing further upward drift once title+chat boundary is reached.
 - Updated `tests/tui-resize-render.test.ts`:
   - added `computeTitleVisibleScrollCap` regression test asserting cap lands on full-title + first-chat-below layout.
-  Validation:
+    Validation:
 - `npm run typecheck` — clean
 - `npm run lint` — clean
 - `npm test` — clean (31 files, 294 tests)
@@ -2917,7 +2917,7 @@ Changed:
 - Updated `tests/tui-resize-render.test.ts`:
   - updated scrolled-layout expectation to reflect fixed-title scroll mode in narrow viewport.
   - retained cap behavior regression.
-  Validation:
+    Validation:
 - `npm run typecheck` — clean
 - `npm run lint` — clean
 - `npm test` — clean (31 files, 294 tests)
@@ -2940,7 +2940,7 @@ Changed:
 - Updated `tests/tui-resize-render.test.ts`:
   - restored intermediate scroll expectation (title can still be displaced while scrolling).
   - retained top-cap regression coverage.
-  Validation:
+    Validation:
 - `npm run typecheck` — clean
 - `npm run lint` — clean
 - `npm test -- tests/tui-resize-render.test.ts` — clean
@@ -3042,3 +3042,160 @@ Validation:
 Next:
 
 - Optional live-terminal pass to confirm transcript spacing feels correct during streaming and non-streaming reply modes.
+
+## 2026-02-25 04:34 UTC — Exchange 97
+
+Summary: Extracted a dedicated Conductor orchestration module from `tui.ts`, added deterministic confirm/VT input-routing helpers, and synchronized roadmap state to current Milestone 2 completion.
+Changed:
+
+- Added `src/conductor.ts`:
+  - new `runConductorTurn(...)` for response chaining, tool-call rounds, tool-result feedback injection, and max-depth cutoff handling.
+  - exported typed contracts for assistant replies/dependencies/results (`ConductorAssistantReply`, `ConductorDependencies`, `ConductorTurnResult`).
+- Added `src/tui-input-routing.ts`:
+  - `decideConfirmationAction(...)` for confirm modal key intent (`y/n/yes/no/enter/esc`).
+  - `routeVtInput(...)` for VT escape/control routing (`Esc Esc`, `Ctrl+Q`, passthrough).
+- Updated `src/tui.ts`:
+  - chat/tool loop now delegates to `runConductorTurn(...)` instead of inline parsing/chaining logic.
+  - confirm-mode and VT-mode stdin branches now use extracted routing helpers.
+  - preserved existing output behavior (assistant trailing spacer line, tool-loop depth warning text, and error paths).
+- Added tests:
+  - `tests/conductor.test.ts` for no-tool path, tool-chaining/system-result injection, denied-tool continuation, and max-depth warning behavior.
+  - `tests/tui-input-routing.test.ts` for confirmation decision mapping and VT routing semantics.
+- Updated docs:
+  - `docs/roadmap.md` now marks completed Milestone 2 items (tool protocol, file ops, shell guardrails, destructive confirmation, working zone enforcement, CODE.md injection, and Conductor extraction), plus session management/tab autocomplete/install script completion status updates.
+  - `docs/changelog.md` updated with Conductor extraction and input-routing helper/test additions.
+    Validation:
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+- `npm test` — clean (34 files, 309 tests)
+  Next:
+- Add a focused stdin-integration harness that asserts repeated wheel/page scroll events and mode routing transitions through the live `stdin.on("data")` path, complementing current pure-helper coverage.
+- Begin Milestone 2 subagent-system design extraction (scoped context + lifecycle) now that Conductor boundaries are explicit.
+
+## 2026-02-25 04:35 UTC — Exchange 98
+
+Summary: Continued Milestone 2 by implementing automatic error recovery pivoting in the Conductor loop; roadmap now marks `Error recovery and automatic pivoting` complete.
+Changed:
+
+- Updated `src/conductor.ts`:
+  - added consecutive tool-failure detection (`error`/`denied`/`timeout` statuses).
+  - after two consecutive all-failed tool rounds, conductor now injects a recovery system message:
+    - `Automatic pivot: consecutive tool failures detected...`
+  - emits a warning callback when pivot guidance is injected (`Consecutive tool failures detected. Attempting an alternative approach.`).
+  - resets failure streak after pivot injection or successful/mixed-result tool rounds.
+- Updated `tests/conductor.test.ts`:
+  - added regression test covering two failing tool rounds followed by successful pivot response.
+  - asserts warning callback and pivot system-message injection behavior.
+- Updated docs:
+  - `docs/roadmap.md` now marks Milestone 2 `Error recovery and automatic pivoting` as complete.
+  - `docs/changelog.md` updated with automatic pivoting behavior notes.
+    Validation:
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+- `npm test` — clean (34 files, 310 tests)
+  Next:
+- Implement Milestone 2 subagent system (delegation, scoped context, lifecycle management) as the remaining open item in Milestone 2.
+- Add a focused stdin integration harness that validates live `stdin.on("data")` mode-routing transitions in one end-to-end flow.
+
+## 2026-02-25 21:42 UTC — Exchange 99
+
+Summary: Implemented Milestone 2 subagent delegation with scoped context and lifecycle result chaining.
+Changed:
+
+- Extended protocol/types for subagent delegation:
+  - `src/types.ts`: added `SubagentCall` / `SubagentResult` contracts.
+  - `src/tool-protocol.ts`: parser now accepts `subagent_calls` in ` ```yips-tools ` blocks with normalized `task`, optional `context`, optional `allowed_tools`, and optional `max_rounds`.
+- Updated Conductor orchestration (`src/conductor.ts`):
+  - added optional `executeSubagentCalls(...)` dependency.
+  - runs delegation rounds when `subagent_calls` are present and injects `Subagent results: ...` into system history.
+  - warns and emits fallback error results when delegation is requested but no subagent runner is configured.
+- Wired runtime subagent execution in `src/tui.ts`:
+  - `requestAssistantFromLlama(...)` now supports scoped request options (`historyOverride`, `codeContextOverride`, `busyLabel`, `streamingOverride`).
+  - added delegated subagent executor that spawns scoped histories, enforces per-call allowed tool lists, runs bounded conductor loops, and returns lifecycle metadata (rounds/duration/warnings).
+  - main chat turn now passes `executeSubagentCalls` into `runConductorTurn(...)`.
+- Added/updated tests:
+  - `tests/tool-protocol.test.ts`: covers valid `subagent_calls` parsing.
+  - `tests/conductor.test.ts`: covers delegated subagent result chaining and missing-runner fallback warnings.
+- Docs updates:
+  - `docs/roadmap.md`: marked Milestone 2 `Subagent system` complete.
+  - `docs/changelog.md`: added subagent system implementation notes under Unreleased.
+
+Validation:
+
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+- `npm test -- tests/conductor.test.ts tests/tool-protocol.test.ts` — clean
+- `npm test` — clean (34 files, 313 tests)
+
+Next:
+
+- Reconcile Milestone 3 `Hardware detection` roadmap status with implemented `src/hardware.ts` behavior (either complete the remaining auto-selection wiring or document the remaining gap explicitly).
+- Add a focused integration harness for live `stdin.on("data")` mode transitions and scroll event saturation (the existing optional follow-up from Exchanges 97/98).
+
+## 2026-02-25 21:45 UTC — Exchange 100
+
+Summary: Completed Milestone 3 hardware detection roadmap gap by adding GPU/VRAM-aware startup model auto-selection.
+Changed:
+
+- Added hardware-aware model chooser in `src/model-manager.ts`:
+  - new `selectBestModelForHardware(models, specs)`.
+  - selection policy:
+    - prefer the largest runnable model that fits detected VRAM when GPU memory is available,
+    - otherwise fall back to the largest runnable model that fits overall RAM+VRAM suitability.
+- Updated startup flow in `src/tui.ts`:
+  - added `applyHardwareAwareStartupModelSelection(...)`.
+  - `startTui(...)` now runs this selection step before `ensureFreshLlamaSessionOnStartup(...)`.
+  - behavior applies only when backend is `llamacpp` and configured model is unresolved (`default`/empty).
+  - selected model is persisted via `saveConfig(...)` so subsequent starts keep the resolved model.
+- Added tests:
+  - `tests/model-manager.test.ts` now covers VRAM-fit preference and fallback selection behavior.
+  - `tests/tui-startup-reset.test.ts` now covers startup auto-selection/persist behavior and skip-when-already-selected behavior.
+- Updated docs:
+  - `docs/roadmap.md`: marked Milestone 3 `Hardware detection: GPU/VRAM-aware model selection` complete.
+  - `docs/changelog.md`: added unreleased notes for startup auto-selection and milestone status update.
+
+Validation:
+
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+- `npm test -- tests/model-manager.test.ts tests/tui-startup-reset.test.ts` — clean
+- `npm test` — clean (34 files, 317 tests)
+
+Next:
+
+- Implement Milestone 3 memory system (`save/read/list conversation memories`) or hooks (`user-defined lifecycle scripts`) as the next unchecked roadmap item.
+
+## 2026-02-25 — Exchange 101
+
+Summary: Implemented Milestone 3 memory system with persistent save/list/read support and `/memorize` command subcommands.
+Changed:
+
+- Added `src/memory-store.ts`:
+  - persistent markdown-backed memory storage at `~/.yips/memories` (override via `YIPS_MEMORIES_DIR`)
+  - `saveMemory(content)`, `listMemories(limit?)`, and `readMemory(id)` APIs
+  - timestamped memory ids (`YYYY-MM-DD_HH-MM-SS_slug`) with preview extraction for list output
+- Updated `src/commands.ts`:
+  - implemented `/memorize` command behavior in the TypeScript rewrite
+  - supports:
+    - `/memorize <fact>` to save memory
+    - `/memorize list [limit]` to list recent memories
+    - `/memorize read <memory_id>` to read a saved memory
+    - `/memorize help` usage text
+- Added tests:
+  - `tests/memory-store.test.ts` for save/list/read and empty-memory rejection
+  - expanded `tests/commands.test.ts` with `/memorize` save/list/read command coverage
+- Updated docs:
+  - `docs/roadmap.md` marks Milestone 3 `Memory system` complete
+  - `docs/guides/slash-commands.md` documents `/memorize` list/read usage
+  - `docs/changelog.md` updated with memory-system additions
+
+Validation:
+
+- `npm test -- tests/memory-store.test.ts tests/commands.test.ts` — clean (41 passing)
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+- `npm test` — clean (35 files, 323 tests)
+
+Next:
+
+- Implement Milestone 3 hooks system (`user-defined scripts at lifecycle points`).

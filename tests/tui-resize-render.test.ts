@@ -119,8 +119,8 @@ describe("computeVisibleLayoutSlices", () => {
 
     const visible = computeVisibleLayoutSlices(8, title, output, prompt);
 
-    expect(visible.titleLines).toEqual(["title-2"]);
-    expect(visible.outputLines).toEqual(["out-1", "out-2", "out-3", "out-4"]);
+    expect(visible.titleLines).toEqual([]);
+    expect(visible.outputLines).toEqual(["", "out-1", "out-2", "out-3", "out-4"]);
     expect(visible.promptLines).toEqual(["prompt-1", "prompt-2", "prompt-3"]);
   });
 
@@ -132,7 +132,7 @@ describe("computeVisibleLayoutSlices", () => {
     const visible = computeVisibleLayoutSlices(6, title, output, prompt);
 
     expect(visible.titleLines).toEqual([]);
-    expect(visible.outputLines).toEqual(["out-1", "out-2", "out-3", "out-4"]);
+    expect(visible.outputLines).toEqual(["", "out-2", "out-3", "out-4"]);
     expect(visible.promptLines).toEqual(["prompt-1", "prompt-2"]);
   });
 
@@ -143,8 +143,8 @@ describe("computeVisibleLayoutSlices", () => {
 
     const visible = computeVisibleLayoutSlices(8, title, output, prompt);
 
-    expect(visible.titleLines).toEqual(["title-1", "title-2", "title-3"]);
-    expect(visible.outputLines).toEqual(["out-1", "out-2", "out-3"]);
+    expect(visible.titleLines).toEqual(["title-2", "title-3"]);
+    expect(visible.outputLines).toEqual(["", "out-1", "out-2", "out-3"]);
     expect(visible.promptLines).toEqual(["prompt-1", "prompt-2"]);
   });
 
@@ -173,6 +173,67 @@ describe("computeVisibleLayoutSlices", () => {
     expect(
       visible.titleLines.length + visible.outputLines.length + visible.promptLines.length
     ).toBe(10);
+  });
+
+  it("supports scrollback offsets to reveal older output lines", () => {
+    const title = ["title-1", "title-2", "title-3"];
+    const output = ["out-1", "out-2", "out-3", "out-4", "out-5", "out-6"];
+    const prompt = ["prompt-1", "prompt-2"];
+
+    const visible = computeVisibleLayoutSlices(6, title, output, prompt, 2);
+
+    expect(visible.titleLines).toEqual([]);
+    expect(visible.outputLines).toEqual(["", "out-2", "out-3", "out-4"]);
+    expect(visible.promptLines).toEqual(["prompt-1", "prompt-2"]);
+  });
+
+  it("does not push title early for spacer-only leading output rows", () => {
+    const title = ["title-1", "title-2", "title-3"];
+    const output = ["", "", "", "", "", "", "", "out-1"];
+    const prompt = ["prompt-1", "prompt-2"];
+
+    const visible = computeVisibleLayoutSlices(8, title, output, prompt);
+
+    expect(visible.titleLines).toEqual(["title-1", "title-2", "title-3"]);
+    expect(visible.outputLines).toEqual(["", "", "out-1"]);
+    expect(visible.promptLines).toEqual(["prompt-1", "prompt-2"]);
+  });
+
+  it("does not let trailing spacer rows push title early", () => {
+    const title = ["title-1", "title-2", "title-3"];
+    const output = ["out-1", "out-2", "out-3", ""];
+    const prompt = ["prompt-1", "prompt-2"];
+
+    const visible = computeVisibleLayoutSlices(8, title, output, prompt);
+
+    expect(visible.titleLines).toEqual(["title-2", "title-3"]);
+    expect(visible.outputLines).toEqual(["out-1", "out-2", "out-3", ""]);
+    expect(visible.promptLines).toEqual(["prompt-1", "prompt-2"]);
+    expect(
+      visible.titleLines.length + visible.outputLines.length + visible.promptLines.length
+    ).toBe(8);
+  });
+
+  it("does not let whitespace-only rows push title early", () => {
+    const title = ["title-1", "title-2", "title-3"];
+    const output = ["out-1", "   ", "\u001b[38;2;255;0;0m   \u001b[0m"];
+    const prompt = ["prompt-1", "prompt-2"];
+
+    const visible = computeVisibleLayoutSlices(8, title, output, prompt);
+
+    expect(visible.titleLines).toEqual(["title-1", "title-2", "title-3"]);
+    expect(visible.promptLines).toEqual(["prompt-1", "prompt-2"]);
+  });
+
+  it("counts wrapped output rows before displacing title", () => {
+    const title = ["title-1", "title-2", "title-3"];
+    const prompt = ["prompt-1", "prompt-2"];
+
+    const fillsGap = computeVisibleLayoutSlices(8, title, ["123456789012345678"], prompt);
+    expect(fillsGap.titleLines).toEqual(["title-2", "title-3"]);
+
+    const exceedsGap = computeVisibleLayoutSlices(8, title, ["123456789012345678", "x"], prompt);
+    expect(exceedsGap.titleLines).toEqual(["title-3"]);
   });
 });
 

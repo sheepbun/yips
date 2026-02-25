@@ -2490,3 +2490,326 @@ Changed:
   Next:
 - Implement Conductor agent orchestration boundaries explicitly (context assembly + tool dispatch + response chaining module extraction from `tui.ts`).
 - Add focused integration tests for confirmation modal key paths and VT-mode raw input handling edge cases.
+
+## 2026-02-25 17:23 UTC — Exchange 74
+
+Summary: Added chat scrollback navigation so full in-session output remains accessible instead of becoming unreachable after viewport overflow.
+Changed:
+
+- Updated `src/input-engine.ts`:
+  - added `scroll-page-up` / `scroll-page-down` input actions.
+  - mapped CSI page keys (`\x1b[5~`, `\x1b[6~`) to those actions.
+- Updated `src/tui.ts`:
+  - added runtime `outputScrollOffset` state to track chat viewport position.
+  - added `shiftOutputScrollOffset(...)` clamp helper.
+  - updated `computeVisibleLayoutSlices(...)` to accept an optional scroll offset and render from the corresponding historical window.
+  - wired `PgUp` / `PgDn` handling in chat mode to move by page-sized increments.
+  - auto-resets scroll offset to bottom on new output writes/stream replacements and session resets/replays.
+  - appended scroll status indicator (`scroll +N`) in prompt footer while scrolled up.
+- Updated tests:
+  - `tests/input-engine.test.ts` now covers page-key parsing and emitted scroll actions.
+  - `tests/tui-resize-render.test.ts` now covers scrollback-offset viewport behavior.
+  Validation:
+- `npm test -- tests/input-engine.test.ts tests/tui-resize-render.test.ts` — clean
+- `npm run typecheck` — clean
+- `npm test` — clean (31 files, 283 tests)
+  Next:
+- Optional UX follow-up: add a one-line in-app hint for `PgUp/PgDn` when first entering chat mode.
+
+## 2026-02-25 18:13 UTC — Exchange 75
+
+Summary: Added explicit blocking model preloading so llama.cpp model initialization finishes before first prompt handling, with visible `Loading <model> into <GPU/CPU>...` status.
+Changed:
+
+- Updated `src/tui.ts`:
+  - added `resolveModelLoadTarget(...)` and `formatModelLoadingLabel(...)` helpers.
+  - added `preloadConfiguredModel()` runtime hook that:
+    - skips non-llamacpp or unresolved/default model configs,
+    - shows busy spinner label `Loading <friendly-model-name> into <GPU/CPU>...`,
+    - blocks on `ensureLlamaReady(...)` and surfaces startup failures immediately in output.
+  - startup now triggers model preload via effect, so model/server warmup happens before user sends first prompt.
+  - `/model <arg>` command path now immediately preloads newly selected model and reports preload failure inline.
+- Updated tests:
+  - `tests/tui-busy-indicator.test.ts` now verifies GPU/CPU loading label formatting.
+  Validation:
+- `npm test -- tests/tui-busy-indicator.test.ts tests/tui-startup-reset.test.ts` — clean
+- `npm run typecheck` — clean
+- `npm test` — clean (31 files, 285 tests)
+  Next:
+- Optional UX follow-up: add a one-time explanatory line when preload starts (for users who miss spinner text on very fast loads).
+
+## 2026-02-25 18:17 UTC — Exchange 76
+
+Summary: Corrected model preload behavior to perform actual model loading (local server reset on `/model`) and removed startup background preload effect that could interfere with chat flow.
+Changed:
+
+- Updated `src/tui.ts`:
+  - imported `isLocalLlamaEndpoint`.
+  - updated `preloadConfiguredModel(forceReloadLocal)`:
+    - when `forceReloadLocal=true` and endpoint is local, it now uses `resetLlamaForFreshSession(...)` (stop + restart with selected model) to guarantee model load.
+    - otherwise falls back to `ensureLlamaReady(...)` readiness checks.
+  - removed automatic startup `useEffect` preload invocation.
+  - `/model <arg>` flow now calls `preloadConfiguredModel(true)` so selected model is actually loaded before next prompt.
+- Preserved loading UX label `Loading <model> into <GPU/CPU>...` during explicit preload.
+  Validation:
+- `npm run typecheck` — clean
+- `npm test -- tests/tui-busy-indicator.test.ts tests/llama-server.test.ts tests/commands.test.ts` — clean
+- `npm test` — clean (31 files, 285 tests)
+  Next:
+- Optional: add a dedicated integration test seam for `/model` preload path to assert local reset invocation explicitly.
+
+## 2026-02-25 18:21 UTC — Exchange 77
+
+Summary: Made model-load status visibly explicit at startup and model-switch time, and ensured both `/model` and Model Manager selection paths show loading progress messages.
+Changed:
+
+- Updated `src/tui.ts`:
+  - `startTui(...)` now emits startup preload line before Ink mount when a concrete llama model is configured:
+    - `Loading <model> into <GPU/CPU>...`
+  - `/model <arg>` flow now appends visible chat output lines:
+    - loading line before preload
+    - `Model preload complete.` on success
+    - existing error output on failure
+  - Model Manager `Enter` selection path now also:
+    - appends loading line,
+    - awaits preload,
+    - appends completion line,
+    before returning to chat.
+- Kept forced local reload path (`resetLlamaForFreshSession`) for explicit model-switch preloads.
+  Validation:
+- `npm run typecheck` — clean
+- `npm test -- tests/commands.test.ts tests/tui-startup-reset.test.ts tests/tui-busy-indicator.test.ts` — clean
+- `npm test` — clean (31 files, 285 tests)
+  Next:
+- Optional: add dedicated tests for model-manager submit preload sequencing and startup preload message emission.
+
+## 2026-02-25 18:35 UTC — Exchange 78
+
+Summary: Fixed streaming regression and adjusted model-manager selection flow so model loading status appears in chat after exiting manager.
+Changed:
+
+- Updated `src/tui.ts` streaming behavior:
+  - changed tool-loop assistant request call from `requestAssistantFromLlama(false)` to `requestAssistantFromLlama()` so runtime `/stream` setting is respected again.
+- Updated `src/tui.ts` model-manager submit behavior:
+  - on model selection, UI now exits Model Manager to chat immediately.
+  - model save + preload now runs from chat mode and appends visible output lines:
+    - `Model set to: ...`
+    - `Loading <model> into <GPU/CPU>...`
+    - `Model preload complete.` (or error output on failure)
+  - avoids showing preload inside manager-only loading state.
+  Validation:
+- `npm run typecheck` — clean
+- `npm test -- tests/commands.test.ts tests/tui-busy-indicator.test.ts tests/tui-resize-render.test.ts` — clean
+- `npm test` — clean (31 files, 285 tests)
+  Next:
+- Optional: add dedicated regression tests for model-manager submit sequencing (exit-to-chat before preload output) and `/stream` propagation through tool-loop request path.
+
+## 2026-02-25 18:37 UTC — Exchange 79
+
+Summary: Fixed duplicate assistant output bug in streaming mode.
+Changed:
+
+- Updated `src/tui.ts` chat loop:
+  - after `requestAssistantFromLlama()`, assistant text is no longer appended again when `reply.rendered === true`.
+  - streamed responses now render once (live token updates) while still recording assistant content to history.
+  Validation:
+- `npm run typecheck` — clean
+- `npm test -- tests/tui-busy-indicator.test.ts tests/tui-resize-render.test.ts tests/commands.test.ts` — clean
+- `npm test` — clean (31 files, 285 tests)
+  Next:
+- Optional: add a focused unit/integration seam for streamed chat-loop rendering to lock regression behavior explicitly.
+
+## 2026-02-25 18:39 UTC — Exchange 80
+
+Summary: Restored expected blank-line spacing after assistant replies while keeping streaming deduplication fix.
+Changed:
+
+- Updated `src/tui.ts` chat loop post-reply rendering:
+  - always appends one trailing blank output line after assistant content is accepted.
+  - preserves prior guard that avoids double-rendering streamed assistant message bodies.
+  Validation:
+- `npm run typecheck` — clean
+- `npm test -- tests/commands.test.ts tests/tui-resize-render.test.ts tests/tui-busy-indicator.test.ts` — clean
+  Next:
+- Optional: add an explicit regression test for streamed reply rendering + trailing spacer behavior in the chat loop.
+
+## 2026-02-25 18:42 UTC — Exchange 81
+
+Summary: Fixed title-box bump threshold so spacer-only output rows do not push the title off-screen before visible content reaches it.
+Changed:
+
+- Updated `src/tui.ts` (`computeVisibleLayoutSlices`):
+  - added leading-content detection for the active output window.
+  - title displacement pressure now uses `pressureWindow` starting at first non-empty output line.
+  - this prevents accumulated leading blank spacer rows from counting as title-collision pressure.
+- Updated `tests/tui-resize-render.test.ts`:
+  - added regression case verifying title remains fully visible when output window has many leading blank rows before first visible content line.
+  Validation:
+- `npm test -- tests/tui-resize-render.test.ts` — clean
+- `npm run typecheck` — clean
+- `npm test` — clean (31 files, 286 tests)
+  Next:
+- Optional: add a second regression case combining scrollback offset + leading spacer rows to lock behavior while paging through history.
+
+## 2026-02-25 18:44 UTC — Exchange 82
+
+Summary: Removed persistent model-preload status text from chat/output history to prevent layout/title displacement side effects.
+Changed:
+
+- Updated `src/tui.ts`:
+  - removed `/model` path chat-output lines for:
+    - `Loading <model> into <GPU/CPU>...`
+    - `Model preload complete.`
+  - removed Model Manager submit path chat-output lines for the same preload status text.
+  - removed startup `process.stdout.write(...)` preload banner before Ink mount.
+  - preserved actual preload behavior and failure reporting (errors still surface).
+  Validation:
+- `npm run typecheck` — clean
+- `npm test -- tests/commands.test.ts tests/tui-resize-render.test.ts tests/tui-busy-indicator.test.ts` — clean
+  Next:
+- Optional: if desired, preload progress can be shown only in transient spinner/footer state (never persisted to output history).
+
+## 2026-02-25 18:45 UTC — Exchange 83
+
+Summary: Removed persistent `Model set to: ...` chat output from TUI model-switch flows to avoid title-box displacement from status text accumulation.
+Changed:
+
+- Updated `src/tui.ts`:
+  - `/model <arg>` command output is now suppressed in TUI render path (command still updates config/model and runs preload).
+  - Model Manager submit path no longer appends `Model set to: ...` line before preload.
+  - preserves error output when save/preload fails.
+  Validation:
+- `npm run typecheck` — clean
+- `npm test -- tests/commands.test.ts tests/tui-resize-render.test.ts tests/tui-busy-indicator.test.ts` — clean
+  Next:
+- Optional: if desired, remove trailing blank line after successful model switch to keep output history even tighter.
+
+## 2026-02-25 18:50 UTC — Exchange 84
+
+Summary: Eliminated remaining successful model-switch output artifacts that could still contribute to title-box bump pressure.
+Changed:
+
+- Updated `src/tui.ts`:
+  - removed trailing blank append after successful Model Manager model switch preload.
+  - with prior changes, successful model switches now add no persistent output lines in TUI.
+  - errors still append visible diagnostics.
+  Validation:
+- `npm run typecheck` — clean
+- `npm test -- tests/commands.test.ts tests/tui-resize-render.test.ts` — clean
+  Next:
+- If bump still appears after first prompt in your terminal size, capture exact `rows/cols` and first-message line count to tune the collision threshold with a deterministic fixture.
+
+## 2026-02-25 18:52 UTC — Exchange 85
+
+Summary: Added model-switch output artifact cleanup to prevent legacy/pre-existing status lines from continuing to cause title-box bump pressure in the same session.
+Changed:
+
+- Updated `src/tui.ts`:
+  - added `stripAnsi(...)` helper.
+  - added `pruneModelSwitchStatusArtifacts(state)` to remove lines matching:
+    - `Model set to: ...`
+    - `Loading ... into GPU/CPU...`
+    - `Model preload complete.`
+    and trims trailing blank lines afterward.
+  - wired cleanup before preload in both model-switch paths:
+    - `/model <arg>` command path
+    - Model Manager `submit` selection path
+  - ensures old status lines from earlier runs/flows do not keep affecting layout after switching models.
+  Validation:
+- `npm run typecheck` — clean
+- `npm test -- tests/commands.test.ts tests/tui-resize-render.test.ts tests/tui-busy-indicator.test.ts` — clean
+- `npm test` — clean (31 files, 286 tests)
+  Next:
+- Optional: expose a lightweight `/trim` or `/clean` command to prune historical non-chat status lines on demand.
+
+## 2026-02-25 18:56 UTC — Exchange 86
+
+Summary: Fixed premature title displacement caused by trailing spacer/newline rows after first chat exchange.
+Changed:
+
+- Updated `src/tui.ts` (`computeVisibleLayoutSlices`):
+  - separated render window (`contentWindow`) from title-collision pressure window (`pressureWindow`).
+  - pressure now trims both:
+    - leading blank rows before first non-empty output line,
+    - trailing blank spacer rows after last non-empty output line.
+  - output rendering still preserves trailing spacer rows, so visual spacing before prompt remains.
+- Updated `tests/tui-resize-render.test.ts`:
+  - added regression test asserting trailing spacer rows do not push title early.
+  Validation:
+- `npm test -- tests/tui-resize-render.test.ts` — clean
+- `npm run typecheck` — clean
+- `npm test` — clean (31 files, 287 tests)
+  Next:
+- Optional: add a high-level integration harness asserting first user+assistant exchange preserves title visibility for a canonical terminal size.
+
+## 2026-02-25 01:58 UTC — Exchange 87
+
+Summary: Fixed title-box early displacement when chat contains visually blank newline rows (whitespace/ANSI-only lines) between prompt and content.
+Changed:
+
+- Updated `src/tui.ts`:
+  - added `isVisuallyEmptyLine(...)` helper using ANSI stripping + trim.
+  - updated `computeVisibleLayoutSlices(...)` content/pressure detection to ignore visually blank rows rather than only zero-length strings.
+  - prevents whitespace-only/ANSI-styled blank lines from counting toward title collision pressure.
+- Updated `tests/tui-resize-render.test.ts`:
+  - added regression test asserting whitespace-only rows (plain and ANSI-colored) do not push the title early.
+  Validation:
+- `npm test -- tests/tui-resize-render.test.ts` — clean (21 passing)
+- `npm run typecheck` — clean
+  Next:
+- Optional: run `npm test` full suite for additional confidence before release packaging.
+
+## 2026-02-25 02:03 UTC — Exchange 88
+
+Summary: Implemented title-anchor collision fix so trailing newline/spacer rows cannot displace the title box before real content collides.
+Changed:
+
+- Updated `src/tui.ts` (`computeVisibleLayoutSlices`):
+  - split output into `pressureWindow` (title-displacing content) and `trailingSpacerRows` (post-content blank rows).
+  - title displacement now remains driven by `pressureWindow` only.
+  - output rendering now includes trailing spacer rows only when row budget remains after title + core output.
+  - added explicit row-budget guard to keep rendered output within available rows.
+- Updated `tests/tui-resize-render.test.ts`:
+  - strengthened trailing-spacer regression to assert spacer row is dropped when constrained and total rendered rows exactly match terminal height.
+  Validation:
+- `npm test -- tests/tui-resize-render.test.ts` — clean (21 passing)
+- `npm run typecheck` — clean
+  Next:
+- Optional: run full `npm test` suite before cutting next build tag.
+
+## 2026-02-25 02:11 UTC — Exchange 89
+
+Summary: Fixed remaining early title bump by making layout collision math wrapping-aware (visual row counts instead of raw line counts).
+Changed:
+
+- Updated `src/tui.ts` (`computeVisibleLayoutSlices`):
+  - added visual-row helpers: `visibleCharLength`, `inferRenderWidth`, `lineDisplayRows`, `countDisplayRows`, `dropLeadingByDisplayRows`.
+  - title displacement now uses wrapped row counts for output pressure, matching how Ink actually renders long lines.
+  - hidden output trimming now drops by visual rows, not raw string rows.
+  - trailing spacer rows are still only included when row budget remains.
+- Updated `tests/tui-resize-render.test.ts`:
+  - added regression `counts wrapped output rows before displacing title` to lock wrapped-line collision behavior.
+  Validation:
+- `npm test -- tests/tui-resize-render.test.ts` — clean (22 passing)
+- `npm run typecheck` — clean
+  Next:
+- Optional: run full `npm test` suite to verify no side effects in non-layout paths.
+
+## 2026-02-25 02:18 UTC — Exchange 90
+
+Summary: Added persistent one-row buffer between title and chat content before title displacement, and normalized chat message spacing to include a blank line after each user and assistant output.
+Changed:
+
+- Updated `src/tui.ts`:
+  - added `TITLE_OUTPUT_GAP_ROWS = 1`.
+  - updated `computeVisibleLayoutSlices(...)` to reserve one row beneath visible title lines before output can begin displacing the title.
+  - updated `handleUserMessage(...)` to append a blank spacer line immediately after formatted user output.
+  - updated `replayOutputFromHistory(...)` to include the same post-user blank spacer so restored sessions match live rendering.
+- Updated `tests/tui-resize-render.test.ts`:
+  - adjusted layout expectations for the new reserved title gap behavior.
+  - retained wrapped-row and spacer regressions under new policy.
+  Validation:
+- `npm test -- tests/tui-resize-render.test.ts` — clean (22 passing)
+- `npm run typecheck` — clean
+  Next:
+- Optional: run `npm test` full suite before release tagging.

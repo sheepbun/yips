@@ -18,7 +18,8 @@ export interface CommandResult {
   uiAction?:
     | { type: "open-downloader" }
     | { type: "open-model-manager" }
-    | { type: "open-sessions" };
+    | { type: "open-sessions" }
+    | { type: "open-vt" };
 }
 
 export interface SessionContext {
@@ -314,6 +315,12 @@ export function createDefaultRegistry(): CommandRegistry {
       return { action: "continue", uiAction: { type: "open-sessions" } };
     },
     "Interactively select and load a session"
+  );
+
+  registry.register(
+    "vt",
+    async () => ({ action: "continue", uiAction: { type: "open-vt" } }),
+    "Open Virtual Terminal"
   );
 
   registry.register(

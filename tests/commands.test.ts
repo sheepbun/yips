@@ -277,6 +277,13 @@ describe("createDefaultRegistry", () => {
     expect(result.uiAction).toEqual({ type: "open-sessions" });
   });
 
+  it("/vt opens virtual terminal mode", async () => {
+    const registry = createDefaultRegistry();
+    const result = await registry.dispatch("vt", "", createContext());
+    expect(result.action).toBe("continue");
+    expect(result.uiAction).toEqual({ type: "open-vt" });
+  });
+
   it("/download opens the interactive downloader when called without args", async () => {
     const registry = createDefaultRegistry();
     const result = await registry.dispatch("download", "", createContext());

@@ -53,3 +53,21 @@ export interface ChatMessage {
   role: ChatRole;
   content: string;
 }
+
+export type ToolName = "read_file" | "list_dir" | "grep" | "run_command";
+
+export interface ToolCall {
+  id: string;
+  name: ToolName;
+  arguments: Record<string, unknown>;
+}
+
+export type ToolExecutionStatus = "ok" | "error" | "denied" | "timeout";
+
+export interface ToolResult {
+  callId: string;
+  tool: ToolName;
+  status: ToolExecutionStatus;
+  output: string;
+  metadata?: Record<string, unknown>;
+}

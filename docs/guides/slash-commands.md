@@ -6,26 +6,26 @@ Slash commands are user-facing commands typed directly into the Yips TUI input. 
 
 ### Session Control
 
-| Command | Description |
-|---------|-------------|
+| Command          | Description                                                  |
+| ---------------- | ------------------------------------------------------------ |
 | `/exit`, `/quit` | Exit Yips gracefully (saves session, stops llama.cpp server) |
-| `/clear`, `/new` | Start a new conversation (clears history, reloads backend) |
-| `/sessions` | Browse and load past sessions interactively |
+| `/clear`, `/new` | Start a new conversation (clears history, reloads backend)   |
+| `/sessions`      | Browse and load past sessions interactively                  |
 
 ### Model & Backend
 
-| Command | Description |
-|---------|-------------|
-| `/model` | Open the Model Manager (list local models, switch, delete, jump to downloader) |
-| `/model <name>` | Switch to a model by local exact/partial match, with free-form fallback |
-| `/download`, `/dl` | Open the interactive model downloader |
-| `/download <hf_url>` | Download a GGUF file from a direct `hf.co` / `huggingface.co` resolve URL |
-| `/backend` | Show current backend |
-| `/backend <name>` | Switch backend (`llamacpp` or `claude`) |
-| `/nick <model> <nickname>` | Set and persist a display nickname for a model |
-| `/tokens` | Show current token counter mode |
-| `/tokens auto` | Use automatic max token calculation from available RAM after model load |
-| `/tokens <value>` | Set manual max token value (supports `k` suffix, for example `32k`) |
+| Command                    | Description                                                                    |
+| -------------------------- | ------------------------------------------------------------------------------ |
+| `/model`                   | Open the Model Manager (list local models, switch, delete, jump to downloader) |
+| `/model <name>`            | Switch to a model by local exact/partial match, with free-form fallback        |
+| `/download`, `/dl`         | Open the interactive model downloader                                          |
+| `/download <hf_url>`       | Download a GGUF file from a direct `hf.co` / `huggingface.co` resolve URL      |
+| `/backend`                 | Show current backend                                                           |
+| `/backend <name>`          | Switch backend (`llamacpp` or `claude`)                                        |
+| `/nick <model> <nickname>` | Set and persist a display nickname for a model                                 |
+| `/tokens`                  | Show current token counter mode                                                |
+| `/tokens auto`             | Use automatic max token calculation from available RAM after model load        |
+| `/tokens <value>`          | Set manual max token value (supports `k` suffix, for example `32k`)            |
 
 `/download` usage:
 
@@ -37,23 +37,23 @@ Slash commands are user-facing commands typed directly into the Yips TUI input. 
 
 ### Display & Behavior
 
-| Command | Description |
-|---------|-------------|
+| Command    | Description                                              |
+| ---------- | -------------------------------------------------------- |
 | `/verbose` | Toggle verbose mode (shows tool calls made by the agent) |
-| `/stream` | Toggle response streaming on/off |
+| `/stream`  | Toggle response streaming on/off                         |
 
 ### Skills & Tools
 
 These commands invoke specialized capabilities. Some are agent-invocable (the agent can call them via `INVOKE_SKILL`), others are user-only.
 
-| Command | Description |
-|---------|-------------|
-| `/help` | Show available commands and tips |
-| `/search <query>` | Search the web (DuckDuckGo) |
-| `/fetch <url>` | Retrieve and display content from a URL |
-| `/grab <file>` | Read a file's content into context |
-| `/memorize <fact>` | Save a fact to long-term memory |
-| `/vt` | Toggle the Virtual Terminal |
+| Command            | Description                                                               |
+| ------------------ | ------------------------------------------------------------------------- |
+| `/help`            | Show available commands and tips                                          |
+| `/search <query>`  | Search the web (DuckDuckGo)                                               |
+| `/fetch <url>`     | Retrieve and display content from a URL                                   |
+| `/grab <file>`     | Read a file's content into context                                        |
+| `/memorize <fact>` | Save a fact to long-term memory                                           |
+| `/vt`              | Open the modal Virtual Terminal (`Esc Esc` or `Ctrl+Q` to return to chat) |
 
 ### Complete List
 

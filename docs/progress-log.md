@@ -2813,3 +2813,209 @@ Changed:
 - `npm run typecheck` — clean
   Next:
 - Optional: run `npm test` full suite before release tagging.
+
+## 2026-02-25 02:25 UTC — Exchange 91
+
+Summary: Implemented mouse-wheel chat scrollback in the Ink TUI so off-screen chat history can be browsed with normal wheel input.
+Changed:
+
+- Updated `src/input-engine.ts`:
+  - added `scroll-line-up` / `scroll-line-down` input actions.
+  - added SGR mouse CSI parsing (`\x1b[<64;...M` / `\x1b[<65;...M`) for wheel up/down.
+  - retained existing page scroll parsing (`\x1b[5~`, `\x1b[6~`) as keyboard fallback.
+- Updated `src/tui.ts`:
+  - enabled terminal mouse reporting on app mount (`?1000h`, `?1006h`) and disabled it on cleanup (`?1000l`, `?1006l`).
+  - wired wheel actions in chat mode to output scrollback offset changes (line-step increments).
+  - preserved existing `PgUp` / `PgDn` paging behavior and footer `scroll +N` status.
+- Updated `tests/input-engine.test.ts`:
+  - added SGR mouse wheel parser coverage.
+  - added engine coverage for wheel actions and split-chunk mouse CSI parsing.
+- Updated docs:
+  - `docs/guides/getting-started.md` now documents mouse-wheel chat scrollback and `PgUp`/`PgDn` fallback.
+  - `docs/changelog.md` updated with the new scrollback behavior and refreshed last-updated date.
+  Validation:
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+- `npm test -- tests/input-engine.test.ts tests/tui-resize-render.test.ts` — clean
+- `npm test` — clean (31 files, 292 tests)
+  Next:
+- Optional: add a focused TUI input integration harness that asserts mouse-wheel actions mutate `outputScrollOffset` through the `stdin` event path (not just parser-level coverage).
+
+## 2026-02-25 02:44 UTC — Exchange 92
+
+Summary: Capped chat scrollback at the first real message so maximum scroll-up stops with the title at the top and first chat content directly beneath it.
+Changed:
+
+- Updated `src/tui.ts` scroll offset and viewport rules:
+  - `shiftOutputScrollOffset(...)` now computes max offset from the first non-empty output line, preventing overscroll into pre-content blank space.
+  - `computeVisibleLayoutSlices(...)` now clamps incoming `outputScrollOffset` with the same first-content rule.
+  - when scrolled (`offset > 0`) and output height is underfilled, padding is now appended below visible output instead of above it, so earliest messages anchor below title.
+- Updated `tests/tui-resize-render.test.ts`:
+  - adjusted existing scrollback expectation for scrolled underfill behavior.
+  - added regression: top scrollback cap keeps first content line visible directly under title when a large offset is requested.
+  Validation:
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+- `npm test -- tests/tui-resize-render.test.ts` — clean
+- `npm test` — clean (31 files, 293 tests)
+  Next:
+- Optional: add a focused unit test for `shiftOutputScrollOffset(...)` if a small pure helper seam is introduced in future refactors.
+
+## 2026-02-25 02:56 UTC — Exchange 93
+
+Summary: Fixed scrollback regression by applying title-lock behavior only at true max scroll, preserving normal intermediate scrolling while still enforcing the requested top-stop layout.
+Changed:
+
+- Updated `src/tui.ts` (`computeVisibleLayoutSlices`):
+  - introduced `isAtTopOfScrollback` (`clampedOffset === maxOffset` and `maxOffset > 0`).
+  - top-stop behavior now applies only when fully scrolled to the oldest visible content:
+    - disables reserved title gap,
+    - prevents title displacement,
+    - bottom-pads underfilled rows so first visible message sits directly below title.
+  - intermediate scroll offsets retain prior layout dynamics (including title displacement and top padding), avoiding collapsed output viewport behavior.
+- Updated `tests/tui-resize-render.test.ts`:
+  - retained/confirmed baseline intermediate scroll expectation.
+  - kept top-scroll cap regression introduced in Exchange 92 to guard requested top-stop behavior.
+  Validation:
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+- `npm test` — clean (31 files, 293 tests)
+  Next:
+- Optional: add an interactive TUI input regression harness to validate wheel/page stepping behavior across offsets in addition to pure layout snapshots.
+
+## 2026-02-25 03:00 UTC — Exchange 94
+
+Summary: Fixed overscrolling by introducing a hard chat scroll cap that stops at the first viewport offset where the full title box is visible and chat content starts directly beneath it.
+Changed:
+
+- Updated `src/tui.ts`:
+  - added `computeTitleVisibleScrollCap(rows, titleLines, outputLines, promptLines)`:
+    - computes base scroll limit from first non-empty output line,
+    - finds the first offset where full title visibility is restored and output starts immediately below title.
+  - added `shiftOutputScrollOffsetWithCap(...)` and switched chat scroll handlers (`PgUp/PgDn` and wheel line scroll) to use the computed cap.
+  - scroll offset is now clamped against that cap in the input path, preventing further upward drift once title+chat boundary is reached.
+- Updated `tests/tui-resize-render.test.ts`:
+  - added `computeTitleVisibleScrollCap` regression test asserting cap lands on full-title + first-chat-below layout.
+  Validation:
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+- `npm test` — clean (31 files, 294 tests)
+  Next:
+- Optional: add a UI-level integration harness around the stdin action loop to assert repeated scroll events saturate at the computed cap during interactive input.
+
+## 2026-02-25 03:03 UTC — Exchange 95
+
+Summary: Fixed title/output scroll desync by making scrolled mode use a consistent fixed-title viewport and by tightening cap semantics to the farthest valid title-visible offset.
+Changed:
+
+- Updated `src/tui.ts`:
+  - `computeVisibleLayoutSlices(...)` now treats any non-zero scroll offset as explicit scroll mode:
+    - title remains fixed/visible,
+    - no title-gap/title-displacement pressure is applied while scrolled,
+    - output rendering no longer mixes live-mode collision rules with scroll-mode state.
+  - `computeTitleVisibleScrollCap(...)` now returns the farthest matching offset (highest valid), not the first matching offset, so scroll range remains usable while still respecting title visibility constraints.
+- Updated `tests/tui-resize-render.test.ts`:
+  - updated scrolled-layout expectation to reflect fixed-title scroll mode in narrow viewport.
+  - retained cap behavior regression.
+  Validation:
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+- `npm test` — clean (31 files, 294 tests)
+  Next:
+- Optional: add an explicit integration-style stdin scroll test to verify repeated wheel/page events preserve title/output lockstep under live rerender conditions.
+
+## 2026-02-25 03:06 UTC — Exchange 96
+
+Summary: Fixed severe scroll regression by restoring synchronized live scroll behavior for intermediate offsets and reserving special full-title layout only at the true top-of-scroll offset.
+Changed:
+
+- Updated `src/tui.ts`:
+  - restored normal title/output coupled displacement for non-max scroll offsets.
+  - reintroduced `isAtTopOfScrollback` mode only when `outputScrollOffset` reaches computed maximum.
+  - in top mode only:
+    - disables title gap pressure,
+    - prevents title displacement,
+    - appends underfill padding below output so title remains fully visible with first content directly below.
+  - simplified `computeTitleVisibleScrollCap(...)` to return the structural max offset (derived from first non-empty output line), relying on top-mode layout at that offset for deterministic stop behavior.
+- Updated `tests/tui-resize-render.test.ts`:
+  - restored intermediate scroll expectation (title can still be displaced while scrolling).
+  - retained top-cap regression coverage.
+  Validation:
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+- `npm test -- tests/tui-resize-render.test.ts` — clean
+- `npm test` — clean (31 files, 294 tests)
+  Next:
+- Optional: add an explicit integration test for repeated wheel/page scroll events to verify smooth progression from live view to top-stop boundary in one scenario.
+
+## 2026-02-25 20:40 UTC — Exchange 10
+
+Summary: Fixed chat scrolling reliability by making scrollback row-aware for wrapped output and broadening mouse wheel sequence parsing.
+Changed:
+
+- Updated `src/tui.ts` scroll math:
+  - added display-row-aware helpers for scroll window trimming (`dropTrailingByDisplayRows`) and max scroll cap computation.
+  - changed scroll cap policy to keep the first visible content row anchored (instead of pinning the entire first content line), enabling scrollback through wrapped first lines.
+  - updated `computeVisibleLayoutSlices(...)` to clamp and apply offsets in display-row units.
+  - updated `computeTitleVisibleScrollCap(...)` to use inferred render width and row-aware cap computation.
+- Updated `src/input-engine.ts` mouse parsing:
+  - SGR wheel detection now honors modifier bits (`shift`/`alt`/`ctrl`) via bitmask decoding, not only exact button codes `64/65`.
+- Added regression coverage:
+  - `tests/input-engine.test.ts`: wheel parsing tests for modifier-coded values (`80/81`) in both sequence and engine chunk paths.
+  - `tests/tui-resize-render.test.ts`: wrapped-output scroll cap test ensuring non-zero cap where output wraps.
+
+Validation:
+
+- `npm test -- tests/input-engine.test.ts tests/tui-resize-render.test.ts` — clean (41 passing)
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+
+Next:
+
+- Manual terminal verification across a couple of emulators (kitty/alacritty/wezterm) to confirm wheel + PageUp/PageDown feel and direction match user expectation.
+- If needed, refine partial wrapped-line trimming to preserve ANSI styles while scrolling through wrapped rows.
+
+## 2026-02-25 20:45 UTC — Exchange 11
+
+Summary: Fixed remaining chat overscroll by capping at the first valid full top viewport instead of allowing extra offset rows.
+Changed:
+
+- Updated `src/tui.ts`:
+  - added `computeUsefulOutputScrollCapRows(...)` to derive a practical scroll cap from viewport geometry (rows/title/prompt/width), not only structural output length.
+  - `computeVisibleLayoutSlices(...)` now uses the practical cap for clamping/`isAtTopOfScrollback`, preventing extra upward scroll that produced empty overscroll frames.
+  - `computeTitleVisibleScrollCap(...)` now returns the same practical cap so input handlers and renderer use identical stop conditions.
+- Updated `tests/tui-resize-render.test.ts`:
+  - added regression test proving scroll stops at the first full-top frame (`out-0` visible with more than one output row) instead of overscrolling.
+
+Validation:
+
+- `npm test -- tests/tui-resize-render.test.ts tests/input-engine.test.ts` — clean (42 passing)
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+
+Next:
+
+- Manual live-terminal pass to verify the exact feel of wheel/page scrolling in the user's terminal profile.
+
+## 2026-02-25 20:48 UTC — Exchange 12
+
+Summary: Restored the blank separator row between the title box and first chat message at top scrollback while preserving overscroll limits.
+Changed:
+
+- Updated `src/tui.ts`:
+  - top-scroll viewport now explicitly reserves `TITLE_OUTPUT_GAP_ROWS` between visible title lines and output content.
+  - top-scroll content capacity and useful-cap math now account for that reserved gap (`computeUsefulOutputScrollCapRows`).
+  - top-scroll render branches now prepend the reserved gap before visible output rows.
+- Updated `tests/tui-resize-render.test.ts`:
+  - top-scroll assertions now verify the separator blank row appears before the first content line.
+  - adjusted one cap regression viewport height to a geometry where `title + gap + first output + prompt` can coexist.
+
+Validation:
+
+- `npm test -- tests/tui-resize-render.test.ts tests/input-engine.test.ts` — clean (42 passing)
+- `npm run typecheck` — clean
+- `npm run lint` — clean
+
+Next:
+
+- Run a quick live TUI check in the user’s terminal profile to confirm this separator appears exactly where expected during wheel/page scroll.

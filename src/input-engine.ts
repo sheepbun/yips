@@ -6,6 +6,10 @@ export type InputAction =
   | { type: "insert"; text: string }
   | { type: "submit" }
   | { type: "newline" }
+  | { type: "scroll-page-up" }
+  | { type: "scroll-page-down" }
+  | { type: "scroll-line-up" }
+  | { type: "scroll-line-down" }
   | { type: "backspace" }
   | { type: "delete" }
   | { type: "move-left" }
@@ -78,6 +82,31 @@ function parseEnterActionFromCsiBody(body: string, final: string): InputAction |
   return null;
 }
 
+function parseMouseActionFromCsiBody(body: string, final: string): InputAction | null {
+  if (final !== "M" && final !== "m") {
+    return null;
+  }
+
+  if (!body.startsWith("<")) {
+    return null;
+  }
+
+  const params = body.slice(1).split(";");
+  const buttonCode = parseInteger(params[0] ?? "");
+  if (buttonCode === null) {
+    return null;
+  }
+
+  // SGR mouse wheel encodes bit 6 for wheel + bit 0 for direction.
+  // Modifier bits may be present (shift/alt/ctrl), so match by bitmask.
+  if ((buttonCode & 0x40) !== 0) {
+    return (buttonCode & 0x01) === 0
+      ? { type: "scroll-line-up" }
+      : { type: "scroll-line-down" };
+  }
+  return null;
+}
+
 export function parseCsiSequence(sequence: string): InputAction | null {
   if (!sequence.startsWith("\x1b[")) {
     return null;
@@ -95,6 +124,11 @@ export function parseCsiSequence(sequence: string): InputAction | null {
     return enterAction;
   }
 
+  const mouseAction = parseMouseActionFromCsiBody(body, final);
+  if (mouseAction) {
+    return mouseAction;
+  }
+
   if (final === "A") return { type: "move-up" };
   if (final === "B") return { type: "move-down" };
   if (final === "C") return { type: "move-right" };
@@ -108,6 +142,8 @@ export function parseCsiSequence(sequence: string): InputAction | null {
     if (firstParam === "1" || firstParam === "7") return { type: "home" };
     if (firstParam === "4" || firstParam === "8") return { type: "end" };
     if (firstParam === "3") return { type: "delete" };
+    if (firstParam === "5") return { type: "scroll-page-up" };
+    if (firstParam === "6") return { type: "scroll-page-down" };
   }
 
   return null;

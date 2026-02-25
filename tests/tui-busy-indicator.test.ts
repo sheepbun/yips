@@ -4,6 +4,7 @@ import {
   buildPromptStatusText,
   computeTokensPerSecond,
   composeOutputLines,
+  formatModelLoadingLabel,
   formatTokensPerSecond
 } from "../src/tui";
 
@@ -124,5 +125,59 @@ describe("throughput helpers", () => {
 
   it("formats tokens-per-second with one decimal place", () => {
     expect(formatTokensPerSecond(37.26)).toBe("37.3 tk/s");
+  });
+});
+
+describe("model preload label", () => {
+  it("formats GPU loading label with friendly model name", () => {
+    const label = formatModelLoadingLabel(
+      {
+        backend: "llamacpp",
+        model: "org/repo/model.gguf",
+        nicknames: {},
+        llamaBaseUrl: "http://127.0.0.1:8080",
+        llamaServerPath: "",
+        llamaModelsDir: ".",
+        llamaHost: "127.0.0.1",
+        llamaPort: 8080,
+        llamaContextSize: 8192,
+        llamaGpuLayers: 999,
+        llamaAutoStart: true,
+        llamaPortConflictPolicy: "kill-user",
+        streaming: true,
+        verbose: false,
+        tokensMode: "auto",
+        tokensManualMax: 8192
+      },
+      {}
+    );
+
+    expect(label).toBe("Loading repo into GPU...");
+  });
+
+  it("formats CPU loading label when gpu layers are disabled", () => {
+    const label = formatModelLoadingLabel(
+      {
+        backend: "llamacpp",
+        model: "org/repo/model.gguf",
+        nicknames: {},
+        llamaBaseUrl: "http://127.0.0.1:8080",
+        llamaServerPath: "",
+        llamaModelsDir: ".",
+        llamaHost: "127.0.0.1",
+        llamaPort: 8080,
+        llamaContextSize: 8192,
+        llamaGpuLayers: 0,
+        llamaAutoStart: true,
+        llamaPortConflictPolicy: "kill-user",
+        streaming: true,
+        verbose: false,
+        tokensMode: "auto",
+        tokensManualMax: 8192
+      },
+      {}
+    );
+
+    expect(label).toBe("Loading repo into CPU...");
   });
 });

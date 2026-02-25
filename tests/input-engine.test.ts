@@ -20,6 +20,16 @@ describe("parseCsiSequence", () => {
     expect(parseCsiSequence("\x1b[H")).toEqual({ type: "home" });
     expect(parseCsiSequence("\x1b[F")).toEqual({ type: "end" });
     expect(parseCsiSequence("\x1b[3~")).toEqual({ type: "delete" });
+    expect(parseCsiSequence("\x1b[5~")).toEqual({ type: "scroll-page-up" });
+    expect(parseCsiSequence("\x1b[6~")).toEqual({ type: "scroll-page-down" });
+  });
+
+  it("maps SGR mouse wheel CSI sequences", () => {
+    expect(parseCsiSequence("\x1b[<64;80;12M")).toEqual({ type: "scroll-line-up" });
+    expect(parseCsiSequence("\x1b[<65;80;12M")).toEqual({ type: "scroll-line-down" });
+    expect(parseCsiSequence("\x1b[<80;80;12M")).toEqual({ type: "scroll-line-up" });
+    expect(parseCsiSequence("\x1b[<81;80;12M")).toEqual({ type: "scroll-line-down" });
+    expect(parseCsiSequence("\x1b[<0;80;12M")).toBeNull();
   });
 
   it("returns null for unknown/invalid sequences", () => {
@@ -70,6 +80,30 @@ describe("InputEngine", () => {
       { type: "move-down" },
       { type: "delete" }
     ]);
+  });
+
+  it("parses page scroll actions from CSI bytes", () => {
+    const engine = new InputEngine();
+    expect(engine.pushChunk("\x1b[5~\x1b[6~")).toEqual([
+      { type: "scroll-page-up" },
+      { type: "scroll-page-down" }
+    ]);
+  });
+
+  it("parses mouse wheel scroll actions from CSI bytes", () => {
+    const engine = new InputEngine();
+    expect(engine.pushChunk("\x1b[<64;80;12M\x1b[<65;80;12M\x1b[<80;80;12M\x1b[<81;80;12M")).toEqual([
+      { type: "scroll-line-up" },
+      { type: "scroll-line-down" },
+      { type: "scroll-line-up" },
+      { type: "scroll-line-down" }
+    ]);
+  });
+
+  it("parses split mouse wheel CSI sequences", () => {
+    const engine = new InputEngine();
+    expect(engine.pushChunk("\x1b[<64;80;")).toEqual([]);
+    expect(engine.pushChunk("12M")).toEqual([{ type: "scroll-line-up" }]);
   });
 
   it("keeps UTF-8 insertion stable across chunk boundaries", () => {

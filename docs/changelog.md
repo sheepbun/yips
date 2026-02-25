@@ -87,6 +87,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Title box right column now renders real recent session activity and highlights selection while browsing `/sessions`
 - TUI now auto-creates and updates session files after exchanges, derives session names from first user prompt, and restores history from selected sessions
 - Title-box token usage now renders as `x.x/y.yk tks`, with auto max derived from RAM-after-model-load and manual override via `/tokens`
+- Ink TUI chat scrollback now supports mouse wheel input (with `PgUp`/`PgDn` fallback), including terminal mouse-reporting enable/disable during app lifetime
 
 ## Legacy (yips-cli)
 
@@ -142,4 +143,4 @@ Changes from the Python CLI predecessor. These entries are reformatted from `yip
 
 ---
 
-> Last updated: 2026-02-24
+> Last updated: 2026-02-25

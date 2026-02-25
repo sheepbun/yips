@@ -68,11 +68,7 @@ import {
   type DownloaderState
 } from "./downloader-state";
 import { getSystemSpecs } from "./hardware";
-import {
-  deleteLocalModel,
-  getFriendlyModelName,
-  listLocalModels
-} from "./model-manager";
+import { deleteLocalModel, getFriendlyModelName, listLocalModels } from "./model-manager";
 import { renderModelManagerLines } from "./model-manager-ui";
 import {
   createModelManagerState,
@@ -106,7 +102,11 @@ import {
   writeSessionFile,
   type SessionListItem
 } from "./session-store";
-import type { AppConfig, ChatMessage, TuiOptions } from "./types";
+import type { AppConfig, ChatMessage, ToolCall, ToolResult, TuiOptions } from "./types";
+import { parseToolProtocol } from "./tool-protocol";
+import { assessCommandRisk, assessPathRisk, resolveToolPath, type ToolRisk } from "./tool-safety";
+import { executeToolCall } from "./tool-executor";
+import { VirtualTerminalSession } from "./vt-session";
 
 const PROMPT_PREFIX = ">>> ";
 const CURSOR_MARKER = "▌";
@@ -137,7 +137,7 @@ interface RuntimeState {
   history: ChatMessage[];
   busy: boolean;
   busyLabel: string;
-  uiMode: "chat" | "downloader" | "model-manager" | "sessions";
+  uiMode: "chat" | "downloader" | "model-manager" | "sessions" | "vt" | "confirm";
   downloader: DownloaderState | null;
   modelManager: ModelManagerState | null;
   sessionFilePath: string | null;
@@ -148,6 +148,13 @@ interface RuntimeState {
   usedTokensExact: number | null;
   latestOutputTokensPerSecond: number | null;
   modelAutocompleteCandidates: ModelAutocompleteCandidate[];
+  pendingConfirmation: PendingConfirmation | null;
+}
+
+interface PendingConfirmation {
+  summary: string;
+  destructive: boolean;
+  outOfZone: boolean;
 }
 
 interface InkModule {
@@ -293,9 +300,7 @@ function buildTitleBoxOptions(
   width: number
 ): TitleBoxOptions {
   const loadedModel = resolveLoadedModel(state.config.model);
-  const modelLabel = loadedModel
-    ? getFriendlyModelName(loadedModel, state.config.nicknames)
-    : "";
+  const modelLabel = loadedModel ? getFriendlyModelName(loadedModel, state.config.nicknames) : "";
   let tokenUsage = "";
   if (loadedModel) {
     const modelSizeBytes = resolveLoadedModelSizeBytes(state.config, loadedModel);
@@ -342,6 +347,12 @@ function resolveLoadedModelSizeBytes(config: AppConfig, loadedModel: string): nu
 }
 
 export function buildPromptStatusText(state: RuntimeState): string {
+  if (state.uiMode === "confirm") {
+    return "confirmation · required";
+  }
+  if (state.uiMode === "vt") {
+    return "virtual-terminal · active";
+  }
   if (state.uiMode === "sessions") {
     return "sessions · browse";
   }
@@ -405,6 +416,7 @@ function resetSession(state: RuntimeState): void {
   state.sessionName = "";
   state.usedTokensExact = null;
   state.latestOutputTokensPerSecond = null;
+  state.pendingConfirmation = null;
 }
 
 function replayOutputFromHistory(state: RuntimeState): void {
@@ -454,7 +466,8 @@ function createRuntimeState(options: TuiOptions): RuntimeState {
     sessionSelectionIndex: 0,
     usedTokensExact: null,
     latestOutputTokensPerSecond: null,
-    modelAutocompleteCandidates: []
+    modelAutocompleteCandidates: [],
+    pendingConfirmation: null
   };
 }
 
@@ -490,7 +503,9 @@ export function buildModelAutocompleteCandidates(
       }
     }
 
-    const dedupedAliases = [...new Set(aliases.filter((alias) => alias.length > 0 && alias !== value))];
+    const dedupedAliases = [
+      ...new Set(aliases.filter((alias) => alias.length > 0 && alias !== value))
+    ];
     candidates.push({
       value,
       aliases: dedupedAliases
@@ -620,7 +635,8 @@ export function buildAutocompleteOverlayLines(
   for (let rowIndex = 0; rowIndex < visibleOptions.length; rowIndex++) {
     const option = visibleOptions[rowIndex] ?? "";
     const descriptor = descriptorBySlashName.get(option);
-    const description = descriptor?.description ?? (option.startsWith("/") ? "Command" : "Local model");
+    const description =
+      descriptor?.description ?? (option.startsWith("/") ? "Command" : "Local model");
     const commandColor = descriptor?.kind === "skill" ? INPUT_PINK : GRADIENT_BLUE;
     const selected = startIndex + rowIndex === menu.selectedIndex;
     const paddedCommand = option.padEnd(commandColumnWidth, " ");
@@ -828,6 +844,9 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
     } | null>(null);
     const downloaderAbortControllerRef = useRef<AbortController | null>(null);
     const busySpinnerRef = useRef<PulsingSpinner | null>(null);
+    const vtSessionRef = useRef<VirtualTerminalSession | null>(null);
+    const confirmResolverRef = useRef<((approved: boolean) => void) | null>(null);
+    const vtEscapePendingRef = useRef(false);
 
     const forceRender = useCallback(() => {
       setRenderVersion((value) => value + 1);
@@ -892,6 +911,49 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
         text: seedText
       });
     }, []);
+
+    const getVtSession = useCallback((): VirtualTerminalSession => {
+      if (!vtSessionRef.current) {
+        vtSessionRef.current = new VirtualTerminalSession();
+      }
+      return vtSessionRef.current;
+    }, []);
+
+    const resolvePendingConfirmation = useCallback(
+      (approved: boolean): void => {
+        const currentState = stateRef.current;
+        const resolver = confirmResolverRef.current;
+        confirmResolverRef.current = null;
+        if (!currentState || !resolver) {
+          return;
+        }
+        currentState.pendingConfirmation = null;
+        currentState.uiMode = "chat";
+        resolver(approved);
+        forceRender();
+      },
+      [forceRender]
+    );
+
+    const requestToolConfirmation = useCallback(
+      async (summary: string, risk: ToolRisk): Promise<boolean> => {
+        const currentState = stateRef.current;
+        if (!currentState) {
+          return false;
+        }
+        currentState.pendingConfirmation = {
+          summary,
+          destructive: risk.destructive,
+          outOfZone: risk.outOfZone
+        };
+        currentState.uiMode = "confirm";
+        forceRender();
+        return await new Promise<boolean>((resolveApproval) => {
+          confirmResolverRef.current = resolveApproval;
+        });
+      },
+      [forceRender]
+    );
 
     if (!composerRef.current) {
       composerRef.current = createComposer();
@@ -986,7 +1048,10 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
           await refreshSessionActivity();
           forceRender();
         } catch (error) {
-          appendOutput(currentState, formatErrorMessage(`Load session failed: ${formatError(error)}`));
+          appendOutput(
+            currentState,
+            formatErrorMessage(`Load session failed: ${formatError(error)}`)
+          );
           appendOutput(currentState, "");
           currentState.uiMode = "chat";
           composerRef.current = createComposer();
@@ -1010,8 +1075,23 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
         downloaderAbortControllerRef.current = null;
         void persistSessionSnapshot().catch(() => undefined);
         void stopLlamaServer().catch(() => undefined);
+        vtSessionRef.current?.dispose();
+        vtSessionRef.current = null;
       };
     }, [persistSessionSnapshot]);
+
+    useEffect(() => {
+      const session = getVtSession();
+      const off = session.onData(() => {
+        const currentState = stateRef.current;
+        if (currentState?.uiMode === "vt") {
+          forceRender();
+        }
+      });
+      return () => {
+        off();
+      };
+    }, [forceRender, getVtSession]);
 
     useEffect(() => {
       void refreshSessionActivity();
@@ -1079,6 +1159,7 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
           columns: stdout.columns ?? 80,
           rows: stdout.rows ?? 24
         };
+        vtSessionRef.current?.resize(Math.max(20, next.columns - 2), Math.max(8, next.rows - 6));
         setDimensions(next);
       };
 
@@ -1106,128 +1187,207 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
       };
     }, [isRawModeSupported, setRawMode]);
 
-    const requestAssistantFromLlama = useCallback(async (): Promise<AssistantReply> => {
-      const currentState = stateRef.current;
-      const llamaClient = llamaClientRef.current;
-      if (!currentState || !llamaClient) {
-        throw new Error("Chat runtime is not initialized.");
-      }
+    const requestAssistantFromLlama = useCallback(
+      async (streamingOverride?: boolean): Promise<AssistantReply> => {
+        const currentState = stateRef.current;
+        const llamaClient = llamaClientRef.current;
+        if (!currentState || !llamaClient) {
+          throw new Error("Chat runtime is not initialized.");
+        }
 
-      const estimateCompletionTokens = (text: string): number =>
-        estimateConversationTokens([{ content: text }]);
+        const estimateCompletionTokens = (text: string): number =>
+          estimateConversationTokens([{ content: text }]);
 
-      const readiness = await ensureLlamaReady(currentState.config);
-      if (!readiness.ready) {
-        throw new Error(
-          readiness.failure
-            ? formatLlamaStartupFailure(readiness.failure, currentState.config)
-            : "llama.cpp is unavailable."
-        );
-      }
+        const readiness = await ensureLlamaReady(currentState.config);
+        if (!readiness.ready) {
+          throw new Error(
+            readiness.failure
+              ? formatLlamaStartupFailure(readiness.failure, currentState.config)
+              : "llama.cpp is unavailable."
+          );
+        }
 
-      llamaClient.setModel(currentState.config.model);
+        llamaClient.setModel(currentState.config.model);
 
-      if (!currentState.config.streaming) {
-        const startedAtMs = Date.now();
+        const shouldStream = streamingOverride ?? currentState.config.streaming;
+
+        if (!shouldStream) {
+          const startedAtMs = Date.now();
+          startBusyIndicator("Thinking...");
+
+          try {
+            const result = await llamaClient.chat(currentState.history, currentState.config.model);
+            return {
+              text: result.text,
+              rendered: false,
+              totalTokens: result.usage?.totalTokens,
+              completionTokens:
+                result.usage?.completionTokens ?? estimateCompletionTokens(result.text),
+              generationDurationMs: Date.now() - startedAtMs
+            };
+          } finally {
+            stopBusyIndicator();
+          }
+        }
+
+        const timestamp = new Date();
+        let streamText = "";
+        let receivedFirstToken = false;
+        let streamStartedAtMs: number | null = null;
+        const blockStart = currentState.outputLines.length;
+        let blockLength = 0;
         startBusyIndicator("Thinking...");
+        forceRender();
 
         try {
-          const result = await llamaClient.chat(currentState.history, currentState.config.model);
-          return {
-            text: result.text,
-            rendered: false,
-            totalTokens: result.usage?.totalTokens,
-            completionTokens: result.usage?.completionTokens ?? estimateCompletionTokens(result.text),
-            generationDurationMs: Date.now() - startedAtMs
-          };
-        } finally {
-          stopBusyIndicator();
-        }
-      }
-
-      const timestamp = new Date();
-      let streamText = "";
-      let receivedFirstToken = false;
-      let streamStartedAtMs: number | null = null;
-      const blockStart = currentState.outputLines.length;
-      let blockLength = 0;
-      startBusyIndicator("Thinking...");
-      forceRender();
-
-      try {
-        const streamResult: ChatResult = await llamaClient.streamChat(
-          currentState.history,
-          {
-            onToken: (token: string): void => {
-              if (!receivedFirstToken) {
-                receivedFirstToken = true;
-                streamStartedAtMs = Date.now();
-                stopBusyIndicator();
-              }
-              streamText += token;
-              blockLength = replaceOutputBlock(
-                currentState,
-                blockStart,
-                blockLength,
-                formatAssistantMessage(streamText, timestamp)
-              );
-              forceRender();
-            }
-          },
-          currentState.config.model
-        );
-        streamText = streamResult.text;
-
-        if (streamText.length === 0) {
-          stopBusyIndicator();
-          throw new Error("Streaming response ended without assistant content.");
-        }
-
-        return {
-          text: streamText,
-          rendered: true,
-          totalTokens: streamResult.usage?.totalTokens,
-          completionTokens: streamResult.usage?.completionTokens ?? estimateCompletionTokens(streamText),
-          generationDurationMs:
-            streamStartedAtMs === null ? undefined : Math.max(0, Date.now() - streamStartedAtMs)
-        };
-      } catch {
-        stopBusyIndicator();
-        appendOutput(
-          currentState,
-          formatWarningMessage("Streaming failed. Retrying without streaming.")
-        );
-        startBusyIndicator("Retrying...");
-        const retryStartedAtMs = Date.now();
-
-        try {
-          const fallbackResult = await llamaClient.chat(
+          const streamResult: ChatResult = await llamaClient.streamChat(
             currentState.history,
+            {
+              onToken: (token: string): void => {
+                if (!receivedFirstToken) {
+                  receivedFirstToken = true;
+                  streamStartedAtMs = Date.now();
+                  stopBusyIndicator();
+                }
+                streamText += token;
+                blockLength = replaceOutputBlock(
+                  currentState,
+                  blockStart,
+                  blockLength,
+                  formatAssistantMessage(streamText, timestamp)
+                );
+                forceRender();
+              }
+            },
             currentState.config.model
           );
-          const fallbackText = fallbackResult.text;
-          replaceOutputBlock(
-            currentState,
-            blockStart,
-            blockLength,
-            formatAssistantMessage(fallbackText, timestamp)
-          );
+          streamText = streamResult.text;
+
+          if (streamText.length === 0) {
+            stopBusyIndicator();
+            throw new Error("Streaming response ended without assistant content.");
+          }
+
           return {
-            text: fallbackText,
+            text: streamText,
             rendered: true,
-            totalTokens: fallbackResult.usage?.totalTokens,
+            totalTokens: streamResult.usage?.totalTokens,
             completionTokens:
-              fallbackResult.usage?.completionTokens ?? estimateCompletionTokens(fallbackText),
-            generationDurationMs: Date.now() - retryStartedAtMs
+              streamResult.usage?.completionTokens ?? estimateCompletionTokens(streamText),
+            generationDurationMs:
+              streamStartedAtMs === null ? undefined : Math.max(0, Date.now() - streamStartedAtMs)
           };
-        } catch (fallbackError) {
-          currentState.outputLines.splice(blockStart, blockLength);
-          throw fallbackError;
-        } finally {
+        } catch {
           stopBusyIndicator();
+          appendOutput(
+            currentState,
+            formatWarningMessage("Streaming failed. Retrying without streaming.")
+          );
+          startBusyIndicator("Retrying...");
+          const retryStartedAtMs = Date.now();
+
+          try {
+            const fallbackResult = await llamaClient.chat(
+              currentState.history,
+              currentState.config.model
+            );
+            const fallbackText = fallbackResult.text;
+            replaceOutputBlock(
+              currentState,
+              blockStart,
+              blockLength,
+              formatAssistantMessage(fallbackText, timestamp)
+            );
+            return {
+              text: fallbackText,
+              rendered: true,
+              totalTokens: fallbackResult.usage?.totalTokens,
+              completionTokens:
+                fallbackResult.usage?.completionTokens ?? estimateCompletionTokens(fallbackText),
+              generationDurationMs: Date.now() - retryStartedAtMs
+            };
+          } catch (fallbackError) {
+            currentState.outputLines.splice(blockStart, blockLength);
+            throw fallbackError;
+          } finally {
+            stopBusyIndicator();
+          }
         }
+      },
+      [forceRender, startBusyIndicator, stopBusyIndicator]
+    );
+
+    const assessToolCallRisk = useCallback((call: ToolCall, workingZone: string): ToolRisk => {
+      if (call.name === "run_command") {
+        const command =
+          typeof call.arguments["command"] === "string" ? call.arguments["command"] : "";
+        const cwdArg = typeof call.arguments["cwd"] === "string" ? call.arguments["cwd"] : ".";
+        const resolvedCwd = resolveToolPath(cwdArg, workingZone);
+        return assessCommandRisk(command, resolvedCwd, workingZone);
       }
-    }, [forceRender, startBusyIndicator, stopBusyIndicator]);
+
+      const pathArg = typeof call.arguments["path"] === "string" ? call.arguments["path"] : ".";
+      return assessPathRisk(pathArg, workingZone);
+    }, []);
+
+    const executeToolCalls = useCallback(
+      async (toolCalls: readonly ToolCall[]): Promise<ToolResult[]> => {
+        const currentState = stateRef.current;
+        if (!currentState) {
+          return [];
+        }
+
+        const workingZone = process.cwd();
+        const results: ToolResult[] = [];
+
+        for (const call of toolCalls) {
+          const risk = assessToolCallRisk(call, workingZone);
+          if (risk.requiresConfirmation) {
+            const approved = await requestToolConfirmation(`${call.name} (${call.id})`, risk);
+            if (!approved) {
+              const deniedResult: ToolResult = {
+                callId: call.id,
+                tool: call.name,
+                status: "denied",
+                output: "Action denied by user confirmation policy."
+              };
+              results.push(deniedResult);
+              if (currentState.config.verbose) {
+                appendOutput(
+                  currentState,
+                  formatDimMessage(`[tool] ${call.name} (${call.id}) denied`)
+                );
+              }
+              continue;
+            }
+          }
+
+          if (currentState.config.verbose) {
+            appendOutput(currentState, formatDimMessage(`[tool] ${call.name} (${call.id})`));
+          }
+
+          const result = await executeToolCall(call, {
+            workingDirectory: workingZone,
+            vtSession: getVtSession()
+          });
+          results.push(result);
+
+          if (currentState.config.verbose) {
+            appendOutput(
+              currentState,
+              formatDimMessage(`[tool-result] ${result.tool} => ${result.status}`)
+            );
+          }
+        }
+
+        if (currentState.config.verbose) {
+          appendOutput(currentState, "");
+        }
+
+        return results;
+      },
+      [assessToolCallRisk, getVtSession, requestToolConfirmation]
+    );
 
     const loadDownloaderModels = useCallback(
       async (
@@ -1650,27 +1810,56 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
         }
 
         try {
-          const reply = await requestAssistantFromLlama();
-          if (!reply.rendered) {
-            appendOutput(currentState, formatAssistantMessage(reply.text));
+          const maxRounds = 6;
+          let rounds = 0;
+          let finished = false;
+
+          while (!finished && rounds < maxRounds) {
+            rounds += 1;
+            const reply = await requestAssistantFromLlama(false);
+            const parsed = parseToolProtocol(reply.text);
+            const assistantText = parsed.assistantText.trim();
+
+            if (assistantText.length > 0) {
+              appendOutput(currentState, formatAssistantMessage(assistantText));
+              appendOutput(currentState, "");
+              currentState.history.push({ role: "assistant", content: assistantText });
+            }
+
+            const completionTokens =
+              typeof reply.completionTokens === "number" && reply.completionTokens > 0
+                ? reply.completionTokens
+                : estimateConversationTokens([{ content: reply.text }]);
+            currentState.latestOutputTokensPerSecond = computeTokensPerSecond(
+              completionTokens,
+              reply.generationDurationMs ?? 0
+            );
+            if (typeof reply.totalTokens === "number" && reply.totalTokens >= 0) {
+              currentState.usedTokensExact = reply.totalTokens;
+            } else {
+              currentState.usedTokensExact = estimateConversationTokens(currentState.history);
+            }
+
+            if (parsed.toolCalls.length === 0) {
+              finished = true;
+              break;
+            }
+
+            const toolResults = await executeToolCalls(parsed.toolCalls);
+            currentState.history.push({
+              role: "system",
+              content: `Tool results: ${JSON.stringify(toolResults)}`
+            });
+            forceRender();
           }
-          const completionTokens =
-            typeof reply.completionTokens === "number" && reply.completionTokens > 0
-              ? reply.completionTokens
-              : estimateConversationTokens([{ content: reply.text }]);
-          const throughput = computeTokensPerSecond(
-            completionTokens,
-            reply.generationDurationMs ?? 0
-          );
-          currentState.latestOutputTokensPerSecond = throughput;
-          if (typeof reply.totalTokens === "number" && reply.totalTokens >= 0) {
-            currentState.usedTokensExact = reply.totalTokens;
+
+          if (!finished) {
+            appendOutput(
+              currentState,
+              formatWarningMessage("Stopped tool chaining after max depth (6 rounds).")
+            );
+            appendOutput(currentState, "");
           }
-          currentState.history.push({ role: "assistant", content: reply.text });
-          if (typeof reply.totalTokens !== "number" || reply.totalTokens < 0) {
-            currentState.usedTokensExact = estimateConversationTokens(currentState.history);
-          }
-          appendOutput(currentState, "");
         } catch (error) {
           appendOutput(currentState, formatErrorMessage(`Request failed: ${formatError(error)}`));
           appendOutput(currentState, "");
@@ -1679,7 +1868,7 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
         await persistSessionSnapshot();
         forceRender();
       },
-      [forceRender, persistSessionSnapshot, requestAssistantFromLlama]
+      [executeToolCalls, forceRender, persistSessionSnapshot, requestAssistantFromLlama]
     );
 
     const processSubmittedInput = useCallback(
@@ -1758,6 +1947,16 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
             return;
           }
 
+          if (result.uiAction?.type === "open-vt") {
+            currentState.uiMode = "vt";
+            getVtSession().ensureStarted(
+              Math.max(20, dimensionsRef.current.columns - 2),
+              Math.max(8, dimensionsRef.current.rows - 6)
+            );
+            forceRender();
+            return;
+          }
+
           forceRender();
 
           if (result.action === "exit") {
@@ -1788,6 +1987,7 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
         refreshSessionActivity,
         refreshModelManagerModels,
         scheduleDownloaderSearch,
+        getVtSession,
         onRestartRequested
       ]
     );
@@ -1855,6 +2055,58 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
         }
 
         if (actions.length === 0) {
+          return;
+        }
+
+        if (currentState.uiMode === "confirm") {
+          for (const action of actions) {
+            if (action.type === "cancel") {
+              resolvePendingConfirmation(false);
+              return;
+            }
+            if (action.type === "submit") {
+              resolvePendingConfirmation(true);
+              return;
+            }
+            if (action.type === "insert") {
+              const normalized = action.text.trim().toLowerCase();
+              if (normalized === "y" || normalized === "yes") {
+                resolvePendingConfirmation(true);
+                return;
+              }
+              if (normalized === "n" || normalized === "no") {
+                resolvePendingConfirmation(false);
+                return;
+              }
+            }
+          }
+          forceRender();
+          return;
+        }
+
+        if (currentState.uiMode === "vt") {
+          const bytes = Buffer.from(sequence, "latin1");
+          if (bytes.includes(0x11)) {
+            vtEscapePendingRef.current = false;
+            currentState.uiMode = "chat";
+            forceRender();
+            return;
+          }
+
+          if (sequence === "\u001b") {
+            if (vtEscapePendingRef.current) {
+              vtEscapePendingRef.current = false;
+              currentState.uiMode = "chat";
+              forceRender();
+              return;
+            }
+            vtEscapePendingRef.current = true;
+            return;
+          }
+
+          vtEscapePendingRef.current = false;
+          getVtSession().write(sequence);
+          forceRender();
           return;
         }
 
@@ -2290,8 +2542,10 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
       persistSessionSnapshot,
       preloadDownloaderTabs,
       refreshModelAutocomplete,
+      resolvePendingConfirmation,
       syncModelManagerSearchFromComposer,
       syncDownloaderSearchFromComposer,
+      getVtSession,
       stdin
     ]);
 
@@ -2306,7 +2560,11 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
     const titleLines = renderTitleBox(buildTitleBoxOptions(state, version, dimensions.columns));
     const promptLines = buildPromptRenderLines(dimensions.columns, statusText, promptLayout, true);
     const autocompleteOverlay =
-      state.uiMode === "downloader" || state.uiMode === "model-manager" || state.uiMode === "sessions"
+      state.uiMode === "downloader" ||
+      state.uiMode === "model-manager" ||
+      state.uiMode === "sessions" ||
+      state.uiMode === "vt" ||
+      state.uiMode === "confirm"
         ? []
         : buildAutocompleteOverlayLines(composer, registryRef.current);
 
@@ -2334,6 +2592,44 @@ function createInkApp(ink: InkModule): React.FC<InkAppProps> {
           currentModel: state.config.model
         })
       );
+    }
+    if (state.uiMode === "vt") {
+      const vtLines = getVtSession().getDisplayLines(Math.max(8, dimensions.rows - 10));
+      outputLines.push("");
+      outputLines.push(
+        horizontalGradient(
+          "╭─── Yips Virtual Terminal ───────────────────────────────╮",
+          GRADIENT_PINK,
+          GRADIENT_YELLOW
+        )
+      );
+      if (vtLines.length === 0) {
+        outputLines.push(
+          colorText("│ starting shell...                                       │", GRADIENT_BLUE)
+        );
+      } else {
+        for (const line of vtLines.slice(-Math.max(1, dimensions.rows - 12))) {
+          outputLines.push(line);
+        }
+      }
+      outputLines.push(
+        colorText("Esc Esc: return to chat | Ctrl+Q: return to chat", GRADIENT_BLUE)
+      );
+    }
+    if (state.uiMode === "confirm" && state.pendingConfirmation) {
+      const riskTags = [
+        state.pendingConfirmation.destructive ? "destructive" : null,
+        state.pendingConfirmation.outOfZone ? "outside-working-zone" : null
+      ]
+        .filter((value): value is string => value !== null)
+        .join(", ");
+      outputLines.push("");
+      outputLines.push(formatWarningMessage("Confirmation required"));
+      outputLines.push(formatDimMessage(`Action: ${state.pendingConfirmation.summary}`));
+      if (riskTags.length > 0) {
+        outputLines.push(formatDimMessage(`Risk: ${riskTags}`));
+      }
+      outputLines.push(formatDimMessage("Approve? [y/N] (Enter = yes, Esc = no)"));
     }
 
     const visible = computeVisibleLayoutSlices(

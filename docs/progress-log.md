@@ -242,13 +242,13 @@ Changed:
 - Updated tests:
   - expanded `tests/prompt-composer.test.ts` for `/model` and `/nick` operator completion contexts, alias matching, empty-arg behavior, and runtime refresh behavior
   - added `tests/tui-model-autocomplete.test.ts` for model alias candidate generation and overlay rendering for local model suggestions
-Validation:
+    Validation:
 
 - `npm run typecheck` — clean
 - `npm test` — 254 tests pass (25 files)
 - `npm run lint` — clean
 - `npm run format:check` — fails (pre-existing repo-wide formatting drift across many files, not introduced by this exchange)
-Next:
+  Next:
 
 - Consider adding an integration-style input-loop test that explicitly asserts `Tab` acceptance in chat mode with an open autocomplete menu.
   Next:
@@ -1114,21 +1114,25 @@ Changed:
 - Add a focused TUI integration-style render test that verifies downloader progress updates do not shift prompt-box geometry during rapid onProgress re-renders.
 
 ## 2026-02-24 02:07 UTC — Exchange 12
+
 Summary: Fixed remaining downloader border break during loading by removing wide glyph usage in loading/download lines.
 Changed:
+
 - Updated `src/downloader-ui.ts` loading/downloading copy to avoid the wide `⏳` glyph, which could exceed terminal cell calculations and push right borders.
   - `⏳ ...` -> `Loading: ...`
   - `⏳ Downloading ...` -> `Downloading ...`
 - Kept fixed-row body rendering logic unchanged; only width-safe text rendering changed.
-Validation:
+  Validation:
 - `npm test -- tests/downloader-ui.test.ts tests/downloader-state.test.ts` — clean
 - `npm run lint -- src/downloader-ui.ts` — clean
-Next:
+  Next:
 - If border artifacts persist in specific terminals/fonts, add display-width-aware string measurement (wcwidth-based) instead of codepoint counting in `src/downloader-ui.ts`.
 
 ## 2026-02-24 02:09 UTC — Exchange 13
+
 Summary: Reduced download-screen flicker and hardened download-view border stability.
 Changed:
+
 - Updated `src/tui.ts` download progress rendering path:
   - throttled `forceRender()` during `onProgress` updates using time and byte gates
   - added constants:
@@ -1138,15 +1142,17 @@ Changed:
 - Updated `src/downloader-ui.ts` progress bar glyphs to ASCII width-safe characters:
   - `[████░░░░]` style replaced with `[====----]`
 - Updated `src/tui.ts` download status text separators to ASCII (`|`) to avoid terminal-width ambiguity in downloader rows.
-Validation:
+  Validation:
 - `npm test -- tests/downloader-ui.test.ts tests/downloader-state.test.ts tests/model-downloader.test.ts` — clean
 - `npm run lint -- src/tui.ts src/downloader-ui.ts` — clean
-Next:
+  Next:
 - If flicker persists on very high-throughput links, add a dedicated sampled progress state timer (e.g., 10 FPS) so render cadence is fully decoupled from network chunk cadence.
 
 ## 2026-02-24 02:12 UTC — Exchange 14
+
 Summary: Reworked downloader progress rendering to fixed-rate repainting to address persistent flicker; restored original block-style progress bar.
 Changed:
+
 - Updated `src/tui.ts` download progress path:
   - removed chunk-cadence `forceRender()` calls from `onProgress`
   - added `downloaderProgressDirtyRef` to mark pending UI updates
@@ -1157,15 +1163,17 @@ Changed:
   - reset dirty flags on start/finish/error transitions
 - Updated `src/downloader-ui.ts`:
   - restored block-style progress bar glyphs (`█` and `░`) per user preference
-Validation:
+    Validation:
 - `npm test -- tests/downloader-ui.test.ts tests/downloader-state.test.ts tests/model-downloader.test.ts` — clean
 - `npm run lint -- src/tui.ts src/downloader-ui.ts` — clean
-Next:
+  Next:
 - If any terminal still flickers, add optional low-refresh mode (e.g., 5 FPS) toggled by env var for slower redraw cadence.
 
 ## 2026-02-24 02:22 UTC — Exchange 15
+
 Summary: Implemented download-screen UX corrections: clear previous list chrome while downloading, full-width progress bar, and real Esc cancel behavior.
 Changed:
+
 - Updated `src/downloader-ui.ts` downloading layout:
   - hides tabs/memory header row while `phase === downloading` (renders a cleared row instead)
   - footer now shows `[Esc] Cancel` during active download
@@ -1182,30 +1190,34 @@ Changed:
   - verifies downloading view hides tabs row text
   - verifies downloading footer is `[Esc] Cancel`
   - verifies progress line consumes row width up to the right border
-Validation:
+    Validation:
 - `npm run typecheck` — clean
 - `npm test -- tests/downloader-ui.test.ts tests/model-downloader.test.ts tests/downloader-state.test.ts` — clean
 - `npm run lint -- src/tui.ts src/downloader-ui.ts src/model-downloader.ts tests/downloader-ui.test.ts` — clean
-Next:
+  Next:
 - If any terminal still shows visual flicker, add a dedicated optional low-FPS download repaint mode (`YIPS_DOWNLOADER_FPS`) for user-tunable cadence.
 
 ## 2026-02-24 02:26 UTC — Exchange 16
+
 Summary: Reduced downloader panel height specifically for active download mode.
 Changed:
+
 - Updated `src/downloader-ui.ts`:
   - added `DOWNLOADER_DOWNLOADING_BODY_ROWS = 7`
   - download-phase renderer now uses the compact body row count while keeping model/file browsing heights unchanged
 - Updated `tests/downloader-ui.test.ts`:
   - adjusted download-mode frame height expectation from 14 lines to 11 lines
-Validation:
+    Validation:
 - `npm test -- tests/downloader-ui.test.ts` — clean
 - `npm run lint -- src/downloader-ui.ts tests/downloader-ui.test.ts` — clean
-Next:
+  Next:
 - If desired, make compact height configurable by terminal size (e.g., adaptive body rows based on `rows`), instead of a fixed constant.
 
 ## 2026-02-24 02:32 UTC — Exchange 17
+
 Summary: Made downloading view fully compact with no empty body lines and moved status text to the bottom-right footer.
 Changed:
+
 - Updated `src/downloader-ui.ts` downloading-mode rendering:
   - removed the tabs/header row while downloading
   - reduced downloading body to only 2 rows: `Downloading ...` and full-width progress bar
@@ -1218,15 +1230,17 @@ Changed:
   - downloading panel height now `5` lines total
   - asserts no blank bordered lines in downloading mode
   - keeps assertions for hidden tabs and cancel footer
-Validation:
+    Validation:
 - `npm test -- tests/downloader-ui.test.ts` — clean
 - `npm run lint -- src/downloader-ui.ts tests/downloader-ui.test.ts` — clean
-Next:
+  Next:
 - If desired, apply the same split-footer pattern to non-downloading file view for richer right-side context in a single row.
 
 ## 2026-02-24 02:35 UTC — Exchange 18
+
 Summary: Reduced residual download flashing by decoupling network chunk callbacks from immediate downloader state mutation/render.
 Changed:
+
 - Updated `src/tui.ts` download update pipeline:
   - increased download repaint interval to 200ms
   - added `downloaderProgressBufferRef` to buffer the latest `(bytesDownloaded, totalBytes)` from `onProgress`
@@ -1234,16 +1248,18 @@ Changed:
   - timer loop now applies buffered progress to state (`updateDownloadProgress`) and re-renders once per tick
   - clears buffered progress on cancel/finish/error/unmount
 - Existing compact download layout and bottom-right status placement remain unchanged.
-Validation:
+  Validation:
 - `npm run typecheck` — clean
 - `npm test -- tests/downloader-ui.test.ts tests/downloader-state.test.ts tests/model-downloader.test.ts` — clean
 - `npm run lint -- src/tui.ts` — clean
-Next:
+  Next:
 - If flashing persists in a specific terminal emulator, add a terminal capability fallback mode that temporarily disables truecolor gradients while downloading.
 
 ## 2026-02-24 03:12 UTC — Exchange 19
+
 Summary: Restored `/models` Yips Model Manager from yips-cli into the TypeScript Ink TUI with local model list/switch/delete, downloader handoff, nickname persistence, and command wiring parity.
 Changed:
+
 - Added model manager implementation modules:
   - `src/model-manager.ts`: recursive local GGUF discovery from `YIPS_MODELS_DIR` or `~/.yips/models`, model metadata shaping, local matching helpers, filtering helpers, and safe local model delete with empty-directory pruning.
   - `src/model-manager-state.ts`: model-manager UI state machine (loading/error/idle, selection/scroll, search filtering, remove/select helpers).
@@ -1272,18 +1288,20 @@ Changed:
   - `docs/guides/slash-commands.md` command table for `/model`, `/models`, and `/nick` behavior.
   - `docs/roadmap.md` marked Model Manager and configuration file support as completed.
   - `docs/changelog.md` updated with restored Model Manager and command/persistence changes.
-Validation:
+    Validation:
 - `npm run typecheck` — clean
 - `npm test` — clean (20 files, 192 tests)
 - `npm run lint` — clean
 - `npm run format:check` — still reports pre-existing formatting drift in unrelated files (unchanged by this exchange)
-Next:
+  Next:
 - Add focused TUI integration coverage for model-manager mode transitions (`/model` open, in-mode search/select/delete, Esc close, and manager -> downloader handoff).
 - Revisit manager-mode `t` key handling if strict single-key semantics are needed independently of typed search input.
 
 ## 2026-02-24 03:57 UTC — Exchange 20
+
 Summary: Implemented llama.cpp server lifecycle management with boot/request readiness checks, auto-start diagnostics, and config schema expansion; included and committed prior in-progress workspace changes.
 Changed:
+
 - Added `src/llama-server.ts` with managed lifecycle helpers:
   - health probe (`/health`) checks
   - binary resolution (`LLAMA_SERVER_PATH`, config path, `which llama-server`, fallback path)
@@ -1308,17 +1326,19 @@ Changed:
   - diagnostic formatter content
 - Updated `tests/config.test.ts` for expanded config fields and env override coverage.
 - Included existing workspace changes requested for commit (`docs/stack.md`, `src/colors.ts`, `src/input-engine.ts`, `tests/input-engine.test.ts`, `src/hardware.ts`, `.yips_config.json`).
-Validation:
+  Validation:
 - `npm run typecheck` — clean
 - `npm test` — clean (21 files, 199 tests)
 - `npm run lint` — clean
-Next:
+  Next:
 - Add `/backend` implementation and optional Claude fallback path so users can recover from llama.cpp failures without leaving chat mode.
 - Add focused TUI integration tests for startup preflight message rendering and managed shutdown behavior.
 
 ## 2026-02-24 04:13 UTC — Exchange 21
+
 Summary: Added an automated `install.sh` for one-command local runtime setup (dependencies, llama.cpp build, env wiring, config normalization) with model-downloader guidance when no GGUF exists.
 Changed:
+
 - Added executable `install.sh` at repository root.
 - Installer behavior:
   - detects OS/package manager (`apt`, `dnf`, `brew`) and auto-installs missing prerequisites (`git`, `cmake`, build tools, `node`, `npm`, `curl`)
@@ -1333,43 +1353,49 @@ Changed:
 - Updated docs:
   - `docs/guides/getting-started.md` now includes automated install flow and `source ~/.yips/env.sh` step.
   - `docs/changelog.md` updated with installer entry.
-Validation:
+    Validation:
 - `npm run lint` — clean
 - `npm run typecheck` — clean
 - `npm test` — clean
-Next:
+  Next:
 - Add a focused installer smoke-check in CI (shell syntax + dry-run validation) once a non-destructive dry-run mode is introduced.
 
 ## 2026-02-24 04:20 UTC — Exchange 22
+
 Summary: Added Arch Linux `pacman` support to `install.sh` and updated setup docs accordingly.
 Changed:
+
 - Updated `install.sh` package manager detection to include `pacman`.
 - Added `install_packages_pacman()` helper using `pacman -Sy --needed --noconfirm`.
 - Added Arch dependency mapping in prerequisite install flow:
   - `git cmake base-devel curl nodejs npm`
 - Updated `docs/guides/getting-started.md` to list `pacman` among supported package managers for automated install.
-Validation:
+  Validation:
 - Script logic review for package-manager dispatch path (`apt`/`pacman`/`dnf`/`brew`) completed.
-Next:
+  Next:
 - Optionally add a non-destructive `--dry-run` mode to `install.sh` and validate pacman branch in CI without root installs.
 
 ## 2026-02-24 04:24 UTC — Exchange 23
+
 Summary: Fixed Arch installer CUDA fallback failure by preventing stale CMake CUDA cache from poisoning CPU fallback; added nvcc gate for CUDA attempts.
 Changed:
+
 - Updated `install.sh` CPU fallback path:
   - clears `${LLAMA_BUILD_DIR}/CMakeCache.txt` and `${LLAMA_BUILD_DIR}/CMakeFiles` before reconfigure
   - explicitly configures CPU build with `-DGGML_CUDA=OFF`
 - Updated CUDA decision logic:
   - if NVIDIA GPU is present but `nvcc` is missing, installer now skips CUDA attempt and goes straight to CPU build with a warning
 - Verified script syntax with `bash -n install.sh`.
-Validation:
+  Validation:
 - `bash -n install.sh` — clean
-Next:
+  Next:
 - Optionally add an explicit Arch CUDA prerequisite hint (e.g. `cuda` package) when `nvidia-smi` is present but `nvcc` is absent.
 
 ## 2026-02-24 04:27 UTC — Exchange 24
+
 Summary: Added explicit opt-in CUDA install flag (`--cuda`) to installer.
 Changed:
+
 - Updated `install.sh`:
   - added argument parsing with `--cuda` and `--help`
   - added CUDA toolkit install step gated by `--cuda`
@@ -1381,15 +1407,17 @@ Changed:
 - Updated docs:
   - `docs/guides/getting-started.md` now documents `./install.sh --cuda`
   - `docs/changelog.md` updated with `--cuda` support note
-Validation:
+    Validation:
 - `bash -n install.sh` — clean
 - `./install.sh --help` output verified
-Next:
+  Next:
 - Add `--dry-run` mode to validate package actions in CI without privileged installs.
 
 ## 2026-02-24 04:35 UTC — Exchange 25
+
 Summary: Hardened Arch installer behavior to avoid partial-upgrade breakage and auto-repair broken Node runtime linkage before npm install.
 Changed:
+
 - Updated `install.sh` pacman workflow:
   - replaced sync-only installs with full-upgrade semantics on first pacman invocation (`pacman -Syu --needed --noconfirm ...`)
   - subsequent pacman installs in same run use `pacman -S --needed --noconfirm ...`
@@ -1402,16 +1430,18 @@ Changed:
 - Updated docs:
   - `docs/guides/getting-started.md` now notes Arch full-upgrade behavior and Node self-heal
   - `docs/changelog.md` includes Arch pacman/runtime hardening notes
-Validation:
+    Validation:
 - `bash -n install.sh` — clean
 - `./install.sh --help` — clean
 - Note: npm/typecheck/test were not run in-session because current environment has broken Node shared-library linkage (the exact condition this patch is intended to recover).
-Next:
+  Next:
 - Add optional `--dry-run` mode so package actions and repair branches can be validated in CI without privileged changes.
 
 ## 2026-02-24 04:38 UTC — Exchange 26
+
 Summary: Extended installer to add a global `yips` launcher path for running from any directory.
 Changed:
+
 - Updated `install.sh`:
   - adds `YIPS_BIN_DIR=~/.local/bin` and creates the directory during install
   - writes env exports in `~/.yips/env.sh`:
@@ -1424,14 +1454,16 @@ Changed:
 - Updated docs:
   - `docs/guides/getting-started.md` now uses `yips` after install
   - `docs/changelog.md` notes launcher + PATH support
-Validation:
+    Validation:
 - `bash -n install.sh` — clean
-Next:
+  Next:
 - Optionally add a `--global-link` mode for users who prefer `/usr/local/bin/yips` instead of `~/.local/bin/yips`.
 
 ## 2026-02-24 04:48 UTC — Exchange 27
+
 Summary: Fixed `yips` launcher staleness by defaulting launcher execution to source mode instead of stale `dist` artifacts.
 Changed:
+
 - Updated `install.sh` launcher generation:
   - launcher now defaults to `npm run dev -- "$@"` for latest local source behavior
   - `dist/index.js` is only used when explicitly requested via `YIPS_USE_DIST=1`
@@ -1439,14 +1471,16 @@ Changed:
 - Updated docs:
   - `docs/guides/getting-started.md` notes launcher default source-mode behavior and `YIPS_USE_DIST=1` override
   - `docs/changelog.md` includes launcher-mode update note
-Validation:
+    Validation:
 - `bash -n install.sh` — clean
-Next:
+  Next:
 - Regenerate user launcher by re-running `./install.sh` (or update `~/.local/bin/yips` manually) so existing local launcher picks up the new logic.
 
 ## 2026-02-24 04:59 UTC — Exchange 28
+
 Summary: Implemented Linux-first llama.cpp port-conflict handling with configurable policy, richer startup diagnostics, and bind-error classification to fix ambiguous startup failures.
 Changed:
+
 - Extended config/types for startup conflict policy:
   - `src/types.ts`: added `LlamaPortConflictPolicy` and `AppConfig.llamaPortConflictPolicy`.
   - `src/config.ts`: added normalization/default/env override support for `llamaPortConflictPolicy` (`YIPS_LLAMA_PORT_CONFLICT_POLICY`), defaulting to `kill-user`.
@@ -1463,30 +1497,34 @@ Changed:
 - Expanded tests:
   - `tests/config.test.ts`: env override coverage for `YIPS_LLAMA_PORT_CONFLICT_POLICY`.
   - `tests/llama-server.test.ts`: added policy and bind-classification coverage with deterministic mocked runtime dependencies; added cleanup via `stopLlamaServer()` to avoid cross-test state leakage.
-Validation:
+    Validation:
 - `npm run typecheck` — clean
 - `npm run lint` — clean
 - `npm test -- tests/llama-server.test.ts tests/config.test.ts` — clean
 - `npm test` — clean (21 files, 203 tests)
 - `npm run build` — clean
-Next:
+  Next:
 - Optionally surface a short UI warning line when Yips auto-terminates a conflicting process, so users can see that recovery action happened without enabling verbose logs.
 
 ## 2026-02-24 05:14 UTC — Exchange 29
+
 Summary: Matched Yips assistant timestamp/colon color to the title-box model-provider light blue.
 Changed:
+
 - Updated `src/messages.ts`:
   - `formatAssistantMessage(...)` now colors the timestamp (`[h:mm AM/PM]`) and trailing `:` with `GRADIENT_BLUE` (same light blue used by title-box provider text), replacing `DARK_BLUE`.
 - Updated `tests/messages.test.ts`:
   - added assertion that timestamp and `:` emit ANSI `38;2;137;207;240` (the `GRADIENT_BLUE` RGB) so the visual contract is locked.
-Validation:
+    Validation:
 - `npm test -- tests/messages.test.ts` — clean (10 passing)
-Next:
+  Next:
 - Optionally run full suite (`npm test`, `npm run lint`, `npm run typecheck`) before next release cut.
 
 ## 2026-02-24 05:39 UTC — Exchange 30
+
 Summary: Implemented `/sessions` end-to-end with session file persistence, interactive loading mode, and title-box recent-activity integration.
 Changed:
+
 - Added `src/session-store.ts`:
   - session slug generation from first user message
   - session file creation and markdown serialization
@@ -1512,28 +1550,32 @@ Changed:
   - `tests/commands.test.ts` now covers `/sessions` UI action
   - `tests/title-box.test.ts` now covers dynamic recent activity and selection highlight rendering
 - Updated `docs/changelog.md` with `/sessions` and session persistence notes.
-Validation:
+  Validation:
 - `npm run typecheck` — clean
 - `npm run lint` — clean
 - `npm test -- tests/session-store.test.ts tests/commands.test.ts tests/title-box.test.ts` — clean
 - `npm test` — clean (22 files, 210 tests)
-Next:
+  Next:
 - Add focused TUI integration tests for sessions-mode transitions and loaded-history replay behavior.
 
 ## 2026-02-24 10:17 UTC — Exchange 31
+
 Summary: Committed and pushed all current local workspace changes to GitHub.
 Changed:
+
 - Staged all modified and untracked files in the repository.
 - Created a single commit containing the full local working set.
 - Pushed `main` to `origin/main`.
-Validation:
+  Validation:
 - `git status --short --branch` checked before and after commit/push.
-Next:
+  Next:
 - Pull latest `main` on other machines/environments before continuing new changes.
 
 ## 2026-02-24 18:35 UTC — Exchange 32
+
 Summary: Updated model friendly-name fallback so nested GGUF model variants display their parent GGUF folder name instead of long quantized filenames.
 Changed:
+
 - Updated `src/model-manager.ts`:
   - `toFriendlyNameFallback(...)` now checks nested path segments for `.gguf` files.
   - when the immediate parent directory name contains `gguf` (case-insensitive), it is used as the fallback display name.
@@ -1541,15 +1583,17 @@ Changed:
 - Updated `tests/model-manager.test.ts`:
   - added regression coverage for `Qwen/Qwen3-VL-2B-Instruct-GGUF/Qwen3VL-2B-Instruct-Q4_K_M.gguf` expecting `Qwen3-VL-2B-Instruct-GGUF`.
   - added `listLocalModels(...)` coverage verifying both `name` and `friendlyName` use the GGUF parent folder for nested variants.
-Validation:
+    Validation:
 - `npm test -- tests/model-manager.test.ts` — clean (7 passing)
 - `npm run typecheck` — clean
-Next:
+  Next:
 - Optionally run full suite (`npm test`, `npm run lint`) if you want broader regression validation before the next commit.
 
 ## 2026-02-24 18:38 UTC — Exchange 33
+
 Summary: Changed GGUF naming strategy from conditional fallback to default parent-folder naming for nested model paths.
 Changed:
+
 - Updated `src/model-manager.ts`:
   - `toFriendlyNameFallback(...)` now defaults to immediate parent directory name for nested `.gguf` model IDs.
   - retained filename-stem behavior only when there is no parent directory segment.
@@ -1557,15 +1601,17 @@ Changed:
 - Updated `tests/model-manager.test.ts`:
   - revised naming tests to assert parent-folder default behavior.
   - added explicit coverage that `org/repo/model-q4.gguf` defaults to `repo`.
-Validation:
+    Validation:
 - `npm test -- tests/model-manager.test.ts` — clean (8 passing)
 - `npm run typecheck` — clean
-Next:
+  Next:
 - Optionally run full suite (`npm test`, `npm run lint`) before commit.
 
 ## 2026-02-24 18:43 UTC — Exchange 34
+
 Summary: Fixed title-box and prompt status to use shortened default model display names instead of raw model paths.
 Changed:
+
 - Updated `src/model-manager.ts`:
   - exported `getModelDisplayName(modelId)` and used it as the default model naming rule.
   - `getFriendlyModelName(...)` and `listLocalModels(...)` now share `getModelDisplayName(...)` for consistent naming.
@@ -1575,30 +1621,34 @@ Changed:
   - both no longer render full raw `owner/repo/file.gguf` path when a parent directory label exists.
 - Updated `tests/model-manager.test.ts`:
   - added explicit `getModelDisplayName(...)` coverage for nested Qwen GGUF path labels.
-Validation:
+    Validation:
 - `npm test -- tests/model-manager.test.ts` — clean (9 passing)
 - `npm run typecheck` — clean
-Next:
+  Next:
 - Optionally run full suite (`npm test`, `npm run lint`) before commit.
 
 ## 2026-02-24 19:06 UTC — Exchange 35
+
 Summary: Title box and prompt status now use configured model nicknames when available.
 Changed:
+
 - Updated `src/tui.ts`:
   - active model label for title-box now resolves via `getFriendlyModelName(currentModel, config.nicknames)`.
   - active model label for prompt footer status now resolves via the same nickname-aware function.
   - both still fall back to default shortened display naming when no nickname exists.
 - Updated `tests/model-manager.test.ts`:
   - added regression coverage asserting exact model-id nickname precedence.
-Validation:
+    Validation:
 - `npm test -- tests/model-manager.test.ts` — clean (10 passing)
 - `npm run typecheck` — clean
-Next:
+  Next:
 - Optionally run full suite (`npm test`, `npm run lint`) before commit.
 
 ## 2026-02-24 19:27 UTC — Exchange 36
+
 Summary: Updated title-box typography and cwd display: bolded top `Yips version`, bolded `Recent activity`, and shortened cwd to `~/current-folder`.
 Changed:
+
 - Updated `src/title-box.ts`:
   - `makeTopBorder(...)` now bolds the `Yips <version>` title string in the top border while preserving existing gradient/blue color styling.
   - full-layout `Recent activity` heading is now bold (and remains white).
@@ -1608,15 +1658,17 @@ Changed:
 - Updated tests:
   - `tests/title-box.test.ts` now asserts bold styling for top `Yips 0.1.0` and for `Recent activity`.
   - `tests/tui-resize-render.test.ts` now covers `formatTitleCwd(...)` output (`~/yips` and root `~`).
-Validation:
+    Validation:
 - `npm test -- tests/title-box.test.ts tests/tui-resize-render.test.ts` — clean (35 passing)
 - `npm run typecheck` — clean
-Next:
+  Next:
 - Run `npm run dev` for a quick visual confirmation in your terminal theme that the top-border bold weight and cwd shorthand read as intended.
 
 ## 2026-02-24 12:32 UTC — Exchange 37
+
 Summary: Implemented `/restart` command end-to-end so Yips can relaunch itself from both TUI and `--no-tui` REPL modes.
 Changed:
+
 - Updated `src/commands.ts`:
   - added `restart` to `CommandResult.action` union.
   - registered `/restart` with output `Restarting Yips.` and action `restart`.
@@ -1633,16 +1685,18 @@ Changed:
 - Updated tests:
   - `tests/commands.test.ts` now asserts `/restart` exists and returns `action: "restart"`.
   - `tests/repl.test.ts` now asserts `/restart` parsing and REPL help output.
-Validation:
+    Validation:
 - `npm run typecheck` — clean
 - `npm test -- tests/commands.test.ts tests/repl.test.ts` — clean
 - `npm test` — clean (22 files, 219 tests)
-Next:
+  Next:
 - Optionally add a focused integration test for restart loop behavior in `src/index.ts` by mocking mode returns (`restart` then `exit`).
 
 ## 2026-02-24 19:43 UTC — Exchange 38
+
 Summary: Polished Model Downloader UI with bold header/tab typography, separate RAM/VRAM display, aligned model-detail columns, and gradient-styled model footer commands.
 Changed:
+
 - Updated `src/downloader-ui.ts`:
   - made top border title text (`Yips Model Downloader`) bold while preserving existing gradient border styling.
   - made all downloader tab labels bold (active and inactive).
@@ -1656,31 +1710,35 @@ Changed:
 - Updated `tests/downloader-ui.test.ts`:
   - added coverage for bold title/tabs, separate RAM/VRAM rendering, column alignment consistency, and gradient footer behavior in models view.
   - added assertion that file-view footer remains non-gradient.
-Validation:
+    Validation:
 - `npm test -- tests/downloader-ui.test.ts` — clean (6 passing)
 - `npm run typecheck` — clean
 - `npm run lint` — clean
-Next:
+  Next:
 - Optionally run a full interactive visual check with `npm run dev` to confirm column readability and footer gradient appearance in your terminal theme.
 
 ## 2026-02-24 19:48 UTC — Exchange 39
+
 Summary: Adjusted downloader model metric glyph placement so DL and Likes icons trail values while keeping aligned columns.
 Changed:
+
 - Updated `src/downloader-ui.ts`:
   - changed DL cell formatting from `↓value` to `value↓`.
   - changed Likes cell formatting from `♥value` to `value♥`.
 - Updated `tests/downloader-ui.test.ts`:
   - revised aligned-row assertions to expect `12.3k↓` and `540♥`.
-Validation:
+    Validation:
 - `npm test -- tests/downloader-ui.test.ts` — clean (6 passing)
 - `npm run typecheck` — clean
 - `npm run lint` — clean
-Next:
+  Next:
 - Optional visual check in `npm run dev` to confirm terminal font renders trailing glyph alignment as expected.
 
 ## 2026-02-24 19:55 UTC — Exchange 40
+
 Summary: Fixed segmented-border gradient restarts so downloader top border and prompt bottom border now render as continuous left-to-right gradients.
 Changed:
+
 - Updated `src/colors.ts`:
   - added `horizontalGradientAtOffset(...)` helper to render gradients using absolute column offsets for segmented strings.
 - Updated `src/downloader-ui.ts`:
@@ -1693,31 +1751,35 @@ Changed:
 - Updated tests:
   - `tests/downloader-ui.test.ts` added top-border continuity assertion ensuring title segment does not reset to start-pink.
   - `tests/tui-resize-render.test.ts` added bottom-border continuity assertion ensuring fill column does not reset to start-pink.
-Validation:
+    Validation:
 - `npm test -- tests/downloader-ui.test.ts tests/tui-resize-render.test.ts` — clean (23 passing)
 - `npm run typecheck` — clean
 - `npm run lint` — clean
-Next:
+  Next:
 - Optional visual check via `npm run dev` in your terminal to confirm continuity looks correct under your font/ANSI renderer.
 
 ## 2026-02-24 19:57 UTC — Exchange 41
+
 Summary: Restored standalone title gradient for downloader header text while keeping continuous border gradient behavior outside the title segment.
 Changed:
+
 - Updated `src/downloader-ui.ts`:
   - `makeBorderTop(...)` now renders `Yips Model Downloader` with its own local pink→yellow gradient again.
   - retained offset-based border gradient coloring for prefix/tail/fill/right-corner so non-title border segments do not restart.
 - Updated `tests/downloader-ui.test.ts`:
   - revised top-border gradient assertion to require title-start pink (standalone title gradient) and non-pink continuation after the title segment.
-Validation:
+    Validation:
 - `npm test -- tests/downloader-ui.test.ts tests/tui-resize-render.test.ts` — clean (23 passing)
 - `npm run typecheck` — clean
 - `npm run lint` — clean
-Next:
+  Next:
 - Optional visual pass in `npm run dev` to confirm this exactly matches your intended title-vs-border gradient behavior.
 
 ## 2026-02-24 19:59 UTC — Exchange 42
+
 Summary: Updated downloader and model-manager title styling so `Yips` stays pink/yellow gradient and the feature label is light blue, matching title-box style intent.
 Changed:
+
 - Updated `src/downloader-ui.ts`:
   - `makeBorderTop(...)` now renders title in two parts:
     - `Yips` with pink→yellow gradient
@@ -1726,74 +1788,84 @@ Changed:
 - Updated `src/model-manager-ui.ts`:
   - `makeBorderTop(...)` now renders:
     - `Yips` with pink→yellow gradient
-    - ` Model Manager ` in `GRADIENT_BLUE`
+    - `Model Manager` in `GRADIENT_BLUE`
 - Updated tests:
   - `tests/downloader-ui.test.ts` now asserts downloader top line includes light-blue title segment coloring.
   - `tests/model-manager-ui.test.ts` now asserts model-manager top line includes light-blue title segment coloring.
-Validation:
+    Validation:
 - `npm test -- tests/downloader-ui.test.ts tests/model-manager-ui.test.ts tests/tui-resize-render.test.ts` — clean (26 passing)
 - `npm run typecheck` — clean
 - `npm run lint` — clean
-Next:
+  Next:
 - Optional visual check in `npm run dev` to confirm the title split looks exactly as intended in your terminal font/theme.
 
 ## 2026-02-24 20:02 UTC — Exchange 43
+
 Summary: Changed the Model Downloader model-table header row to a pink/yellow gradient style.
 Changed:
+
 - Updated `src/downloader-ui.ts`:
   - model-list header row (`Model | DL | Likes | Size | Updated`) now uses `horizontalGradient(..., GRADIENT_PINK, GRADIENT_YELLOW)` instead of solid blue.
 - Updated `tests/downloader-ui.test.ts`:
   - added assertion that the model-list header row emits multiple truecolor foreground runs, confirming gradient styling.
-Validation:
+    Validation:
 - `npm test -- tests/downloader-ui.test.ts` — clean (7 passing)
 - `npm run typecheck` — clean
 - `npm run lint` — clean
-Next:
+  Next:
 - Optional visual check with `npm run dev` to confirm header contrast/readability in your terminal theme.
 
 ## 2026-02-24 20:03 UTC — Exchange 44
+
 Summary: Renamed downloader model-table `DL` header to `Downloads` while keeping column alignment intact.
 Changed:
+
 - Updated `src/downloader-ui.ts`:
   - changed model-list header label from `DL` to `Downloads`.
   - increased downloads column width from `8` to `10` so the longer header text does not break alignment.
 - Updated `tests/downloader-ui.test.ts`:
   - header detection assertions now look for `Downloads` instead of `DL`.
-Validation:
+    Validation:
 - `npm test -- tests/downloader-ui.test.ts` — clean (7 passing)
 - `npm run typecheck` — clean
 - `npm run lint` — clean
-Next:
+  Next:
 - Optional visual pass in `npm run dev` to verify column spacing looks ideal at your normal terminal width.
 
 ## 2026-02-24 20:05 UTC — Exchange 45
+
 Summary: Tightened downloader `Downloads` column width by one character to remove extra left padding.
 Changed:
+
 - Updated `src/downloader-ui.ts`:
   - changed downloads column width from `10` to `9` so the header/value alignment no longer appears one character too wide on the left.
-Validation:
+    Validation:
 - `npm test -- tests/downloader-ui.test.ts` — clean (7 passing)
 - `npm run typecheck` — clean
 - `npm run lint` — clean
-Next:
+  Next:
 - Optional visual confirmation in `npm run dev` for your terminal width.
 
 ## 2026-02-24 20:05 UTC — Exchange 46
+
 Summary: Tightened downloader `Likes` and `Size` column widths by one character each to reduce extra left padding.
 Changed:
+
 - Updated `src/downloader-ui.ts`:
   - changed likes column width from `7` to `6`.
   - changed size column width from `6` to `5`.
-Validation:
+    Validation:
 - `npm test -- tests/downloader-ui.test.ts` — clean (7 passing)
 - `npm run typecheck` — clean
 - `npm run lint` — clean
-Next:
+  Next:
 - Optional visual pass in `npm run dev` to confirm all column headers now sit exactly where you want.
 
 ## 2026-02-24 20:12 UTC — Exchange 47
+
 Summary: Added downloader cancel confirmation UX and automatic partial-file cleanup for canceled/failed downloads.
 Changed:
+
 - Updated `src/downloader-state.ts`:
   - added `cancelConfirmOpen` state flag.
   - added `openCancelConfirm(...)` and `closeCancelConfirm(...)` helpers.
@@ -1811,27 +1883,31 @@ Changed:
   - `tests/downloader-state.test.ts` for cancel-confirm state transitions.
   - `tests/downloader-ui.test.ts` for cancel-confirm rendering.
   - `tests/model-downloader.test.ts` for partial-file cleanup on stream failure.
-Validation:
+    Validation:
 - `npm test -- tests/downloader-state.test.ts tests/downloader-ui.test.ts tests/model-downloader.test.ts` — clean (28 passing)
 - `npm run typecheck` — clean
 - `npm run lint` — clean
-Next:
+  Next:
 - Optional interactive check in `npm run dev`: start a large model download, press `Esc` to open confirm, `Esc` to resume, then `Esc` + `Enter` to cancel and verify no partial `.gguf` remains.
 
 ## 2026-02-24 20:14 UTC — Exchange 48
+
 Summary: Removed duplicate cancel-confirm options text in downloader popup.
 Changed:
+
 - Updated `src/downloader-ui.ts`:
   - cancel-confirm body now renders only the confirmation message (plus a blank spacer row), leaving controls only in the footer.
   - this removes duplicate `[Enter] Yes  [Esc] No` display while preserving downloader frame height.
-Validation:
+    Validation:
 - `npm test -- tests/downloader-ui.test.ts tests/downloader-state.test.ts` — clean (20 passing)
-Next:
+  Next:
 - Optional visual check in `npm run dev` during an active download to confirm confirm-mode text appears exactly once.
 
 ## 2026-02-24 20:27 UTC — Exchange 49
+
 Summary: Reworked downloader Files view into aligned columns, switched file fit wording to GPU-first labels, and applied gradient footer styling to files/downloading/cancel states.
 Changed:
+
 - Updated `src/downloader-ui.ts`:
   - added files table layout with aligned columns and header row:
     - `File | Quant | Size | Fit`
@@ -1847,16 +1923,18 @@ Changed:
   - added fit-label assertions for `Fits on GPU` and non-runnable `Model too large` cases.
   - updated files footer gradient assertion (now gradient, not plain).
   - added gradient assertions for downloading and cancel-confirm footer lines.
-Validation:
+    Validation:
 - `npm test -- tests/downloader-ui.test.ts` — clean (8 passing)
 - `npm run typecheck` — clean
 - `npm run lint` — clean
-Next:
+  Next:
 - Optional visual pass in `npm run dev` to confirm files-column readability and full-footer gradient appearance in your terminal theme.
 
 ## 2026-02-24 20:46 UTC — Exchange 50
+
 Summary: Removed `/keys`, `/build`, and `/todos` from the TypeScript command surface and docs.
 Changed:
+
 - Updated `src/commands.ts`:
   - removed `/keys` registration and deleted in-file key diagnostics text constant.
 - Updated `src/command-catalog.ts`:
@@ -1870,15 +1948,17 @@ Changed:
   - `docs/guides/getting-started.md` removed `/keys` troubleshooting instruction.
   - `docs/guides/slash-commands.md` removed `/build` and `/todos` from reference and complete list.
   - `docs/changelog.md` removed the unreleased `/keys` added entry.
-Validation:
+    Validation:
 - `npm test -- tests/commands.test.ts tests/command-catalog.test.ts tests/prompt-composer.test.ts tests/tui-resize-render.test.ts` — clean (62 passing)
 - `npm run typecheck` — clean
-Next:
+  Next:
 - Optional: run full-suite `npm test` and `npm run lint` before committing.
 
 ## 2026-02-24 21:16 UTC — Exchange 51
+
 Summary: Implemented dynamic title-box token counter with `/tokens auto` and `/tokens {value}` (manual override), plus exact llama usage ingestion.
 Changed:
+
 - Added token counter module `src/token-counter.ts`:
   - `computeAutoMaxTokens(...)` using RAM-after-model heuristic (`ram - model_size - 2GB`) with `4k..128k` clamp.
   - `resolveEffectiveMaxTokens(...)` for auto/manual mode selection.
@@ -1909,13 +1989,13 @@ Changed:
   - updated `tests/commands.test.ts` for `/tokens` behavior.
   - updated `tests/llama-client.test.ts` for `{ text, usage }` return shape and SSE usage parsing.
   - updated `tests/config.test.ts` for token-mode env overrides.
-Validation:
+    Validation:
 - `npm run typecheck` — clean
 - `npm test -- tests/llama-client.test.ts tests/commands.test.ts tests/config.test.ts tests/token-counter.test.ts` — clean (53 passing)
 - `npm test` — clean (23 files, 236 tests)
 - `npm run lint` — clean
 - `npm run format:check` — failing due to pre-existing formatting issues across untouched files
-Next:
+  Next:
 - Run `npm run dev` and verify live title-box token counter behavior across:
   - default auto mode,
   - `/tokens 32k` manual override,
@@ -1923,8 +2003,10 @@ Next:
   - model-switch changes affecting auto max.
 
 ## 2026-02-24 21:34 UTC — Exchange 52
+
 Summary: Refined title token display formatting and made used-token count update on every turn (user input + assistant response).
 Changed:
+
 - Updated `src/token-counter.ts`:
   - `formatTitleTokenUsage(...)` now removes redundant trailing `.0` in both used and max segments.
     - examples: `0/32k tks` (instead of `0.0/32.0k tks`), `15.7/32.2k tks` unchanged.
@@ -1938,12 +2020,12 @@ Changed:
 - Updated tests in `tests/token-counter.test.ts`:
   - added no-trailing-`.0` formatting regression.
   - added conversation token estimation coverage.
-Validation:
+    Validation:
 - `npm run typecheck` — clean
 - `npm test -- tests/token-counter.test.ts tests/llama-client.test.ts tests/commands.test.ts tests/tui-resize-render.test.ts` — clean (64 passing)
 - `npm test` — clean (23 files, 238 tests)
 - `npm run lint` — clean
-Next:
+  Next:
 - Run `npm run dev` and verify live behavior for:
   - initial display `0/<auto-or-manual>k tks`,
   - increment after user submit,
@@ -1951,33 +2033,39 @@ Next:
   - `/tokens auto` and `/tokens <value>` transitions.
 
 ## 2026-02-24 21:35 UTC — Exchange 53
+
 Summary: Adjusted title token usage format so the used side also shows `k` for values >= 1000.
 Changed:
+
 - Updated `src/token-counter.ts` formatting:
   - used side now renders with `k` suffix when >= 1000 (`15.7k/32.2k tks`).
   - values < 1000 remain plain integers (`0/32k tks`).
 - Updated `tests/token-counter.test.ts` to assert `15.7k/32.2k tks` output.
-Validation:
+  Validation:
 - `npm test -- tests/token-counter.test.ts` — clean (8 passing)
 - `npm run typecheck` — clean
-Next:
+  Next:
 - Optional visual confirmation in `npm run dev` that title usage formatting matches desired display.
 
 ## 2026-02-24 21:37 UTC — Exchange 54
+
 Summary: Stopped tracking local workspace config files and ensured they are ignored.
 Changed:
+
 - Updated `.gitignore` to include `.yips_config.json`.
 - Removed tracked local-only files from git index (kept on disk):
   - `.obsidian/*`
   - `.yips_config.json`
-Validation:
+    Validation:
 - `git status --short` now shows staged deletions from index for `.obsidian/*` and `.yips_config.json`, with ignore rules in place.
-Next:
+  Next:
 - Commit the ignore cleanup so local workspace/config changes no longer appear in future diffs.
 
 ## 2026-02-24 21:44 UTC — Exchange 55
+
 Summary: Reimplemented the pre-response “Thinking ...” loading indicator as a transient animated output-line spinner (ported behavior from yips-cli), including streaming-first-token stop and retry wait coverage.
 Changed:
+
 - Updated `src/tui.ts`:
   - imported and integrated `PulsingSpinner` into the Ink runtime via a transient `busySpinnerRef`.
   - added `BUSY_SPINNER_RENDER_INTERVAL_MS` (80ms) and a busy animation render tick so spinner frames/time update while waiting.
@@ -1991,33 +2079,37 @@ Changed:
   - verifies transient busy line is appended after output/autocomplete rows.
   - verifies busy line is omitted when not provided.
   - verifies prompt status text no longer includes `Thinking...` when busy.
-Validation:
+    Validation:
 - `npm test -- tests/tui-busy-indicator.test.ts tests/spinner.test.ts tests/tui-resize-render.test.ts` — clean (28 passing)
 - `npm run typecheck` — clean
 - `npm run lint` — clean
 - `npm test` — clean (24 files, 241 tests)
-Next:
+  Next:
 - Optional manual visual pass with `npm run dev` to confirm the transient busy row behavior feels right in your terminal while waiting for first streaming token.
 
 ## 2026-02-24 21:47 UTC — Exchange 56
+
 Summary: Made Model Manager model selection persist before leaving the panel so startup consistently loads the last selected model.
 Changed:
+
 - Updated `src/tui.ts` model-manager submit path:
   - replaced fire-and-forget `saveConfig(...)` call with an awaited async flow.
   - added temporary loading state (`Saving selected model...`) while persisting selection.
   - now switches back to chat only after config save succeeds.
   - on save failure, stays in Model Manager and surfaces an inline error (`Failed to save model selection: ...`).
   - preserves existing behavior of setting backend to `llamacpp` and setting `config.model` to selected model id.
-Validation:
+    Validation:
 - `npm test -- tests/tui-resize-render.test.ts tests/commands.test.ts` — clean (51 passing)
 - `npm run typecheck` — clean
 - `npm run lint` — clean
-Next:
+  Next:
 - Optional manual check with `npm run dev`: select a model in Model Manager, restart Yips, and confirm the same model is loaded on startup.
 
 ## 2026-02-24 21:55 UTC — Exchange 57
+
 Summary: Restored Thinking indicator to ~60fps render updates while keeping spinner glyph cadence stable.
 Changed:
+
 - Updated `src/tui.ts`:
   - changed busy animation repaint interval from `80ms` to `16ms` (~60fps) for smoother transient Thinking row animation.
 - Updated `src/spinner.ts`:
@@ -2026,16 +2118,18 @@ Changed:
   - preserves existing pulsing color + elapsed-time display behavior.
 - Updated `tests/spinner.test.ts`:
   - adjusted frame-cycling test to mock `Date.now()` and advance by `80ms`, matching time-based frame logic.
-Validation:
+    Validation:
 - `npm test -- tests/spinner.test.ts tests/tui-busy-indicator.test.ts tests/tui-resize-render.test.ts` — clean (28 passing)
 - `npm run typecheck` — clean
 - `npm run lint` — clean
-Next:
+  Next:
 - Optional visual check with `npm run dev` to confirm motion smoothness and spinner cadence in your terminal renderer.
 
 ## 2026-02-24 21:59 UTC — Exchange 58
+
 Summary: Fixed Thinking-row ordering and restored smooth yips-cli-style color pulsing.
 Changed:
+
 - Updated `src/tui.ts` streaming request path:
   - removed pre-stream empty assistant placeholder append.
   - `blockLength` now starts at `0`, so no timestamped Yips assistant header is rendered above `Thinking...` before first token.
@@ -2046,16 +2140,18 @@ Changed:
   - result: smooth continuous pink↔yellow oscillation matching yips-cli behavior.
 - Updated `tests/spinner.test.ts`:
   - added sub-second oscillation regression assertion to verify color changes within fractional seconds.
-Validation:
+    Validation:
 - `npm test -- tests/spinner.test.ts tests/tui-busy-indicator.test.ts tests/tui-resize-render.test.ts` — clean (29 passing)
 - `npm run typecheck` — clean
 - `npm run lint` — clean
-Next:
+  Next:
 - Optional manual visual check with `npm run dev` to verify no timestamp/header appears before first streaming token and color pulsing looks right in your terminal.
 
 ## 2026-02-24 22:11 UTC — Exchange 59
+
 Summary: Added latest assistant output throughput to chat prompt footer so status now renders `provider/model/x.x tk/s` after a response completes.
 Changed:
+
 - Updated `src/tui.ts`:
   - added runtime state field `latestOutputTokensPerSecond` with initialization and session-reset clearing.
   - added exported helpers `computeTokensPerSecond(...)` and `formatTokensPerSecond(...)`.
@@ -2065,41 +2161,47 @@ Changed:
 - Updated `tests/tui-busy-indicator.test.ts`:
   - added footer regression tests for throughput suffix and unresolved-model provider-only behavior.
   - added helper tests for throughput computation and `x.x tk/s` formatting.
-Validation:
+    Validation:
 - `npm test -- tests/tui-busy-indicator.test.ts tests/tui-resize-render.test.ts tests/prompt-box.test.ts` — clean
 - `npm test` — clean (24 files, 247 tests)
 - `npm run typecheck` — clean
 - `npm run lint` — clean
-Next:
+  Next:
 - Optional interactive check with `npm run dev` to confirm the displayed `tk/s` value feels accurate against real model output cadence.
 
 ## 2026-02-24 22:14 UTC — Exchange 60
+
 Summary: Restored middle-dot separators in chat prompt footer status while keeping latest `tk/s` throughput suffix.
 Changed:
+
 - Updated `src/tui.ts`:
   - changed chat-mode prompt status joiner from `" / "` back to `" · "`.
 - Updated `tests/tui-busy-indicator.test.ts`:
   - adjusted throughput footer expectation to `llama.cpp · example · 37.3 tk/s`.
-  - updated status-format assertion to expect ` · ` separator.
-Validation:
+  - updated status-format assertion to expect `·` separator.
+    Validation:
 - `npm test -- tests/tui-busy-indicator.test.ts` — clean (8 passing)
 - `npm run typecheck` — clean
-Next:
+  Next:
 - Optional interactive check with `npm run dev` to verify footer visual spacing with the restored middle-dot separators.
 
 ## 2026-02-24 22:36 UTC — Exchange 61
+
 Summary: Pushed all local commits on `main` to `origin/main`.
 Changed:
+
 - No file content changes; synchronized remote branch state.
-Validation:
+  Validation:
 - `git status -sb` showed `main...origin/main [ahead 15]` before push.
 - `git push origin main` — clean (`65b117d..dda9aa3  main -> main`).
-Next:
+  Next:
 - Continue from updated remote baseline for the next feature or fix.
 
 ## 2026-02-24 22:45 UTC — Exchange 62
+
 Summary: Updated upper-layout slicing so output consumes the title/prompt gap first, and only then begins pushing title lines off-screen.
 Changed:
+
 - Updated `src/tui.ts`:
   - rewrote `computeVisibleLayoutSlices(...)` to use explicit phases:
     - preserve prompt rows at the bottom,
@@ -2109,15 +2211,17 @@ Changed:
   - retained output top-padding behavior only when visible output is shorter than the remaining upper area.
 - Updated `tests/tui-resize-render.test.ts`:
   - added threshold regression test ensuring the full title remains visible when output exactly fills the gap, and bumping starts only after that point.
-Validation:
+    Validation:
 - `npm test -- tests/tui-resize-render.test.ts` — clean (17 passing)
 - `npm run typecheck` — clean
-Next:
+  Next:
 - Optional interactive verification with `npm run dev` to confirm the gap-fill and title-bump behavior feels correct during live chat output.
 
 ## 2026-02-24 22:59 UTC — Exchange 63
+
 Summary: Enforced fresh llama.cpp startup sessions by resetting local server/model residency before TUI launch and failing fast on reset/start errors.
 Changed:
+
 - Updated `src/llama-server.ts`:
   - added localhost endpoint detection helpers (`isLocalLlamaEndpoint`, internal hostname normalization).
   - added `resetLlamaForFreshSession(config, overrides?)`:
@@ -2133,33 +2237,37 @@ Changed:
   - `tests/tui-startup-reset.test.ts` for startup preflight behavior (skip non-llama backend, call reset for llama backend, throw on failure).
   - expanded `tests/llama-server.test.ts` for endpoint locality and fresh-session reset behavior.
 - Updated `docs/changelog.md` Unreleased `Changed` section with fresh-session startup reset behavior.
-Validation:
+  Validation:
 - `npm test -- tests/llama-server.test.ts tests/tui-startup-reset.test.ts` — clean
 - `npm test` — clean (26 files, 262 tests)
 - `npm run typecheck` — clean
 - `npm run lint` — clean
-Next:
+  Next:
 - Optional manual runtime check with `npm run dev` to verify expected startup fail-fast behavior when model/binary config is invalid and fresh local model reload behavior when valid.
 
 ## 2026-02-24 23:02 UTC — Exchange 64
+
 Summary: Fixed startup regression so Yips no longer fatals when config model is `default` while preserving fresh-session fail-fast behavior for concrete llama models.
 Changed:
+
 - Updated `src/tui.ts`:
   - `ensureFreshLlamaSessionOnStartup(...)` now skips startup reset when `config.model` is empty or `default`.
   - keeps existing reset + fail-fast path for explicit configured llama models.
 - Updated `tests/tui-startup-reset.test.ts`:
   - added regression test asserting reset is skipped when no concrete model is selected.
   - adjusted reset-path test to use a concrete model id (`qwen.gguf`).
-Validation:
+    Validation:
 - `npm test -- tests/tui-startup-reset.test.ts tests/llama-server.test.ts` — clean
 - `npm run typecheck` — clean
 - `npm run lint` — clean
-Next:
+  Next:
 - Re-run `yips` and confirm startup succeeds with `model: "default"`; then select a model via `/model` or `/download` for fresh-session startup reload behavior.
 
 ## 2026-02-24 23:07 UTC — Exchange 65
+
 Summary: Fixed model/nickname persistence drift by introducing a canonical config-path override (`YIPS_CONFIG_PATH`) with legacy fallback loading.
 Changed:
+
 - Updated `src/config.ts`:
   - added `CONFIG_PATH_ENV_VAR` (`YIPS_CONFIG_PATH`).
   - `resolveConfigPath()` now honors `YIPS_CONFIG_PATH` for default config resolution.
@@ -2175,17 +2283,19 @@ Changed:
 - Updated docs:
   - `docs/guides/getting-started.md` now documents config loading via `YIPS_CONFIG_PATH` (with `.yips_config.json` fallback behavior).
   - `docs/changelog.md` updated under Unreleased `Changed`.
-Validation:
+    Validation:
 - `npm test -- tests/config.test.ts tests/commands.test.ts` — clean
 - `npm test` — clean (26 files, 265 tests)
 - `npm run typecheck` — clean
 - `npm run lint` — clean
-Next:
+  Next:
 - Re-source `~/.yips/env.sh` in active shells (or open a new shell) so `YIPS_CONFIG_PATH` is active, then verify `/model` and `/nick` survive restart.
 
 ## 2026-02-24 23:12 UTC — Exchange 66
+
 Summary: Removed redundant `/models` command so `/model` is the single Model Manager entrypoint.
 Changed:
+
 - Updated `src/commands.ts`:
   - removed `/models` command registration and handler.
 - Updated `src/command-catalog.ts`:
@@ -2195,31 +2305,35 @@ Changed:
   - removed `/models` behavior test.
 - Updated docs:
   - `docs/guides/slash-commands.md` command table and complete-list block now omit `/models`.
-Validation:
+    Validation:
 - `npm test -- tests/commands.test.ts tests/command-catalog.test.ts` — clean
 - `npm run typecheck` — clean
 - `npm run lint` — clean
-Next:
+  Next:
 - Optional: run `npm run dev` and verify `/model` still opens Model Manager with no args and `/models` now reports unknown command.
 
 ## 2026-02-24 23:30 UTC — Exchange 67
+
 Summary: Aligned Model Manager frame styling with Model Downloader for top border gradient/title treatment and gradient footer text.
 Changed:
+
 - Updated `src/model-manager-ui.ts`:
   - top border now uses offset-aware gradient rendering (`horizontalGradientAtOffset`) consistent with downloader framing.
   - title rendering now matches downloader style with bold brand/title segment and matching trailing title spacing.
   - top-right corner now uses gradient-at-offset instead of a single fixed corner color.
   - footer command line inside the box now uses pink→yellow horizontal gradient text, matching downloader footer styling.
-Validation:
+    Validation:
 - `npm test -- tests/model-manager-ui.test.ts` — clean (3 passing)
 - `npm run lint -- src/model-manager-ui.ts` — clean
 - `npm run typecheck` — clean
-Next:
+  Next:
 - Optional visual pass in `npm run dev` to confirm Model Manager and Model Downloader frames look identical in-terminal at multiple widths.
 
 ## 2026-02-24 23:36 UTC — Exchange 68
+
 Summary: Reworked Model Manager list columns to reduce squish, reordered to `backend | provider | name | file | size`, and added a header row.
 Changed:
+
 - Updated `src/model-manager-ui.ts` table rendering:
   - reordered model row columns to `backend | provider | name | file | size`.
   - switched `name` column to `friendlyName` (repo-default unless overridden via `/nick`).
@@ -2231,41 +2345,86 @@ Changed:
 - Updated `tests/model-manager-ui.test.ts`:
   - asserts header labels are present.
   - asserts row order and values include backend/provider/name(file nickname default)/file columns.
-Validation:
+    Validation:
 - `npm test -- tests/model-manager-ui.test.ts` — clean (3 passing)
 - `npm test -- tests/model-manager-ui.test.ts tests/model-manager.test.ts` — initially failed due to empty-list header expectation; fixed and re-ran targeted UI test cleanly
 - `npm test -- tests/tui-resize-render.test.ts tests/tui-busy-indicator.test.ts` — clean (25 passing)
 - `npm run typecheck` — clean
 - `npm run lint -- src/model-manager-ui.ts tests/model-manager-ui.test.ts src/tui.ts` — clean
-Next:
+  Next:
 - Optional interactive pass in `npm run dev` to verify column readability at narrow and wide terminal widths and confirm scroll behavior feels correct with header row present.
 
 ## 2026-02-24 23:39 UTC — Exchange 69
+
 Summary: Reduced awkward wide-terminal spacing in Model Manager columns by capping dynamic table width growth.
 Changed:
+
 - Updated `src/model-manager-ui.ts` column sizing logic:
   - replaced unbounded `file` column growth with a capped dynamic-width budget (`72` chars for `name + file`).
   - extra terminal width now appears as trailing row space after the table instead of stretching internal columns.
   - added overflow guard so narrow terminals still shrink safely without breaking rendering.
-Validation:
+    Validation:
 - `npm test -- tests/model-manager-ui.test.ts` — clean (3 passing)
 - `npm run typecheck` — clean
 - `npm run lint -- src/model-manager-ui.ts` — clean
-Next:
+  Next:
 - Optional visual pass in `npm run dev` to confirm spacing feels right at your typical terminal widths (especially very wide windows).
 
 ## 2026-02-24 23:42 UTC — Exchange 70
+
 Summary: Updated Model Manager table sizing to fill the full box width by distributing extra width across all columns.
 Changed:
+
 - Updated `src/model-manager-ui.ts` column allocator:
   - replaced capped dynamic `name/file` sizing with full-width column distribution.
   - table now computes minimum column widths and spreads additional width evenly across `backend`, `provider`, `name`, `file`, and `size`.
   - added narrow-terminal fallback that shrinks columns in priority order while preserving minimum readability.
 - Updated `tests/model-manager-ui.test.ts`:
   - relaxed one row assertion to avoid brittleness from dynamic column spacing while still validating column order/content.
-Validation:
+    Validation:
 - `npm test -- tests/model-manager-ui.test.ts` — clean (3 passing)
 - `npm run typecheck` — clean
 - `npm run lint -- src/model-manager-ui.ts tests/model-manager-ui.test.ts` — clean
-Next:
+  Next:
 - Optional visual pass in `npm run dev` to fine-tune min widths if you want a denser or more spacious default distribution.
+
+## 2026-02-24 17:01 UTC — Exchange 71
+
+Summary: Implemented Milestone 2 thin-slice tool loop with structured JSON tool calls, safety confirmations, guarded shell execution, and modal `/vt` backed by persistent PTY.
+Changed:
+
+- Added structured tool protocol parsing:
+  - `src/tool-protocol.ts` parses fenced `yips-tools` JSON blocks and validates supported tool calls (`read_file`, `list_dir`, `grep`, `run_command`).
+- Added safety classification and working-zone checks:
+  - `src/tool-safety.ts` implements destructive command detection, path-zone checks, and confirmation risk flags.
+- Added tool execution layer:
+  - `src/tool-executor.ts` executes `read_file`, `list_dir`, `grep` (via `rg`), and `run_command`.
+- Added persistent VT shell backend:
+  - `src/vt-session.ts` introduces `VirtualTerminalSession` using `node-pty`, with persistent shell, output buffering, and marker-based command capture.
+- Updated runtime/tool types:
+  - `src/types.ts` now includes `ToolName`, `ToolCall`, `ToolResult`, and tool execution status types.
+- Updated slash command handling:
+  - `src/commands.ts` adds implemented `/vt` returning `uiAction: { type: "open-vt" }`.
+- Integrated tool loop + confirmations + VT mode into TUI:
+  - `src/tui.ts` now supports `uiMode: "vt" | "confirm"`.
+  - llama chat path now runs a structured tool-call chain (max depth 6), executes tools, injects tool results back into chat history, and supports verbose tool traces.
+  - confirmation modal enforces hybrid safeguards for destructive/out-of-zone actions.
+  - `/vt` opens modal terminal mode; raw input routes to PTY; `Esc Esc`/`Ctrl+Q` returns to chat.
+- Added tests:
+  - `tests/tool-protocol.test.ts`
+  - `tests/tool-safety.test.ts`
+  - `tests/commands.test.ts` includes `/vt` behavior assertion.
+- Updated docs:
+  - `docs/roadmap.md` marks structured tool protocol + shell guardrails + destructive confirmation + working-zone enforcement complete.
+  - `docs/guides/slash-commands.md` updates `/vt` description and exit keys.
+- Added dependency:
+  - `package.json` / `package-lock.json`: `node-pty`.
+    Validation:
+- `npm run typecheck` — clean
+- `npm test -- tests/commands.test.ts tests/tool-protocol.test.ts tests/tool-safety.test.ts` — clean
+- `npm test` — clean (271 passing)
+- `npm run lint && npm run build` — clean
+  Next:
+- Extend tool set with write/edit flows and diff preview (remaining Milestone 2 file-ops scope).
+- Add focused integration tests for confirmation modal key paths and VT-mode input routing.
+- Optionally re-enable streaming for non-tool responses while preserving deterministic tool-call parsing.

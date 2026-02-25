@@ -8,6 +8,21 @@
 
 ## Installation
 
+### npm package (quick CLI install)
+
+```sh
+npm install -g yips
+yips
+```
+
+If you prefer no global install:
+
+```sh
+npx yips
+```
+
+For local llama.cpp lifecycle setup (models directory, launcher, env wiring), use the installer flow below.
+
 ### Automated local install (recommended)
 
 ```sh
@@ -73,6 +88,11 @@ When you start Yips:
 
 Use `--no-tui` or pipe input to force REPL fallback mode.
 
+### Platform Notes
+
+- Linux and macOS are fully supported for the installer workflow.
+- Windows support is currently through WSL2.
+
 ## First Conversation
 
 Type a message and press Enter. With backend `llamacpp`, Yips sends your in-memory conversation history to `/v1/chat/completions` and renders the response in the output pane.
@@ -133,6 +153,7 @@ bindings = [
 | `/help` | Show available commands |
 | `/model` | Show or set active model name |
 | `/stream` | Toggle token streaming on/off |
+| `/update` | Check npm latest version and show upgrade commands |
 | `/clear` or `/new` | Reset the current conversation session |
 | `/exit` or `/quit` | Exit Yips |
 
@@ -161,4 +182,4 @@ When you run Yips from a directory containing `CODE.md`, the file is loaded into
 
 ---
 
-> Last updated: 2026-02-24
+> Last updated: 2026-02-25

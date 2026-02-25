@@ -120,6 +120,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
   - `src/gateway/runtime/discord-main.ts` now resolves and validates gateway backend at startup and passes it to headless runtime
   - `src/gateway/headless-conductor.ts` now supports explicit gateway backend override while retaining defensive unsupported-backend guardrails
   - added coverage in `tests/gateway/runtime/backend-policy.test.ts` and expanded `tests/gateway/headless-conductor.test.ts`
+- `/update` command and npm registry version-check path:
+  - added `src/app/update-check.ts` for npm latest-version checks and semver comparison
+  - added guided update command output (`npm install -g yips@latest`, source-install refresh path, `yips.dev` docs hub)
+  - added coverage in `tests/app/update-check.test.ts` and expanded command coverage in `tests/agent/commands/commands.test.ts`
+- Release workflow automation:
+  - added `.github/workflows/release.yml` for tag-driven validation, npm publish, and GitHub release creation
 
 ### Changed
 
@@ -170,6 +176,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Tool executor now runs `on-file-write` hooks after successful `write_file`/`edit_file`; hook failures are surfaced as warnings in tool output while preserving successful file operations
 - Added runtime import alias mapping for `#gateway/*` in `package.json` and `tsconfig.json`
 - Gateway adapter contract now supports outbound multi-request payloads for platforms that require chunked sends
+- Distribution metadata and CLI packaging:
+  - `package.json` now includes `bin`, publish `files`, `homepage`, `repository`, and issue tracker metadata
+  - `src/app/index.ts` now includes a Node shebang for npm global-bin execution
+- Removed stale duplicate legacy test file `tests/tui-resize-render.test.ts` to restore full-suite baseline (`tests/ui/tui/tui-resize-render.test.ts` remains canonical)
 
 ## Legacy (yips-cli)
 

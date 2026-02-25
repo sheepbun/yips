@@ -26,6 +26,7 @@ Slash commands are user-facing commands typed directly into the Yips TUI input. 
 | `/tokens`                  | Show current token counter mode                                                |
 | `/tokens auto`             | Use automatic max token calculation from available RAM after model load        |
 | `/tokens <value>`          | Set manual max token value (supports `k` suffix, for example `32k`)            |
+| `/update`                  | Check latest npm version and print guided upgrade commands                     |
 
 `/download` usage:
 
@@ -65,7 +66,7 @@ All commands recognized by yips-cli, carried forward to the TypeScript rewrite:
 /backend    /clear      /dl         /download   /exit
 /fetch      /grab       /help       /memorize   /model
 /new        /nick       /quit       /search
-/sessions   /stream     /tokens     /verbose    /vt
+/sessions   /stream     /tokens     /update     /verbose    /vt
 ```
 
 `/memorize` usage:

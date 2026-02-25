@@ -67,11 +67,11 @@ Self-hosted messaging platform bridge.
 
 Packaging and installation.
 
-- [ ] Distribution format decision (npm, standalone binary, Homebrew, or combination)
+- [x] Distribution format decision (npm package + `install.sh`; Homebrew/binary deferred)
 - [x] Install script (single-command setup)
-- [ ] Auto-update mechanism
-- [ ] llama.cpp bundling or first-run download
-- [ ] Platform support: Linux, macOS, Windows (WSL)
+- [x] Auto-update mechanism (notify + guided update commands via `/update`)
+- [x] llama.cpp bundling or first-run download (first-run setup flow via `install.sh` + `/download`)
+- [x] Platform support: Linux, macOS, Windows (WSL2)
 
 ## Decision Log
 
@@ -83,7 +83,7 @@ Packaging and installation.
 | TUI framework   | Decided  | Ink                        | terminal-kit, blessed   | React component model, portable input handling, and maintainable render lifecycle |
 | Config format   | Decided  | JSON (`.yips_config.json`) | TOML, YAML              | Chosen for zero dependencies during bootstrap; comments may be revisited later    |
 | MCP integration | Rejected | Not pursuing MCP client    | MCP client architecture | Explicitly removed from roadmap by product direction (2026-02-25)                 |
-| Distribution    | Open     | —                          | npm, binary, Homebrew   | See [Tech Stack](./stack.md) for evaluation criteria                              |
+| Distribution    | Decided  | npm package + `install.sh` | binary, Homebrew        | `yips.dev` acts as docs/download hub; guided updates via `/update`                |
 | Package manager | Decided  | npm                        | pnpm, bun               | Pragmatic default for bootstrapping                                               |
 | Formatter       | Decided  | Prettier                   | Biome                   | Widest editor/tooling compatibility                                               |
 | Test framework  | Decided  | Vitest                     | Jest, node:test         | Fast TypeScript test loop and simple setup                                        |

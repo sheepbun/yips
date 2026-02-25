@@ -2,6 +2,7 @@
 
 import { loadCommandCatalog } from "#agent/commands/command-catalog";
 import type { CommandDescriptor, CommandKind } from "#agent/commands/command-catalog";
+import { checkForUpdates, getInstalledPackageVersion } from "#app/update-check";
 import { saveConfig } from "#config/config";
 import { listMemories, readMemory, saveMemory } from "#agent/context/memory-store";
 import { listLocalModels, findMatchingModel } from "#models/model-manager";
@@ -351,6 +352,52 @@ export function createDefaultRegistry(): CommandRegistry {
       return { output: `Verbose mode ${state}.`, action: "continue" };
     },
     "Toggle verbose mode"
+  );
+
+  registry.register(
+    "update",
+    async () => {
+      const currentVersion = await getInstalledPackageVersion();
+      const result = await checkForUpdates(currentVersion);
+
+      const guidance = [
+        "Update options:",
+        "  npm global: npm install -g yips@latest",
+        "  local source: git pull --ff-only && ./install.sh",
+        "  docs: https://yips.dev"
+      ];
+
+      if (result.status === "update-available" && result.latestVersion) {
+        return {
+          output: [
+            `Update available: ${result.currentVersion} -> ${result.latestVersion}`,
+            ...guidance
+          ].join("\n"),
+          action: "continue"
+        };
+      }
+
+      if (result.status === "up-to-date" && result.latestVersion) {
+        return {
+          output: [
+            `You are up to date (${result.currentVersion}). Latest: ${result.latestVersion}.`,
+            ...guidance
+          ].join("\n"),
+          action: "continue"
+        };
+      }
+
+      const unknownReason = result.error ? ` (${result.error})` : "";
+      return {
+        output: [
+          `Could not verify latest version${unknownReason}`,
+          `Current version: ${result.currentVersion}`,
+          ...guidance
+        ].join("\n"),
+        action: "continue"
+      };
+    },
+    "Check for updates and show upgrade commands"
   );
 
   registry.register(

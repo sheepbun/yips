@@ -125,6 +125,7 @@ describe("createDefaultRegistry", () => {
     expect(registry.has("model")).toBe(true);
     expect(registry.has("stream")).toBe(true);
     expect(registry.has("tokens")).toBe(true);
+    expect(registry.has("update")).toBe(true);
     expect(registry.has("verbose")).toBe(true);
     expect(registry.has("backend")).toBe(true);
     expect(registry.has("sessions")).toBe(true);
@@ -205,6 +206,35 @@ describe("createDefaultRegistry", () => {
     const result = await registry.dispatch("tokens", "", context);
     expect(result.action).toBe("continue");
     expect(result.output).toContain("auto");
+  });
+
+  it("/update reports when newer npm release is available", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ version: "99.0.0" }), {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        })
+      )
+    );
+
+    const registry = createDefaultRegistry();
+    const result = await registry.dispatch("update", "", createContext());
+    expect(result.action).toBe("continue");
+    expect(result.output).toContain("Update available:");
+    expect(result.output).toContain("npm install -g yips@latest");
+    expect(result.output).toContain("https://yips.dev");
+  });
+
+  it("/update handles registry lookup failures gracefully", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network down")));
+
+    const registry = createDefaultRegistry();
+    const result = await registry.dispatch("update", "", createContext());
+    expect(result.action).toBe("continue");
+    expect(result.output).toContain("Could not verify latest version");
+    expect(result.output).toContain("Current version:");
   });
 
   it("/tokens auto enables auto mode", async () => {
@@ -465,5 +495,6 @@ describe("createDefaultRegistry", () => {
     expect(autocomplete).toContain("/help");
     expect(autocomplete).toContain("/backend");
     expect(autocomplete).toContain("/search");
+    expect(autocomplete).toContain("/update");
   });
 });

@@ -1,3 +1,5 @@
+#!/usr/bin/env node
+
 import { stdin, stdout } from "node:process";
 
 import { loadConfig } from "#config/config";

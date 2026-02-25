@@ -4,6 +4,9 @@ coverage/
 .claude/
 .obsidian/
 .github/
+!.github/
+!.github/workflows/
+!.github/workflows/*.yml
 AGENTS.md
 CLAUDE.md
 

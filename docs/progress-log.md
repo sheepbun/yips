@@ -89,6 +89,7 @@ Rolling implementation handoff between exchanges, stored as one file per entry.
 - [16:24 — Exchange 188](./progress-log/2026/02/25/1624-exchange-188.md)
 - [17:15 — Exchange 189](./progress-log/2026/02/25/1715-exchange-189.md)
 - [19:19 — Exchange 190](./progress-log/2026/02/25/1919-exchange-190.md)
+- [19:51 — Exchange 191](./progress-log/2026/02/25/1951-exchange-191.md)
 
 ### 2026-02-24
 

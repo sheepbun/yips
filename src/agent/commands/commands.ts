@@ -23,7 +23,8 @@ export interface CommandResult {
     | { type: "open-model-manager" }
     | { type: "open-sessions" }
     | { type: "open-vt" }
-    | { type: "open-setup" };
+    | { type: "open-setup" }
+    | { type: "set-mouse-capture"; mode: "on" | "off" | "toggle" | "status" };
 }
 
 export interface SessionContext {
@@ -359,6 +360,34 @@ export function createDefaultRegistry(): CommandRegistry {
       return { output: `Verbose mode ${state}.`, action: "continue" };
     },
     "Toggle verbose mode"
+  );
+
+  const mouseUsage = "Usage: /mouse [toggle|on|off|status]";
+  registry.register(
+    "mouse",
+    (args) => {
+      const trimmed = args.trim().toLowerCase();
+      if (trimmed.length === 0 || trimmed === "toggle") {
+        return {
+          action: "continue",
+          uiAction: { type: "set-mouse-capture", mode: "toggle" }
+        };
+      }
+      if (trimmed === "on" || trimmed === "enable") {
+        return { action: "continue", uiAction: { type: "set-mouse-capture", mode: "on" } };
+      }
+      if (trimmed === "off" || trimmed === "disable") {
+        return { action: "continue", uiAction: { type: "set-mouse-capture", mode: "off" } };
+      }
+      if (trimmed === "status") {
+        return {
+          action: "continue",
+          uiAction: { type: "set-mouse-capture", mode: "status" }
+        };
+      }
+      return { action: "continue", output: mouseUsage };
+    },
+    "Toggle mouse capture mode for wheel scroll vs selection"
   );
 
   registry.register(

@@ -178,6 +178,7 @@ interface RuntimeState {
   pendingConfirmation: PendingConfirmation | null;
   codeContextPath: string | null;
   codeContextMessage: string | null;
+  mouseCaptureEnabled: boolean;
 }
 
 interface PendingConfirmation {
@@ -467,6 +468,20 @@ export function composeOutputLines(options: {
     lines.push(options.busyLine);
   }
   return lines;
+}
+
+export function composeFullTranscriptLines(sections: {
+  titleLines: readonly string[];
+  outputLines: readonly string[];
+  promptLines: readonly string[];
+}): string[] {
+  return [...sections.titleLines, ...sections.outputLines, ...sections.promptLines];
+}
+
+interface RuntimeRenderLines {
+  titleLines: string[];
+  outputLines: string[];
+  promptLines: string[];
 }
 
 function shiftOutputScrollOffsetWithCap(
@@ -835,7 +850,8 @@ function createRuntimeState(options: TuiOptions): RuntimeState {
     modelAutocompleteCandidates: [],
     pendingConfirmation: null,
     codeContextPath: null,
-    codeContextMessage: null
+    codeContextMessage: null,
+    mouseCaptureEnabled: false
   };
 }
 
@@ -1301,12 +1317,13 @@ interface InkAppProps {
   options: TuiOptions;
   version: string;
   onRestartRequested: () => void;
+  onExitTranscript: (lines: readonly string[]) => void;
 }
 
 export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
   const { Box, Text, useApp, useStdin, useStdout } = ink;
 
-  return function InkApp({ options, version, onRestartRequested }) {
+  return function InkApp({ options, version, onRestartRequested, onExitTranscript }) {
     const { exit } = useApp();
     const { stdin, isRawModeSupported, setRawMode } = useStdin();
     const { stdout } = useStdout();
@@ -1430,6 +1447,115 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
       }
       return vtSessionRef.current;
     }, []);
+
+    const buildRuntimeRenderLines = useCallback(
+      (
+        currentState: RuntimeState,
+        currentDimensions: { columns: number; rows: number },
+        includeAutocomplete: boolean
+      ): RuntimeRenderLines => {
+        const composer = composerRef.current ?? createComposer();
+        composerRef.current = composer;
+        composer.setInteriorWidth(Math.max(0, currentDimensions.columns - 2));
+
+        const promptLayout = composer.getLayout();
+        const statusText = buildPromptStatusText(currentState);
+        const titleLines = renderTitleBox(
+          buildTitleBoxOptions(currentState, version, currentDimensions.columns)
+        );
+        const promptLines = buildPromptRenderLines(
+          currentDimensions.columns,
+          statusText,
+          promptLayout,
+          true
+        );
+        const autocompleteOverlay =
+          includeAutocomplete &&
+          currentState.uiMode !== "downloader" &&
+          currentState.uiMode !== "model-manager" &&
+          currentState.uiMode !== "setup" &&
+          currentState.uiMode !== "sessions" &&
+          currentState.uiMode !== "vt" &&
+          currentState.uiMode !== "confirm"
+            ? buildAutocompleteOverlayLines(composer, registryRef.current)
+            : [];
+
+        const busyLine =
+          currentState.busy && busySpinnerRef.current ? busySpinnerRef.current.render() : "";
+        const outputLines = composeOutputLines({
+          outputLines: currentState.outputLines,
+          autocompleteOverlay,
+          busyLine
+        });
+
+        if (currentState.uiMode === "downloader" && currentState.downloader) {
+          outputLines.push("");
+          outputLines.push(
+            ...renderDownloaderLines({
+              width: currentDimensions.columns,
+              state: currentState.downloader
+            })
+          );
+        }
+        if (currentState.uiMode === "model-manager" && currentState.modelManager) {
+          outputLines.push("");
+          outputLines.push(
+            ...renderModelManagerLines({
+              width: currentDimensions.columns,
+              state: currentState.modelManager,
+              currentModel: currentState.config.model
+            })
+          );
+        }
+        if (currentState.uiMode === "setup" && currentState.setup) {
+          outputLines.push("");
+          outputLines.push(
+            ...renderSetupLines({
+              width: currentDimensions.columns,
+              state: currentState.setup,
+              channels: currentState.config.channels,
+              draftToken: currentState.setup.editingChannel !== null ? composer.getText() : ""
+            })
+          );
+        }
+        if (currentState.uiMode === "vt") {
+          const vtLines = getVtSession().getDisplayLines(Math.max(8, currentDimensions.rows - 10));
+          outputLines.push("");
+          outputLines.push(
+            horizontalGradient(
+              "╭─── Yips Virtual Terminal ───────────────────────────────╮",
+              GRADIENT_PINK,
+              GRADIENT_YELLOW
+            )
+          );
+          if (vtLines.length === 0) {
+            outputLines.push(
+              colorText("│ starting shell...                                       │", GRADIENT_BLUE)
+            );
+          } else {
+            for (const line of vtLines.slice(-Math.max(1, currentDimensions.rows - 12))) {
+              outputLines.push(line);
+            }
+          }
+          outputLines.push(
+            colorText("Esc Esc: return to chat | Ctrl+Q: return to chat", GRADIENT_BLUE)
+          );
+        }
+        if (currentState.uiMode === "confirm" && currentState.pendingConfirmation) {
+          const riskTags = currentState.pendingConfirmation.reasons.join(", ");
+          outputLines.push("");
+          outputLines.push(formatWarningMessage("Confirmation required"));
+          outputLines.push(formatDimMessage(`Action: ${currentState.pendingConfirmation.summary}`));
+          if (riskTags.length > 0) {
+            outputLines.push(formatDimMessage(`Risk: ${riskTags}`));
+          }
+          outputLines.push(formatDimMessage("Approve? [y/N] (Enter = yes, Esc = no)"));
+        }
+
+        return { titleLines, outputLines, promptLines };
+      },
+      [createComposer, getVtSession, version]
+    );
 
     const getFileChangeStore = useCallback((): FileChangeStore => {
       if (!fileChangeStoreRef.current) {
@@ -1635,13 +1761,24 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
           }
           await persistSessionSnapshot();
           await runSessionEndHookOnce(reason);
+          if (currentState && !options?.restart) {
+            const fullLines = buildRuntimeRenderLines(currentState, dimensionsRef.current, true);
+            onExitTranscript(composeFullTranscriptLines(fullLines));
+          }
           if (options?.restart) {
             onRestartRequested();
           }
           exit();
         })();
       },
-      [exit, onRestartRequested, persistSessionSnapshot, runSessionEndHookOnce]
+      [
+        buildRuntimeRenderLines,
+        exit,
+        onExitTranscript,
+        onRestartRequested,
+        persistSessionSnapshot,
+        runSessionEndHookOnce
+      ]
     );
 
     const loadSessionIntoState = useCallback(
@@ -1853,11 +1990,11 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
       if (!stdout.isTTY) {
         return;
       }
-      stdout.write(ENABLE_MOUSE_REPORTING);
+      stdout.write(state.mouseCaptureEnabled ? ENABLE_MOUSE_REPORTING : DISABLE_MOUSE_REPORTING);
       return () => {
         stdout.write(DISABLE_MOUSE_REPORTING);
       };
-    }, [stdout]);
+    }, [state.mouseCaptureEnabled, stdout]);
 
     const requestAssistantFromLlama = useCallback(
       async (options?: AssistantRequestOptions): Promise<ConductorAssistantReply> => {
@@ -2994,6 +3131,33 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
             return;
           }
 
+          if (result.uiAction?.type === "set-mouse-capture") {
+            const previous = currentState.mouseCaptureEnabled;
+            if (result.uiAction.mode === "on") {
+              currentState.mouseCaptureEnabled = true;
+            } else if (result.uiAction.mode === "off") {
+              currentState.mouseCaptureEnabled = false;
+            } else if (result.uiAction.mode === "toggle") {
+              currentState.mouseCaptureEnabled = !currentState.mouseCaptureEnabled;
+            }
+            const status = currentState.mouseCaptureEnabled ? "enabled" : "disabled";
+            if (result.uiAction.mode === "status") {
+              appendOutput(currentState, formatDimMessage(`Mouse capture is ${status}.`));
+            } else if (previous !== currentState.mouseCaptureEnabled) {
+              appendOutput(
+                currentState,
+                formatDimMessage(
+                  `Mouse capture ${status}. ${status === "enabled" ? "Mouse wheel scroll is active." : "Drag selection/copy is active."}`
+                )
+              );
+            } else {
+              appendOutput(currentState, formatDimMessage(`Mouse capture is already ${status}.`));
+            }
+            appendOutput(currentState, "");
+            forceRender();
+            return;
+          }
+
           forceRender();
 
           if (result.action === "exit") {
@@ -3704,102 +3868,17 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
       stdin
     ]);
 
-    const composer = composerRef.current;
-    composer.setInteriorWidth(Math.max(0, dimensions.columns - 2));
     let titleNodes: React.ReactNode[] = [];
     let outputNodes: React.ReactNode[] = [];
     let promptNodes: React.ReactNode[] = [];
 
-    const promptLayout = composer.getLayout();
-    const statusText = buildPromptStatusText(state);
-    const titleLines = renderTitleBox(buildTitleBoxOptions(state, version, dimensions.columns));
-    const promptLines = buildPromptRenderLines(dimensions.columns, statusText, promptLayout, true);
-    const autocompleteOverlay =
-      state.uiMode === "downloader" ||
-      state.uiMode === "model-manager" ||
-      state.uiMode === "setup" ||
-      state.uiMode === "sessions" ||
-      state.uiMode === "vt" ||
-      state.uiMode === "confirm"
-        ? []
-        : buildAutocompleteOverlayLines(composer, registryRef.current);
-
-    const busyLine = state.busy && busySpinnerRef.current ? busySpinnerRef.current.render() : "";
-    const outputLines = composeOutputLines({
-      outputLines: state.outputLines,
-      autocompleteOverlay,
-      busyLine
-    });
-    if (state.uiMode === "downloader" && state.downloader) {
-      outputLines.push("");
-      outputLines.push(
-        ...renderDownloaderLines({
-          width: dimensions.columns,
-          state: state.downloader
-        })
-      );
-    }
-    if (state.uiMode === "model-manager" && state.modelManager) {
-      outputLines.push("");
-      outputLines.push(
-        ...renderModelManagerLines({
-          width: dimensions.columns,
-          state: state.modelManager,
-          currentModel: state.config.model
-        })
-      );
-    }
-    if (state.uiMode === "setup" && state.setup) {
-      outputLines.push("");
-      outputLines.push(
-        ...renderSetupLines({
-          width: dimensions.columns,
-          state: state.setup,
-          channels: state.config.channels,
-          draftToken:
-            state.setup.editingChannel !== null ? composer.getText() : ""
-        })
-      );
-    }
-    if (state.uiMode === "vt") {
-      const vtLines = getVtSession().getDisplayLines(Math.max(8, dimensions.rows - 10));
-      outputLines.push("");
-      outputLines.push(
-        horizontalGradient(
-          "╭─── Yips Virtual Terminal ───────────────────────────────╮",
-          GRADIENT_PINK,
-          GRADIENT_YELLOW
-        )
-      );
-      if (vtLines.length === 0) {
-        outputLines.push(
-          colorText("│ starting shell...                                       │", GRADIENT_BLUE)
-        );
-      } else {
-        for (const line of vtLines.slice(-Math.max(1, dimensions.rows - 12))) {
-          outputLines.push(line);
-        }
-      }
-      outputLines.push(
-        colorText("Esc Esc: return to chat | Ctrl+Q: return to chat", GRADIENT_BLUE)
-      );
-    }
-    if (state.uiMode === "confirm" && state.pendingConfirmation) {
-      const riskTags = state.pendingConfirmation.reasons.join(", ");
-      outputLines.push("");
-      outputLines.push(formatWarningMessage("Confirmation required"));
-      outputLines.push(formatDimMessage(`Action: ${state.pendingConfirmation.summary}`));
-      if (riskTags.length > 0) {
-        outputLines.push(formatDimMessage(`Risk: ${riskTags}`));
-      }
-      outputLines.push(formatDimMessage("Approve? [y/N] (Enter = yes, Esc = no)"));
-    }
+    const fullLines = buildRuntimeRenderLines(state, dimensions, true);
 
     const visible = computeVisibleLayoutSlices(
       dimensions.rows,
-      titleLines,
-      outputLines,
-      promptLines,
+      fullLines.titleLines,
+      fullLines.outputLines,
+      fullLines.promptLines,
       state.outputScrollOffset
     );
 

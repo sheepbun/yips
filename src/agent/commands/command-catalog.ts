@@ -35,6 +35,7 @@ const RESTORED_COMMAND_DEFAULTS: ReadonlyArray<{
   { name: "help", description: "Show available commands and tips", kind: "skill" },
   { name: "memorize", description: "Save a fact to long-term memory", kind: "tool" },
   { name: "model", description: "Open the Model Manager or switch to a specific model", kind: "builtin" },
+  { name: "mouse", description: "Toggle mouse capture mode for wheel scroll vs selection", kind: "builtin" },
   { name: "new", description: "Start a new session", kind: "builtin" },
   { name: "nick", description: "Set a custom nickname for a model", kind: "builtin" },
   { name: "quit", description: "Exit Yips", kind: "builtin" },

@@ -123,6 +123,7 @@ describe("createDefaultRegistry", () => {
     expect(registry.has("clear")).toBe(true);
     expect(registry.has("new")).toBe(true);
     expect(registry.has("model")).toBe(true);
+    expect(registry.has("mouse")).toBe(true);
     expect(registry.has("stream")).toBe(true);
     expect(registry.has("tokens")).toBe(true);
     expect(registry.has("update")).toBe(true);
@@ -199,6 +200,31 @@ describe("createDefaultRegistry", () => {
     const result = await registry.dispatch("verbose", "", context);
     expect(context.config.verbose).toBe(true);
     expect(result.output).toContain("enabled");
+  });
+
+  it("/mouse with no args toggles capture mode via uiAction", async () => {
+    const registry = createDefaultRegistry();
+    const result = await registry.dispatch("mouse", "", createContext());
+    expect(result.action).toBe("continue");
+    expect(result.uiAction).toEqual({ type: "set-mouse-capture", mode: "toggle" });
+  });
+
+  it("/mouse supports on/off/status args", async () => {
+    const registry = createDefaultRegistry();
+    const onResult = await registry.dispatch("mouse", "on", createContext());
+    const offResult = await registry.dispatch("mouse", "disable", createContext());
+    const statusResult = await registry.dispatch("mouse", "status", createContext());
+
+    expect(onResult.uiAction).toEqual({ type: "set-mouse-capture", mode: "on" });
+    expect(offResult.uiAction).toEqual({ type: "set-mouse-capture", mode: "off" });
+    expect(statusResult.uiAction).toEqual({ type: "set-mouse-capture", mode: "status" });
+  });
+
+  it("/mouse returns usage for invalid args", async () => {
+    const registry = createDefaultRegistry();
+    const result = await registry.dispatch("mouse", "nonsense", createContext());
+    expect(result.action).toBe("continue");
+    expect(result.output).toBe("Usage: /mouse [toggle|on|off|status]");
   });
 
   it("/tokens shows current mode with no args", async () => {

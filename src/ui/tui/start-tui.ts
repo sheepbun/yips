@@ -38,7 +38,9 @@ export {
 export { applyHardwareAwareStartupModelSelection, ensureFreshLlamaSessionOnStartup } from "#ui/tui/startup";
 
 export async function startTui(options: TuiOptions): Promise<"exit" | "restart"> {
-  let restartRequested = false;
+  let restartRequested: boolean = false;
+  let hasExitTranscript: boolean = false;
+  let exitTranscript: readonly string[] = [];
   await applyHardwareAwareStartupModelSelection(options);
   await ensureFreshLlamaSessionOnStartup(options);
   const version = await getVersion();
@@ -50,6 +52,10 @@ export async function startTui(options: TuiOptions): Promise<"exit" | "restart">
       version,
       onRestartRequested: () => {
         restartRequested = true;
+      },
+      onExitTranscript: (lines: readonly string[]) => {
+        hasExitTranscript = true;
+        exitTranscript = [...lines];
       }
     }),
     {
@@ -58,5 +64,8 @@ export async function startTui(options: TuiOptions): Promise<"exit" | "restart">
   );
 
   await instance.waitUntilExit();
+  if (!restartRequested && hasExitTranscript && exitTranscript.length > 0) {
+    process.stdout.write(`${exitTranscript.join("\n")}\n`);
+  }
   return restartRequested ? "restart" : "exit";
 }

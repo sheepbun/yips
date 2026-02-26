@@ -100,6 +100,18 @@ export function assessActionRisk(call: ToolCall, sessionRoot: string): ActionRis
     return assessCommandRisk(command, cwdArg, sessionRoot);
   }
 
+  if (call.name === "apply_file_change") {
+    const resolvedPath = resolveSessionPath(".", sessionRoot);
+    return {
+      riskLevel: "confirm",
+      reasons: ["file-mutation"],
+      requiresConfirmation: true,
+      destructive: false,
+      outOfZone: false,
+      resolvedPath
+    };
+  }
+
   const pathArg = typeof call.arguments["path"] === "string" ? call.arguments["path"] : ".";
   return assessPathRisk(pathArg, sessionRoot);
 }

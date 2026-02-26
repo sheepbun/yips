@@ -5,6 +5,9 @@ import type { AgentActionCall } from "#agent/core/contracts";
 const ENVELOPE_BLOCK_REGEX = /```(yips-agent|yips-tools)\s*\n([\s\S]*?)```/gu;
 const ALLOWED_TOOLS: ReadonlySet<ToolName> = new Set([
   "read_file",
+  "preview_write_file",
+  "preview_edit_file",
+  "apply_file_change",
   "write_file",
   "edit_file",
   "list_dir",

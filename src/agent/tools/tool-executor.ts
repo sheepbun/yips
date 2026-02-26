@@ -1,11 +1,14 @@
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { dirname, resolve } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
 import { formatHookFailure, type HookRunResult } from "#config/hooks";
 import type { ToolCall, ToolResult } from "#types/app-types";
 import { resolveToolPath } from "#agent/tools/tool-safety";
+import { FileChangeStore } from "#agent/tools/file-change-store";
+import { isWithinSessionRoot } from "#agent/tools/action-risk-policy";
 import type { VirtualTerminalSession } from "#ui/input/vt-session";
 
 const execFileAsync = promisify(execFile);
@@ -87,9 +90,48 @@ function buildDiffPreview(before: string, after: string, maxBodyLines = 80): str
   return [...header, ...shown].join("\n");
 }
 
+async function readFileIfExists(path: string): Promise<string> {
+  try {
+    return await readFile(path, "utf8");
+  } catch {
+    return "";
+  }
+}
+
+async function readCurrentContent(path: string): Promise<string | null> {
+  try {
+    return await readFile(path, "utf8");
+  } catch {
+    return null;
+  }
+}
+
+async function writeFileAtomic(path: string, content: string): Promise<void> {
+  const parentDir = dirname(path);
+  await mkdir(parentDir, { recursive: true });
+  const tempPath = `${path}.yips-tmp-${randomUUID()}`;
+  let wroteTemp = false;
+
+  try {
+    await writeFile(tempPath, content, "utf8");
+    wroteTemp = true;
+    await rename(tempPath, path);
+  } catch (error) {
+    if (wroteTemp) {
+      try {
+        await unlink(tempPath);
+      } catch {
+        // ignore cleanup failure
+      }
+    }
+    throw error;
+  }
+}
+
 export interface ToolExecutorContext {
   workingDirectory: string;
   vtSession: VirtualTerminalSession;
+  fileChangeStore: FileChangeStore;
   runHook?: (name: "on-file-write", payload: Record<string, unknown>) => Promise<HookRunResult>;
 }
 
@@ -172,59 +214,59 @@ async function executeReadFile(call: ToolCall, context: ToolExecutorContext): Pr
   }
 }
 
-async function executeWriteFile(call: ToolCall, context: ToolExecutorContext): Promise<ToolResult> {
+async function executePreviewWriteFile(
+  call: ToolCall,
+  context: ToolExecutorContext,
+  options: { legacyTranslated?: boolean } = {}
+): Promise<ToolResult> {
   const pathArg = normalizeString(call.arguments["path"]);
   if (!pathArg) {
     return {
       callId: call.id,
       tool: call.name,
       status: "error",
-      output: "write_file requires a non-empty 'path' argument."
+      output: `${call.name} requires a non-empty 'path' argument.`
     };
   }
+
   const content = typeof call.arguments["content"] === "string" ? call.arguments["content"] : null;
   if (content === null) {
     return {
       callId: call.id,
       tool: call.name,
       status: "error",
-      output: "write_file requires a string 'content' argument."
+      output: `${call.name} requires a string 'content' argument.`
     };
   }
 
   const absolutePath = resolveToolPath(pathArg, context.workingDirectory);
-  const parentDir = resolve(absolutePath, "..");
-  let before = "";
 
   try {
-    before = await readFile(absolutePath, "utf8");
-  } catch {
-    before = "";
-  }
-
-  try {
-    await mkdir(parentDir, { recursive: true });
-    await writeFile(absolutePath, content, "utf8");
+    const before = await readFileIfExists(absolutePath);
     const diffPreview = buildDiffPreview(before, content);
-    const hookResult = await runFileWriteHook(context, {
+    const preview = context.fileChangeStore.createPreview({
       operation: "write_file",
-      path: absolutePath,
-      bytesAfter: content.length
+      absolutePath,
+      before,
+      after: content,
+      diffPreview
     });
-    const hookWarning =
-      hookResult && hookResult.status !== "ok" && hookResult.status !== "skipped"
-        ? `\n${formatHookFailure(hookResult)}`
-        : "";
+
+    const legacyTranslated = options.legacyTranslated === true;
     return {
       callId: call.id,
       tool: call.name,
       status: "ok",
-      output: `Wrote ${absolutePath}\n${diffPreview}${hookWarning}`,
+      output: `Staged write for ${absolutePath}\nToken: ${preview.token}\n${diffPreview}`,
       metadata: {
+        token: preview.token,
         path: absolutePath,
-        bytes: content.length,
+        operation: "write_file",
         diffPreview,
-        hook: hookResult ? summarizeHookResult(hookResult) : undefined
+        bytesBefore: before.length,
+        bytesAfter: content.length,
+        expiresAt: preview.expiresAt,
+        legacyTranslated: legacyTranslated ? true : undefined
       }
     };
   } catch (error) {
@@ -232,22 +274,27 @@ async function executeWriteFile(call: ToolCall, context: ToolExecutorContext): P
       callId: call.id,
       tool: call.name,
       status: "error",
-      output: `write_file failed: ${toErrorMessage(error)}`,
+      output: `preview_write_file failed: ${toErrorMessage(error)}`,
       metadata: { path: absolutePath }
     };
   }
 }
 
-async function executeEditFile(call: ToolCall, context: ToolExecutorContext): Promise<ToolResult> {
+async function executePreviewEditFile(
+  call: ToolCall,
+  context: ToolExecutorContext,
+  options: { legacyTranslated?: boolean } = {}
+): Promise<ToolResult> {
   const pathArg = normalizeString(call.arguments["path"]);
   if (!pathArg) {
     return {
       callId: call.id,
       tool: call.name,
       status: "error",
-      output: "edit_file requires a non-empty 'path' argument."
+      output: `${call.name} requires a non-empty 'path' argument.`
     };
   }
+
   const oldText = typeof call.arguments["oldText"] === "string" ? call.arguments["oldText"] : null;
   const newText = typeof call.arguments["newText"] === "string" ? call.arguments["newText"] : null;
   if (oldText === null || newText === null) {
@@ -255,7 +302,7 @@ async function executeEditFile(call: ToolCall, context: ToolExecutorContext): Pr
       callId: call.id,
       tool: call.name,
       status: "error",
-      output: "edit_file requires string arguments 'oldText' and 'newText'."
+      output: `${call.name} requires string arguments 'oldText' and 'newText'.`
     };
   }
 
@@ -270,7 +317,7 @@ async function executeEditFile(call: ToolCall, context: ToolExecutorContext): Pr
       callId: call.id,
       tool: call.name,
       status: "error",
-      output: `edit_file failed: ${toErrorMessage(error)}`,
+      output: `preview_edit_file failed: ${toErrorMessage(error)}`,
       metadata: { path: absolutePath }
     };
   }
@@ -280,34 +327,139 @@ async function executeEditFile(call: ToolCall, context: ToolExecutorContext): Pr
       callId: call.id,
       tool: call.name,
       status: "error",
-      output: "edit_file failed: 'oldText' was not found in file.",
+      output: "preview_edit_file failed: 'oldText' was not found in file.",
       metadata: { path: absolutePath }
     };
   }
 
   const after = replaceAll ? before.split(oldText).join(newText) : before.replace(oldText, newText);
+
   try {
-    await writeFile(absolutePath, after, "utf8");
     const diffPreview = buildDiffPreview(before, after);
-    const hookResult = await runFileWriteHook(context, {
+    const preview = context.fileChangeStore.createPreview({
       operation: "edit_file",
+      absolutePath,
+      before,
+      after,
+      diffPreview
+    });
+
+    const legacyTranslated = options.legacyTranslated === true;
+    return {
+      callId: call.id,
+      tool: call.name,
+      status: "ok",
+      output: `Staged edit for ${absolutePath}\nToken: ${preview.token}\n${diffPreview}`,
+      metadata: {
+        token: preview.token,
+        path: absolutePath,
+        operation: "edit_file",
+        diffPreview,
+        bytesBefore: before.length,
+        bytesAfter: after.length,
+        expiresAt: preview.expiresAt,
+        replaceAll,
+        legacyTranslated: legacyTranslated ? true : undefined
+      }
+    };
+  } catch (error) {
+    return {
+      callId: call.id,
+      tool: call.name,
+      status: "error",
+      output: `preview_edit_file failed: ${toErrorMessage(error)}`,
+      metadata: { path: absolutePath }
+    };
+  }
+}
+
+async function executeApplyFileChange(
+  call: ToolCall,
+  context: ToolExecutorContext
+): Promise<ToolResult> {
+  const token = normalizeString(call.arguments["token"]);
+  if (!token) {
+    return {
+      callId: call.id,
+      tool: call.name,
+      status: "error",
+      output: "apply_file_change requires a non-empty 'token' argument.",
+      metadata: {
+        token: token ?? "",
+        reason: "missing-token"
+      }
+    };
+  }
+
+  const preview = context.fileChangeStore.get(token);
+  if (!preview) {
+    return {
+      callId: call.id,
+      tool: call.name,
+      status: "error",
+      output: "apply_file_change failed: token is invalid or expired.",
+      metadata: {
+        token,
+        reason: "invalid-or-expired-token"
+      }
+    };
+  }
+
+  const absolutePath = resolveToolPath(preview.absolutePath, context.workingDirectory);
+  if (!isWithinSessionRoot(absolutePath, context.workingDirectory)) {
+    return {
+      callId: call.id,
+      tool: call.name,
+      status: "error",
+      output: "apply_file_change failed: path is outside the working zone.",
+      metadata: {
+        token,
+        path: absolutePath,
+        reason: "outside-working-zone"
+      }
+    };
+  }
+
+  const currentContent = await readCurrentContent(absolutePath);
+  const currentHash = FileChangeStore.hashContent(currentContent ?? "");
+  if (currentHash !== preview.contentHashBefore) {
+    return {
+      callId: call.id,
+      tool: call.name,
+      status: "error",
+      output: "apply_file_change failed: file changed since preview; re-run preview.",
+      metadata: {
+        token,
+        path: absolutePath,
+        reason: "stale-preview"
+      }
+    };
+  }
+
+  try {
+    await writeFileAtomic(absolutePath, preview.after);
+    context.fileChangeStore.consume(token);
+    const hookResult = await runFileWriteHook(context, {
+      operation: preview.operation,
       path: absolutePath,
-      replaced: replaceAll ? "all" : "first",
-      bytesAfter: after.length
+      bytesAfter: preview.after.length
     });
     const hookWarning =
       hookResult && hookResult.status !== "ok" && hookResult.status !== "skipped"
         ? `\n${formatHookFailure(hookResult)}`
         : "";
+
     return {
       callId: call.id,
       tool: call.name,
       status: "ok",
-      output: `Edited ${absolutePath}\n${diffPreview}${hookWarning}`,
+      output: `Applied ${preview.operation} for ${absolutePath}\n${preview.diffPreview}${hookWarning}`,
       metadata: {
         path: absolutePath,
-        replaceAll,
-        diffPreview,
+        operation: preview.operation,
+        token,
+        applied: true,
+        diffPreview: preview.diffPreview,
         hook: hookResult ? summarizeHookResult(hookResult) : undefined
       }
     };
@@ -316,8 +468,12 @@ async function executeEditFile(call: ToolCall, context: ToolExecutorContext): Pr
       callId: call.id,
       tool: call.name,
       status: "error",
-      output: `edit_file failed: ${toErrorMessage(error)}`,
-      metadata: { path: absolutePath }
+      output: `apply_file_change failed: ${toErrorMessage(error)}`,
+      metadata: {
+        token,
+        path: absolutePath,
+        reason: "apply-write-failed"
+      }
     };
   }
 }
@@ -443,11 +599,20 @@ export async function executeToolCall(
   if (call.name === "read_file") {
     return await executeReadFile(call, context);
   }
+  if (call.name === "preview_write_file") {
+    return await executePreviewWriteFile(call, context);
+  }
+  if (call.name === "preview_edit_file") {
+    return await executePreviewEditFile(call, context);
+  }
+  if (call.name === "apply_file_change") {
+    return await executeApplyFileChange(call, context);
+  }
   if (call.name === "write_file") {
-    return await executeWriteFile(call, context);
+    return await executePreviewWriteFile(call, context, { legacyTranslated: true });
   }
   if (call.name === "edit_file") {
-    return await executeEditFile(call, context);
+    return await executePreviewEditFile(call, context, { legacyTranslated: true });
   }
   if (call.name === "list_dir") {
     return await executeListDir(call, context);

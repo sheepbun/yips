@@ -84,11 +84,28 @@ Still accepted during compatibility period:
 ### Allowed tools
 
 - `read_file`
+- `preview_write_file`
+- `preview_edit_file`
+- `apply_file_change`
 - `write_file`
 - `edit_file`
 - `list_dir`
 - `grep`
 - `run_command`
+
+### File mutation flow
+
+Canonical two-phase mutation flow:
+
+1. Stage the change with `preview_write_file` or `preview_edit_file`.
+2. Read `metadata.token` and `metadata.diffPreview`.
+3. Apply with `apply_file_change` and `{ "token": "<token>" }`.
+
+Compatibility behavior:
+
+- `write_file` and `edit_file` are accepted for backward compatibility.
+- They are translated to preview-only staging and return `metadata.legacyTranslated: true`.
+- They do not mutate files directly.
 
 ### Allowed skills
 
@@ -123,13 +140,18 @@ If consecutive rounds are all failures (`error`, `denied`, `timeout`), the engin
 Tool calls are evaluated with `ActionRiskAssessment`:
 
 - `riskLevel: "none"` -> execute normally.
-- `riskLevel: "confirm"` -> ask user confirmation in TUI; gateway auto-denies.
+- `riskLevel: "confirm"` -> ask user confirmation in TUI.
 - `riskLevel: "deny"` -> denied immediately.
 
 Risk signals include:
 
 - destructive command patterns
 - outside-working-zone path/cwd
+
+Gateway behavior:
+
+- confirm-level actions are denied by default.
+- `apply_file_change` is the explicit non-interactive approval action in gateway mode and is allowed when token/path validation succeeds.
 
 ## Common Failure Modes
 
@@ -171,7 +193,7 @@ Cause: `confirm` rejected by user or `deny` risk level reached.
 4. Validate JSON and required keys (`type`, `id`, `name`/`task`, `arguments`).
 5. Confirm action names are in the allow-lists above.
 6. Check whether call was denied by risk policy.
-7. If using gateway, remember confirm-level actions are auto-denied.
+7. If using gateway, remember confirm-level actions are auto-denied except explicit `apply_file_change` with a valid token.
 8. If parser errors persist, simplify to a one-action minimal envelope and retry.
 
 ## Minimal Examples

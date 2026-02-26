@@ -3,6 +3,7 @@ import { loadCodeContext, toCodeContextSystemMessage } from "#agent/context/code
 import { createSessionFileFromHistory, writeSessionFile } from "#agent/context/session-store";
 import { executeSkillCall } from "#agent/skills/skills";
 import { executeToolCall } from "#agent/tools/tool-executor";
+import { FileChangeStore } from "#agent/tools/file-change-store";
 import { composeChatRequestMessages } from "#agent/protocol/system-prompt";
 import {
   assessActionRisk,
@@ -31,6 +32,7 @@ const AUTO_DENY_OUTPUT = "Action denied by gateway safety policy.";
 interface HeadlessSessionState {
   history: ChatMessage[];
   sessionFilePath: string | null;
+  fileChangeStore: FileChangeStore;
 }
 
 function buildSubagentScopeMessage(call: SubagentCall): string {
@@ -62,6 +64,7 @@ export interface GatewayHeadlessConductorDeps {
   executeTool: typeof executeToolCall;
   executeSkill: typeof executeSkillCall;
   createVtSession: () => VirtualTerminalSession;
+  createFileChangeStore: () => FileChangeStore;
   loadCodeContext: typeof loadCodeContext;
   toCodeContextSystemMessage: typeof toCodeContextSystemMessage;
   createSessionFile: typeof createSessionFileFromHistory;
@@ -82,6 +85,7 @@ const DEFAULT_DEPS: GatewayHeadlessConductorDeps = {
   executeTool: executeToolCall,
   executeSkill: executeSkillCall,
   createVtSession: () => new VirtualTerminalSession(),
+  createFileChangeStore: () => new FileChangeStore(),
   loadCodeContext,
   toCodeContextSystemMessage,
   createSessionFile: createSessionFileFromHistory,
@@ -190,7 +194,7 @@ export class GatewayHeadlessConductor {
 
           for (const call of toolCalls) {
             const risk = assessToolCallRisk(call, this.workingDirectory);
-            if (risk.riskLevel !== "none") {
+            if (call.name !== "apply_file_change" && risk.riskLevel !== "none") {
               results.push({
                 callId: call.id,
                 tool: call.name,
@@ -202,7 +206,8 @@ export class GatewayHeadlessConductor {
 
             const result = await this.deps.executeTool(call, {
               workingDirectory: this.workingDirectory,
-              vtSession: this.vtSession
+              vtSession: this.vtSession,
+              fileChangeStore: state.fileChangeStore
             });
             results.push(result);
           }
@@ -280,7 +285,7 @@ export class GatewayHeadlessConductor {
                     }
 
                     const risk = assessToolCallRisk(call, this.workingDirectory);
-                    if (risk.riskLevel !== "none") {
+                    if (call.name !== "apply_file_change" && risk.riskLevel !== "none") {
                       denied.push({
                         callId: call.id,
                         tool: call.name,
@@ -297,7 +302,8 @@ export class GatewayHeadlessConductor {
                   for (const call of permitted) {
                     const result = await this.deps.executeTool(call, {
                       workingDirectory: this.workingDirectory,
-                      vtSession: this.vtSession
+                      vtSession: this.vtSession,
+                      fileChangeStore: state.fileChangeStore
                     });
                     executed.push(result);
                   }
@@ -397,7 +403,8 @@ export class GatewayHeadlessConductor {
     }
     const created: HeadlessSessionState = {
       history: [],
-      sessionFilePath: null
+      sessionFilePath: null,
+      fileChangeStore: this.deps.createFileChangeStore()
     };
     this.sessionStates.set(key, created);
     return created;

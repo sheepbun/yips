@@ -127,6 +127,7 @@ import {
   assessActionRisk,
   type ActionRiskAssessment
 } from "#agent/tools/action-risk-policy";
+import { FileChangeStore } from "#agent/tools/file-change-store";
 import { executeToolCall } from "#agent/tools/tool-executor";
 import { executeSkillCall } from "#agent/skills/skills";
 import { VirtualTerminalSession } from "#ui/input/vt-session";
@@ -1334,6 +1335,7 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
     const downloaderAbortControllerRef = useRef<AbortController | null>(null);
     const busySpinnerRef = useRef<PulsingSpinner | null>(null);
     const vtSessionRef = useRef<VirtualTerminalSession | null>(null);
+    const fileChangeStoreRef = useRef<FileChangeStore | null>(null);
     const confirmResolverRef = useRef<((approved: boolean) => void) | null>(null);
     const vtEscapePendingRef = useRef(false);
     const sessionStartHookRanRef = useRef(false);
@@ -1427,6 +1429,13 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
         vtSessionRef.current = new VirtualTerminalSession();
       }
       return vtSessionRef.current;
+    }, []);
+
+    const getFileChangeStore = useCallback((): FileChangeStore => {
+      if (!fileChangeStoreRef.current) {
+        fileChangeStoreRef.current = new FileChangeStore();
+      }
+      return fileChangeStoreRef.current;
     }, []);
 
     const resolvePendingConfirmation = useCallback(
@@ -2151,6 +2160,7 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
               await executeToolCall(call, {
                 workingDirectory: sessionRoot,
                 vtSession: getVtSession(),
+                fileChangeStore: getFileChangeStore(),
                 runHook: async (name, payload) =>
                   await runConfiguredHook(name, payload, { surfaceFailure: false })
               })
@@ -2182,6 +2192,7 @@ export function createInkApp(ink: InkModule): React.FC<InkAppProps> {
       [
         assessToolCallRisk,
         flushUi,
+        getFileChangeStore,
         getVtSession,
         requestToolConfirmation,
         runWithBusyLabel,

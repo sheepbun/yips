@@ -149,6 +149,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
   - Telegram runtime now clears inbound 👀 reaction after at least one successful outbound send
   - background launcher now auto-starts Telegram runtime when token is configured, including concurrent Discord+Telegram startup
   - added coverage in `tests/gateway/runtime/telegram-bot.test.ts` and expanded `tests/gateway/background.test.ts`
+- Two-phase autonomous file mutation flow:
+  - added staged file change token store in `src/agent/tools/file-change-store.ts` (session-scoped, in-memory, TTL + FIFO eviction)
+  - added new tools: `preview_write_file`, `preview_edit_file`, and `apply_file_change`
+  - added stale-preview protection (hash check before apply), token expiry handling, and atomic file apply writes
+  - added gateway/session wiring so staged previews and applies share per-session token state
+  - added coverage in `tests/agent/tools/tool-executor.test.ts`, `tests/gateway/headless-conductor.test.ts`, and `tests/agent/protocol/system-prompt.test.ts`
 
 ### Changed
 
@@ -207,6 +213,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/), and this
 - Milestone 2 now includes Conductor-managed subagent delegation, scoped context execution, and lifecycle result chaining
 - Milestone 3 hardware detection now includes GPU/VRAM-aware startup model auto-selection from local GGUF inventory
 - Tool executor now runs `on-file-write` hooks after successful `write_file`/`edit_file`; hook failures are surfaced as warnings in tool output while preserving successful file operations
+- File tools now use staged preview/apply semantics:
+  - `write_file` and `edit_file` are compatibility aliases that stage preview only and return `legacyTranslated` metadata
+  - file mutations now apply only through `apply_file_change(token)` after preview
+  - TUI always confirms `apply_file_change`; gateway treats it as explicit non-interactive approval action
 - Added runtime import alias mapping for `#gateway/*` in `package.json` and `tsconfig.json`
 - Gateway adapter contract now supports outbound multi-request payloads for platforms that require chunked sends
 - Distribution metadata and CLI packaging:

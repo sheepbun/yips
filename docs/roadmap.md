@@ -28,7 +28,7 @@ Terminal interface with LLM integration.
 Autonomous tool use and multi-agent architecture.
 
 - [x] Tool protocol: structured tool calls (replacing text-tag parsing)
-- [x] File operations: read, write, edit with diff preview
+- [x] File operations: read, staged write/edit preview, tokenized apply with diff preview
 - [x] Shell command execution with safety guardrails
 - [x] Destructive command detection and confirmation flow
 - [x] Working zone enforcement

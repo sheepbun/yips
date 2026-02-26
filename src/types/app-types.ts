@@ -77,6 +77,9 @@ export interface ChatMessage {
 
 export type ToolName =
   | "read_file"
+  | "preview_write_file"
+  | "preview_edit_file"
+  | "apply_file_change"
   | "write_file"
   | "edit_file"
   | "list_dir"

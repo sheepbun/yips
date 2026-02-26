@@ -1,5 +1,11 @@
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it, vi } from "vitest";
 
+import { executeToolCall } from "#agent/tools/tool-executor";
+import { FileChangeStore } from "#agent/tools/file-change-store";
 import { getDefaultConfig } from "#config/config";
 import {
   createGatewayHeadlessMessageHandler,
@@ -46,6 +52,7 @@ function createBaseDeps(): Partial<GatewayHeadlessConductorDeps> {
         })),
         dispose: vi.fn()
       }) as never,
+    createFileChangeStore: () => new FileChangeStore(),
     ensureReady: vi.fn(async () => ({ ready: true, started: false })),
     formatStartupFailure: vi.fn(() => "startup failed"),
     loadCodeContext: vi.fn(async () => null),
@@ -273,16 +280,149 @@ describe("gateway headless conductor", () => {
     ]);
     expect(second.metadata).toBeUndefined();
   });
+
+  it("applies previewed file changes in gateway with token flow", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "yips-gateway-preview-apply-"));
+    const config = getDefaultConfig();
+    const deps = createBaseDeps();
+    deps.executeTool = executeToolCall as never;
+
+    deps.runConductor = vi.fn(async (runtimeDeps) => {
+      const previewResults = await runtimeDeps.executeToolCalls([
+        {
+          id: "t1",
+          name: "preview_write_file",
+          arguments: { path: "file.txt", content: "hello" }
+        }
+      ]);
+      const token = previewResults[0]?.metadata?.["token"];
+      const applyResults = await runtimeDeps.executeToolCalls([
+        {
+          id: "t2",
+          name: "apply_file_change",
+          arguments: { token }
+        }
+      ]);
+
+      expect(previewResults[0]?.status).toBe("ok");
+      expect(applyResults[0]?.status).toBe("ok");
+      runtimeDeps.history.push({ role: "assistant", content: "done" });
+      runtimeDeps.onAssistantText("done", false);
+      return {
+        finished: true,
+        rounds: 1,
+        latestOutputTokensPerSecond: null,
+        usedTokensExact: 0
+      };
+    });
+
+    const handler = await createGatewayHeadlessMessageHandler(
+      configureOptions(config, { workingDirectory: dir }),
+      deps
+    );
+    const response = await handler.handleMessage(createGatewayContext("run tools"));
+
+    expect(response.text).toBe("done");
+    const content = await readFile(join(dir, "file.txt"), "utf8");
+    expect(content).toBe("hello");
+  });
+
+  it("rejects apply_file_change without valid token in gateway", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "yips-gateway-apply-invalid-"));
+    const config = getDefaultConfig();
+    const deps = createBaseDeps();
+    deps.executeTool = executeToolCall as never;
+
+    deps.runConductor = vi.fn(async (runtimeDeps) => {
+      const results = await runtimeDeps.executeToolCalls([
+        {
+          id: "t1",
+          name: "apply_file_change",
+          arguments: { token: "invalid" }
+        }
+      ]);
+
+      expect(results[0]?.status).toBe("error");
+      expect(results[0]?.metadata?.["reason"]).toBe("invalid-or-expired-token");
+      runtimeDeps.history.push({ role: "assistant", content: "done" });
+      runtimeDeps.onAssistantText("done", false);
+      return {
+        finished: true,
+        rounds: 1,
+        latestOutputTokensPerSecond: null,
+        usedTokensExact: 0
+      };
+    });
+
+    const handler = await createGatewayHeadlessMessageHandler(
+      configureOptions(config, { workingDirectory: dir }),
+      deps
+    );
+    const response = await handler.handleMessage(createGatewayContext("run tools"));
+    expect(response.text).toBe("done");
+  });
+
+  it("rejects expired token apply in gateway without mutating file", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "yips-gateway-apply-expired-"));
+    await writeFile(join(dir, "exp.txt"), "start", "utf8");
+    const config = getDefaultConfig();
+    const deps = createBaseDeps();
+    deps.executeTool = executeToolCall as never;
+    deps.createFileChangeStore = () => new FileChangeStore({ ttlMs: 5 });
+
+    deps.runConductor = vi.fn(async (runtimeDeps) => {
+      const preview = await runtimeDeps.executeToolCalls([
+        {
+          id: "t1",
+          name: "preview_write_file",
+          arguments: { path: "exp.txt", content: "after" }
+        }
+      ]);
+      const token = preview[0]?.metadata?.["token"] as string;
+
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 15);
+      });
+
+      const apply = await runtimeDeps.executeToolCalls([
+        {
+          id: "t2",
+          name: "apply_file_change",
+          arguments: { token }
+        }
+      ]);
+      expect(apply[0]?.status).toBe("error");
+      runtimeDeps.history.push({ role: "assistant", content: "done" });
+      runtimeDeps.onAssistantText("done", false);
+      return {
+        finished: true,
+        rounds: 1,
+        latestOutputTokensPerSecond: null,
+        usedTokensExact: 0
+      };
+    });
+
+    const handler = await createGatewayHeadlessMessageHandler(
+      configureOptions(config, { workingDirectory: dir }),
+      deps
+    );
+    await handler.handleMessage(createGatewayContext("run tools"));
+    const content = await readFile(join(dir, "exp.txt"), "utf8");
+    expect(content).toBe("start");
+  });
 });
 
 function configureOptions(
   config: ReturnType<typeof getDefaultConfig>,
-  overrides: { gatewayBackend?: ReturnType<typeof getDefaultConfig>["backend"] } = {}
+  overrides: {
+    gatewayBackend?: ReturnType<typeof getDefaultConfig>["backend"];
+    workingDirectory?: string;
+  } = {}
 ) {
   return {
     config,
     username: "Gateway User",
-    workingDirectory: process.cwd(),
+    workingDirectory: overrides.workingDirectory ?? process.cwd(),
     gatewayBackend: overrides.gatewayBackend
   };
 }

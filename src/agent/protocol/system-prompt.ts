@@ -10,7 +10,9 @@ export const TOOL_PROTOCOL_SYSTEM_PROMPT = [
   "Rules:",
   "- Use exactly one block per assistant message.",
   "- Keep action ids unique within a message.",
-  "- Allowed tools: read_file, write_file, edit_file, list_dir, grep, run_command.",
+  "- Allowed tools: read_file, preview_write_file, preview_edit_file, apply_file_change, write_file, edit_file, list_dir, grep, run_command.",
+  "- For any file mutation, first stage a preview using preview_write_file/preview_edit_file, then call apply_file_change with the returned token.",
+  "- Legacy write_file/edit_file are compatibility aliases that stage preview only; they do not apply changes directly.",
   "- Allowed skills: search, fetch, build, todos, virtual_terminal.",
   "- Subagent actions use type 'subagent' with fields: id, task, optional context, optional allowed_tools, optional max_rounds.",
   "- If no action is needed, answer normally without a tool block."

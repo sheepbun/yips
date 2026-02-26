@@ -166,6 +166,15 @@ function formatToolCallLabel(name: string, args: Record<string, unknown>): strin
   if (name === "read_file") {
     return `Read(${compact(normalizeStringArg(args.path), ".")})`;
   }
+  if (name === "preview_write_file") {
+    return `PreviewWrite(${compact(normalizeStringArg(args.path), ".")})`;
+  }
+  if (name === "preview_edit_file") {
+    return `PreviewEdit(${compact(normalizeStringArg(args.path), ".")})`;
+  }
+  if (name === "apply_file_change") {
+    return `ApplyChange(${compact(normalizeStringArg(args.token), "<token>", 32)})`;
+  }
   if (name === "list_dir") {
     return `List(${compact(normalizeStringArg(args.path), ".")})`;
   }
@@ -222,6 +231,18 @@ function formatActionCallLine(event: ActionCallBoxEvent): string {
     if (event.name === "read_file") {
       const path = compact(normalizeStringArg(args.path), ".");
       return `${bullet}${horizontalGradient("Read(", GRADIENT_PINK, GRADIENT_YELLOW)}${blue(path)}${horizontalGradient(")", GRADIENT_PINK, GRADIENT_YELLOW)}`;
+    }
+    if (event.name === "preview_write_file") {
+      const path = compact(normalizeStringArg(args.path), ".");
+      return `${bullet}${horizontalGradient("PreviewWrite(", GRADIENT_PINK, GRADIENT_YELLOW)}${blue(path)}${horizontalGradient(")", GRADIENT_PINK, GRADIENT_YELLOW)}`;
+    }
+    if (event.name === "preview_edit_file") {
+      const path = compact(normalizeStringArg(args.path), ".");
+      return `${bullet}${horizontalGradient("PreviewEdit(", GRADIENT_PINK, GRADIENT_YELLOW)}${blue(path)}${horizontalGradient(")", GRADIENT_PINK, GRADIENT_YELLOW)}`;
+    }
+    if (event.name === "apply_file_change") {
+      const token = compact(normalizeStringArg(args.token), "<token>", 32);
+      return `${bullet}${horizontalGradient("ApplyChange(", GRADIENT_PINK, GRADIENT_YELLOW)}${blue(token)}${horizontalGradient(")", GRADIENT_PINK, GRADIENT_YELLOW)}`;
     }
     if (event.name === "list_dir") {
       const path = compact(normalizeStringArg(args.path), ".");

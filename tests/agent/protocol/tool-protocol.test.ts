@@ -7,7 +7,7 @@ describe("tool-protocol", () => {
     const input = [
       "Working on it.",
       "```yips-tools",
-      '{"tool_calls":[{"id":"1","name":"write_file","arguments":{"path":"README.md","content":"x"}}]}',
+      '{"tool_calls":[{"id":"1","name":"preview_write_file","arguments":{"path":"README.md","content":"x"}}]}',
       "```"
     ].join("\n");
 
@@ -16,7 +16,7 @@ describe("tool-protocol", () => {
     expect(parsed.toolCalls).toHaveLength(1);
     expect(parsed.subagentCalls).toHaveLength(0);
     expect(parsed.skillCalls).toHaveLength(0);
-    expect(parsed.toolCalls[0]?.name).toBe("write_file");
+    expect(parsed.toolCalls[0]?.name).toBe("preview_write_file");
   });
 
   it("returns no tool calls on invalid json", () => {

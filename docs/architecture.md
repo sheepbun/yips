@@ -107,7 +107,16 @@ Tool execution uses `ActionRiskAssessment` with:
 
 Risk includes destructive command patterns and outside-working-zone paths/cwd.
 
-Gateway headless mode auto-denies risky calls rather than interactive confirmation.
+Gateway headless mode auto-denies risky calls rather than interactive confirmation, except for the explicit two-phase file-apply action (`apply_file_change`), which serves as non-interactive approval when a valid preview token is provided.
+
+## File Mutation Staging
+
+File mutations are handled as a two-step flow:
+
+1. Stage diff with `preview_write_file` or `preview_edit_file`.
+2. Apply staged change with `apply_file_change(token)`.
+
+Staged changes are session-scoped, in-memory, short-lived tokens with stale-file detection before apply.
 
 ## Request Flow
 

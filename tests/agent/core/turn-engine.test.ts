@@ -99,4 +99,32 @@ describe("turn-engine", () => {
       expect.objectContaining({ code: "protocol_parse_error" })
     );
   });
+
+  it("emits fallback assistant text when reply is blank and has no actions", async () => {
+    const onAssistantText = vi.fn();
+    const history: ChatMessage[] = [{ role: "user", content: "hello" }];
+
+    const result = await runAgentTurn({
+      history,
+      requestAssistant: async () => ({
+        text: "   ",
+        rendered: false,
+        completionTokens: 1,
+        generationDurationMs: 1000
+      }),
+      executeActions: vi.fn(async () => []),
+      onAssistantText,
+      onWarning: vi.fn(),
+      estimateCompletionTokens: vi.fn(() => 1),
+      estimateHistoryTokens: vi.fn(() => 2),
+      computeTokensPerSecond: vi.fn(() => 1)
+    });
+
+    expect(result.finished).toBe(true);
+    expect(onAssistantText).toHaveBeenCalledWith("(no response)", false);
+    expect(history[history.length - 1]).toEqual({
+      role: "assistant",
+      content: "(no response)"
+    });
+  });
 });

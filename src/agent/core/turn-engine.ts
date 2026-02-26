@@ -9,6 +9,7 @@ import type {
 
 const ACTION_FAILURE_STATUSES = new Set<AgentActionResult["status"]>(["error", "denied", "timeout"]);
 const CONSECUTIVE_FAILURE_PIVOT_THRESHOLD = 2;
+const EMPTY_ASSISTANT_FALLBACK = "(no response)";
 
 function shouldCountAsFailureRound(results: readonly AgentActionResult[]): boolean {
   if (results.length === 0) {
@@ -108,6 +109,10 @@ export async function runAgentTurn(request: AgentTurnRequest): Promise<AgentTurn
         : request.estimateHistoryTokens(request.history);
 
     if (parsed.actions.length === 0) {
+      if (assistantText.length === 0) {
+        request.onAssistantText(EMPTY_ASSISTANT_FALLBACK, false);
+        request.history.push({ role: "assistant", content: EMPTY_ASSISTANT_FALLBACK });
+      }
       finished = true;
       break;
     }

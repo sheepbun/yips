@@ -34,12 +34,25 @@ describe("action-risk-policy", () => {
     const risk = assessActionRisk(
       {
         id: "t1",
-        name: "read_file",
-        arguments: { path: "README.md" }
+        name: "preview_write_file",
+        arguments: { path: "README.md", content: "x" }
       },
       process.cwd()
     );
     expect(risk.riskLevel).toBe("none");
     expect(isWithinSessionRoot(resolve(process.cwd(), "src"), process.cwd())).toBe(true);
+  });
+
+  it("requires confirmation for apply_file_change", () => {
+    const risk = assessActionRisk(
+      {
+        id: "t2",
+        name: "apply_file_change",
+        arguments: { token: "abc" }
+      },
+      process.cwd()
+    );
+    expect(risk.riskLevel).toBe("confirm");
+    expect(risk.reasons).toContain("file-mutation");
   });
 });

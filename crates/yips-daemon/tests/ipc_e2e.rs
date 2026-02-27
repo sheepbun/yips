@@ -9,7 +9,9 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream, UnixStream};
 use tokio::process::{Child, Command};
 use tokio::time::{sleep, timeout};
-use yips_core::ipc::{read_message, write_message, ClientMessage, DaemonMessage};
+use yips_core::ipc::{
+    read_message, write_message, CancelOrigin, CancelOutcome, ClientMessage, DaemonMessage,
+};
 
 #[tokio::test]
 async fn chat_stream_orders_tool_events_before_turn_complete() {
@@ -122,6 +124,205 @@ default_timeout_secs = 30
     mock_handle.abort();
 }
 
+#[tokio::test]
+async fn cancel_reports_no_active_turn_when_idle() {
+    let (mock_base_url, mock_handle) = start_mock_llama_server().await;
+
+    let temp = tempdir().expect("create temp dir");
+    let socket_path = temp.path().join("daemon.sock");
+    let config_path = temp.path().join("config.toml");
+
+    let config = format!(
+        r#"
+[llm]
+base_url = "{base_url}"
+model = "mock-model"
+max_tokens = 512
+temperature = 0.1
+
+[daemon]
+socket_path = "{socket_path}"
+auto_start_llm = false
+
+[agent]
+max_rounds = 6
+failure_pivot_threshold = 2
+
+[skills]
+extra_dirs = []
+default_timeout_secs = 30
+"#,
+        base_url = mock_base_url,
+        socket_path = socket_path.display(),
+    );
+
+    tokio::fs::write(&config_path, config)
+        .await
+        .expect("write config");
+
+    let mut daemon = spawn_daemon(&config_path).await;
+    wait_for_socket(&socket_path).await;
+
+    let mut stream = UnixStream::connect(&socket_path)
+        .await
+        .expect("connect daemon socket");
+
+    let session_id = "it-cancel-idle";
+    write_message(
+        &mut stream,
+        &ClientMessage::Cancel {
+            session_id: session_id.to_string(),
+        },
+    )
+    .await
+    .expect("send cancel request");
+
+    let message = wait_for_daemon_message_matching(&mut stream, Duration::from_secs(10), |msg| {
+        matches!(
+            msg,
+            DaemonMessage::CancelResult {
+                session_id: id,
+                outcome: CancelOutcome::NoActiveTurn,
+                origin: CancelOrigin::UserRequest,
+            } if id == session_id
+        )
+    })
+    .await;
+
+    match message {
+        DaemonMessage::CancelResult {
+            session_id: id,
+            outcome,
+            origin,
+        } => {
+            assert_eq!(id, session_id);
+            assert_eq!(outcome, CancelOutcome::NoActiveTurn);
+            assert_eq!(origin, CancelOrigin::UserRequest);
+        }
+        other => panic!("unexpected daemon message: {other:?}"),
+    }
+
+    assert_no_daemon_message_matching(&mut stream, Duration::from_millis(750), |msg| {
+        matches!(
+            msg,
+            DaemonMessage::Error {
+                session_id: Some(id),
+                message,
+            } if id == session_id && message.starts_with("No active turn for session: ")
+        )
+    })
+    .await;
+
+    send_shutdown(&socket_path).await;
+    wait_for_daemon_exit(&mut daemon).await;
+    mock_handle.abort();
+}
+
+#[tokio::test]
+async fn cancel_reports_cancelled_session_turn_when_active() {
+    let (mock_base_url, mock_handle) = start_mock_llama_server().await;
+
+    let temp = tempdir().expect("create temp dir");
+    let socket_path = temp.path().join("daemon.sock");
+    let config_path = temp.path().join("config.toml");
+
+    let config = format!(
+        r#"
+[llm]
+base_url = "{base_url}"
+model = "mock-model"
+max_tokens = 512
+temperature = 0.1
+
+[daemon]
+socket_path = "{socket_path}"
+auto_start_llm = false
+
+[agent]
+max_rounds = 6
+failure_pivot_threshold = 2
+
+[skills]
+extra_dirs = []
+default_timeout_secs = 30
+"#,
+        base_url = mock_base_url,
+        socket_path = socket_path.display(),
+    );
+
+    tokio::fs::write(&config_path, config)
+        .await
+        .expect("write config");
+
+    let mut daemon = spawn_daemon(&config_path).await;
+    wait_for_socket(&socket_path).await;
+
+    let mut stream = UnixStream::connect(&socket_path)
+        .await
+        .expect("connect daemon socket");
+
+    let session_id = "it-cancel-active";
+    write_message(
+        &mut stream,
+        &ClientMessage::Chat {
+            session_id: Some(session_id.to_string()),
+            message: "Generate output that can be cancelled".to_string(),
+            working_directory: Some("/tmp".to_string()),
+        },
+    )
+    .await
+    .expect("send chat request");
+
+    write_message(
+        &mut stream,
+        &ClientMessage::Cancel {
+            session_id: session_id.to_string(),
+        },
+    )
+    .await
+    .expect("send cancel request");
+
+    let message = wait_for_daemon_message_matching(&mut stream, Duration::from_secs(10), |msg| {
+        matches!(
+            msg,
+            DaemonMessage::CancelResult {
+                session_id: id,
+                outcome: CancelOutcome::CancelledActiveTurn,
+                origin: CancelOrigin::UserRequest,
+            } if id == session_id
+        )
+    })
+    .await;
+
+    match message {
+        DaemonMessage::CancelResult {
+            session_id: id,
+            outcome,
+            origin,
+        } => {
+            assert_eq!(id, session_id);
+            assert_eq!(outcome, CancelOutcome::CancelledActiveTurn);
+            assert_eq!(origin, CancelOrigin::UserRequest);
+        }
+        other => panic!("unexpected daemon message: {other:?}"),
+    }
+
+    assert_no_daemon_message_matching(&mut stream, Duration::from_millis(750), |msg| {
+        matches!(
+            msg,
+            DaemonMessage::Error {
+                session_id: Some(id),
+                message,
+            } if id == session_id && message.starts_with("Cancelled session turn: ")
+        )
+    })
+    .await;
+
+    send_shutdown(&socket_path).await;
+    wait_for_daemon_exit(&mut daemon).await;
+    mock_handle.abort();
+}
+
 async fn spawn_daemon(config_path: &std::path::Path) -> Child {
     Command::new(env!("CARGO_BIN_EXE_yips-daemon"))
         .arg("--config")
@@ -153,6 +354,63 @@ async fn wait_for_daemon_exit(daemon: &mut Child) {
             let _ = daemon.kill().await;
             let _ = daemon.wait().await;
             panic!("daemon did not exit after shutdown request");
+        }
+    }
+}
+
+async fn wait_for_daemon_message_matching<F>(
+    stream: &mut UnixStream,
+    total_timeout: Duration,
+    mut predicate: F,
+) -> DaemonMessage
+where
+    F: FnMut(&DaemonMessage) -> bool,
+{
+    let deadline = tokio::time::Instant::now() + total_timeout;
+
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        assert!(
+            !remaining.is_zero(),
+            "timed out waiting for expected daemon message"
+        );
+
+        let msg = timeout(remaining, read_message::<_, DaemonMessage>(stream))
+            .await
+            .expect("timed out waiting for daemon message")
+            .expect("read daemon message");
+
+        if predicate(&msg) {
+            return msg;
+        }
+    }
+}
+
+async fn assert_no_daemon_message_matching<F>(
+    stream: &mut UnixStream,
+    total_timeout: Duration,
+    mut predicate: F,
+) where
+    F: FnMut(&DaemonMessage) -> bool,
+{
+    let deadline = tokio::time::Instant::now() + total_timeout;
+
+    loop {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        if remaining.is_zero() {
+            return;
+        }
+
+        let read_window = remaining.min(Duration::from_millis(100));
+        match timeout(read_window, read_message::<_, DaemonMessage>(stream)).await {
+            Ok(Ok(msg)) => {
+                assert!(
+                    !predicate(&msg),
+                    "received unexpected daemon message while asserting absence: {msg:?}"
+                );
+            }
+            Ok(Err(_)) => return,
+            Err(_) => {}
         }
     }
 }
@@ -202,7 +460,7 @@ async fn handle_mock_connection(mut socket: TcpStream, req_count: Arc<AtomicUsiz
         None => return,
     };
 
-    let headers = String::from_utf8_lossy(&buf[..header_end]);
+    let headers = String::from_utf8_lossy(&buf[..header_end]).into_owned();
     let mut lines = headers.lines();
     let request_line = match lines.next() {
         Some(line) => line,
@@ -210,7 +468,7 @@ async fn handle_mock_connection(mut socket: TcpStream, req_count: Arc<AtomicUsiz
     };
     let mut parts = request_line.split_whitespace();
     let _method = parts.next().unwrap_or_default();
-    let path = parts.next().unwrap_or_default();
+    let path = parts.next().unwrap_or_default().to_string();
 
     let mut content_len = 0usize;
     for line in lines {
@@ -228,10 +486,14 @@ async fn handle_mock_connection(mut socket: TcpStream, req_count: Arc<AtomicUsiz
             Ok(0) => break,
             Ok(n) => {
                 already_body += n;
+                buf.extend_from_slice(&chunk[..n]);
             }
             Err(_) => break,
         }
     }
+    let body_start = header_end;
+    let body_end = body_start.saturating_add(content_len).min(buf.len());
+    let body = String::from_utf8_lossy(&buf[body_start..body_end]);
 
     if path == "/health" {
         let _ =
@@ -248,6 +510,10 @@ async fn handle_mock_connection(mut socket: TcpStream, req_count: Arc<AtomicUsiz
     if path != "/v1/chat/completions" {
         let _ = write_http_response(&mut socket, 404, "text/plain", "not found").await;
         return;
+    }
+
+    if body.contains("Generate output that can be cancelled") {
+        sleep(Duration::from_millis(300)).await;
     }
 
     let call_idx = req_count.fetch_add(1, Ordering::SeqCst);

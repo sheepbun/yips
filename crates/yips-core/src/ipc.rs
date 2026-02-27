@@ -57,6 +57,12 @@ pub enum DaemonMessage {
         session_id: String,
         round_count: u32,
     },
+    /// Result of a cancel request or implicit cancellation.
+    CancelResult {
+        session_id: String,
+        outcome: CancelOutcome,
+        origin: CancelOrigin,
+    },
     /// An error occurred.
     Error {
         session_id: Option<String>,
@@ -69,6 +75,24 @@ pub enum DaemonMessage {
     },
     /// Response to a list sessions request.
     SessionList { sessions: Vec<SessionInfo> },
+}
+
+/// Outcome of a cancel attempt for a session turn.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum CancelOutcome {
+    /// An active turn existed and was cancelled.
+    CancelledActiveTurn,
+    /// No active turn existed for the session.
+    NoActiveTurn,
+}
+
+/// Source of a cancel operation.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum CancelOrigin {
+    /// Explicit client-initiated cancel request.
+    UserRequest,
+    /// Previous turn was cancelled because a new chat arrived for the same session.
+    SupersededByNewChat,
 }
 
 /// Information about an active session.

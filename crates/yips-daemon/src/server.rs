@@ -13,7 +13,9 @@ use tracing::{error, info, warn};
 use yips_agent::engine::{AgentDependencies, LlmResponse, TurnConfig, TurnEngine};
 use yips_agent::event::AgentEvent;
 use yips_core::config::YipsConfig;
-use yips_core::ipc::{read_message, write_message, ClientMessage, DaemonMessage};
+use yips_core::ipc::{
+    read_message, write_message, CancelOrigin, CancelOutcome, ClientMessage, DaemonMessage,
+};
 use yips_core::message::{ChatMessage, ToolCall};
 use yips_core::tool::{ToolDefinition, ToolOutput};
 use yips_llm::client::LlamaClient;
@@ -224,17 +226,13 @@ impl DaemonServerContext {
                     tx.send(DaemonMessage::SessionList { sessions }).await?;
                 }
                 ClientMessage::Cancel { session_id } => {
-                    let cancelled = self.cancel_turn(&session_id).await;
-                    let message = if cancelled {
-                        format!("Cancelled session turn: {}", session_id)
+                    let outcome = if self.cancel_turn(&session_id).await {
+                        CancelOutcome::CancelledActiveTurn
                     } else {
-                        format!("No active turn for session: {}", session_id)
+                        CancelOutcome::NoActiveTurn
                     };
-                    tx.send(DaemonMessage::Error {
-                        session_id: Some(session_id),
-                        message,
-                    })
-                    .await?;
+                    self.emit_cancel_result(&tx, session_id, outcome, CancelOrigin::UserRequest)
+                        .await?;
                 }
                 ClientMessage::Shutdown => {
                     info!("Shutdown requested by client");
@@ -261,11 +259,13 @@ impl DaemonServerContext {
 
     async fn cancel_existing_turn(&self, session_id: &str, tx: &mpsc::Sender<DaemonMessage>) {
         if self.cancel_turn(session_id).await {
-            let _ = tx
-                .send(DaemonMessage::Error {
-                    session_id: Some(session_id.to_string()),
-                    message: "Previous turn cancelled by a new chat request".to_string(),
-                })
+            let _ = self
+                .emit_cancel_result(
+                    tx,
+                    session_id.to_string(),
+                    CancelOutcome::CancelledActiveTurn,
+                    CancelOrigin::SupersededByNewChat,
+                )
                 .await;
         }
     }
@@ -278,6 +278,23 @@ impl DaemonServerContext {
         } else {
             false
         }
+    }
+
+    async fn emit_cancel_result(
+        &self,
+        tx: &mpsc::Sender<DaemonMessage>,
+        session_id: String,
+        outcome: CancelOutcome,
+        origin: CancelOrigin,
+    ) -> Result<()> {
+        tx.send(DaemonMessage::CancelResult {
+            session_id,
+            outcome,
+            origin,
+        })
+        .await?;
+
+        Ok(())
     }
 }
 

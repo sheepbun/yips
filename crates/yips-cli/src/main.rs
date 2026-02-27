@@ -2,7 +2,9 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 use tokio::net::UnixStream;
-use yips_core::ipc::{read_message, write_message, ClientMessage, DaemonMessage};
+use yips_core::ipc::{
+    read_message, write_message, CancelOrigin, CancelOutcome, ClientMessage, DaemonMessage,
+};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about = "Yips AI Agent CLI")]
@@ -147,6 +149,29 @@ async fn run_ask(stream: &mut UnixStream, query: String, session: Option<String>
                     session_id, round_count
                 );
                 break;
+            }
+            DaemonMessage::CancelResult {
+                session_id,
+                outcome,
+                origin,
+            } => {
+                let msg = match (outcome, origin) {
+                    (CancelOutcome::CancelledActiveTurn, CancelOrigin::UserRequest) => {
+                        format!("Cancel succeeded: session={session_id}")
+                    }
+                    (CancelOutcome::NoActiveTurn, CancelOrigin::UserRequest) => {
+                        format!("Cancel ignored: no active turn (session={session_id})")
+                    }
+                    (CancelOutcome::CancelledActiveTurn, CancelOrigin::SupersededByNewChat) => {
+                        format!(
+                            "Previous turn cancelled by a new chat request (session={session_id})"
+                        )
+                    }
+                    (CancelOutcome::NoActiveTurn, CancelOrigin::SupersededByNewChat) => {
+                        format!("Cancel ignored: no active turn (session={session_id})")
+                    }
+                };
+                println!("[System] {}", msg);
             }
             DaemonMessage::Error { message, .. } => {
                 return Err(anyhow::anyhow!(message));

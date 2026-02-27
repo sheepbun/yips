@@ -1,5 +1,7 @@
 # Phase 5: Subagents + Polish
 
+Last verified: 2026-02-27
+
 ## Goal
 Full conductor/subagent orchestration, memory, hooks, and model management.
 

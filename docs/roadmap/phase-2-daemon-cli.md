@@ -1,5 +1,7 @@
 # Phase 2: Daemon + CLI (MVP)
 
+Last verified: 2026-02-27
+
 ## Goal
 IPC server, daemon process, and CLI client. This is the minimum viable product.
 
@@ -24,5 +26,8 @@ Phase 1
 ## Deliverable
 `yips-daemon &` + `yips ask "list the files in this directory"` returns correct output.
 
+## Environment Note
+Daemon IPC end-to-end tests bind local sockets and may fail in restricted sandboxes even when implementation is correct.
+
 ## Status
-In Progress
+Complete

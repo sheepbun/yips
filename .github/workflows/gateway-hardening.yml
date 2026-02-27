@@ -1,0 +1,24 @@
+name: Gateway Hardening
+
+on:
+  workflow_dispatch:
+
+jobs:
+  gateway-signal-hardening:
+    name: Gateway Signal Process Test (Unix, ignored)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      RUST_BACKTRACE: 1
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run gateway process signal integration test
+        run: cargo test --locked -p yips-gateway --test gateway_signal_process -- --ignored

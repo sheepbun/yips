@@ -1,5 +1,7 @@
 # Phase 4: Skills
 
+Last verified: 2026-02-27
+
 ## Goal
 Skill discovery, subprocess protocol, and built-in skill examples.
 

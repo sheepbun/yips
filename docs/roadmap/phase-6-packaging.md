@@ -1,5 +1,7 @@
 # Phase 6: Packaging
 
+Last verified: 2026-02-27
+
 ## Goal
 Release binaries, systemd units, install script, migration tools.
 

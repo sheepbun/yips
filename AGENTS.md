@@ -2,6 +2,10 @@
 
 This document provides universal instructions for any AI coding tool working on Yips.
 
+## High Priority Session Handoff
+- After finishing implementation work in a session, always include a ready-to-run “next session prompt” in the final response.
+- The prompt must summarize completed work, current state, open items, and the first concrete step for the next session.
+
 ## Project Structure
 Rust workspace with 9 crates under `crates/`. See `CLAUDE.md` for the full architecture overview.
 

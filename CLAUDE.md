@@ -1,5 +1,9 @@
 # Yips - AI Agent System
 
+## High Priority Session Handoff
+- After finishing implementation work in a session, always include a ready-to-run “next session prompt” in the final response.
+- The prompt must summarize completed work, current state, open items, and the first concrete step for the next session.
+
 ## Overview
 Yips is a local-first AI agent with a microservices architecture built in Rust. It combines agentic coding capabilities with a multi-channel personal assistant gateway, powered by llama.cpp for local inference.
 
@@ -33,3 +37,5 @@ cargo run --bin yips-tui       # Run the TUI
 ## See Also
 - `AGENTS.md` for universal agent instructions
 - `docs/roadmap/` for implementation phases
+- `docs/ipc-compatibility.md` for IPC migration and compatibility policy
+- `docs/ipc-client-inventory.md` for external client verification and signoff

@@ -1,0 +1,70 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/yips-core",
+    "crates/yips-llm",
+    "crates/yips-tools",
+    "crates/yips-agent",
+    "crates/yips-skills",
+    "crates/yips-daemon",
+    "crates/yips-tui",
+    "crates/yips-gateway",
+    "crates/yips-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/yips-project/yips"
+
+[workspace.dependencies]
+# Internal crates
+yips-core = { path = "crates/yips-core" }
+yips-llm = { path = "crates/yips-llm" }
+yips-tools = { path = "crates/yips-tools" }
+yips-agent = { path = "crates/yips-agent" }
+yips-skills = { path = "crates/yips-skills" }
+yips-daemon = { path = "crates/yips-daemon" }
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# HTTP
+reqwest = { version = "0.12", features = ["json", "stream"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# TUI
+ratatui = "0.29"
+crossterm = "0.28"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Errors
+anyhow = "1"
+thiserror = "2"
+
+# Config
+toml = "0.8"
+
+# Diffing
+similar = "2"
+
+# Regex
+regex = "1"
+
+# Testing
+tempfile = "3"
+
+# Async utilities
+async-trait = "0.1"
+futures = "0.3"
+tokio-stream = "0.1"

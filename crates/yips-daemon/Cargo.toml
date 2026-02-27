@@ -1,0 +1,28 @@
+[package]
+name = "yips-daemon"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "yips-daemon"
+path = "src/main.rs"
+
+[dependencies]
+yips-core = { workspace = true }
+yips-llm = { workspace = true }
+yips-agent = { workspace = true }
+yips-tools = { workspace = true }
+yips-skills = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+uuid = { version = "1", features = ["v4"] }
+futures = { workspace = true }
+async-trait = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+clap = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

@@ -1,0 +1,18 @@
+[package]
+name = "yips-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "yips"
+path = "src/main.rs"
+
+[dependencies]
+yips-core = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+clap = { workspace = true }

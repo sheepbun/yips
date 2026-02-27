@@ -7,6 +7,10 @@ edition.workspace = true
 name = "yips-gateway"
 path = "src/main.rs"
 
+[[bin]]
+name = "gateway_signal_harness"
+path = "src/bin/gateway_signal_harness.rs"
+
 [dependencies]
 yips-core = { workspace = true }
 serde = { workspace = true }
@@ -16,3 +20,10 @@ tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 clap = { workspace = true }
+async-trait = { workspace = true }
+thiserror = { workspace = true }
+serenity = { workspace = true }
+teloxide = { workspace = true }
+
+[dev-dependencies]
+nix = { version = "0.29", features = ["signal", "process"] }

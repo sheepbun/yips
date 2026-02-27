@@ -12,6 +12,7 @@ pub struct YipsConfig {
     pub daemon: DaemonConfig,
     pub agent: AgentConfig,
     pub skills: SkillsConfig,
+    pub gateway: GatewayConfig,
 }
 
 /// Configuration for the llama.cpp backend.
@@ -64,6 +65,91 @@ pub struct SkillsConfig {
     pub default_timeout_secs: u64,
 }
 
+/// Configuration for external gateway adapters (Discord, Telegram).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GatewayConfig {
+    /// Whether gateway processing is enabled.
+    pub enabled: bool,
+    /// Optional override for the daemon socket path used by gateway clients.
+    pub daemon_socket_path: Option<PathBuf>,
+    /// Authentication policy for external users.
+    pub auth: GatewayAuthConfig,
+    /// Rate limiting policy for inbound gateway messages.
+    pub rate_limit: GatewayRateLimitConfig,
+    /// Session routing behavior for gateway users.
+    pub session: GatewaySessionConfig,
+    /// Discord adapter configuration.
+    pub discord: DiscordConfig,
+    /// Telegram adapter configuration.
+    pub telegram: TelegramConfig,
+}
+
+/// Allowlist-based gateway authentication policy.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GatewayAuthConfig {
+    /// Explicit user IDs allowed to talk to the gateway.
+    /// Empty means all users are allowed.
+    pub allow_user_ids: Vec<String>,
+}
+
+/// Sliding-window rate limit policy for inbound user messages.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GatewayRateLimitConfig {
+    /// Maximum allowed requests per user in a rolling window.
+    pub max_requests: u32,
+    /// Rolling window size in seconds.
+    pub window_secs: u64,
+}
+
+/// Session routing controls for gateway traffic.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GatewaySessionConfig {
+    /// Prefix included in generated daemon session IDs.
+    pub prefix: String,
+}
+
+/// Discord adapter configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DiscordConfig {
+    /// Whether the Discord adapter is enabled.
+    pub enabled: bool,
+    /// Bot token, typically sourced from configuration or env expansion.
+    pub token: Option<String>,
+    /// Optional list of allowed guild IDs; empty allows all guilds.
+    pub allowed_guild_ids: Vec<String>,
+    /// Whether direct messages are accepted by the Discord adapter.
+    pub allow_dms: bool,
+    /// Inbound message trigger policy for Discord channels.
+    pub trigger_mode: DiscordTriggerMode,
+}
+
+/// Telegram adapter configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TelegramConfig {
+    /// Whether the Telegram adapter is enabled.
+    pub enabled: bool,
+    /// Bot token, typically sourced from configuration or env expansion.
+    pub token: Option<String>,
+    /// Explicit allowlist of accepted chat IDs.
+    pub allowed_chat_ids: Vec<String>,
+}
+
+/// Trigger policy for inbound Discord messages.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DiscordTriggerMode {
+    /// Process all non-bot, non-empty messages that pass guild policy.
+    AllMessages,
+    /// In guild channels, only process mentions/replies directed at the bot.
+    MentionOnly,
+}
+
 impl Default for YipsConfig {
     fn default() -> Self {
         Self {
@@ -71,6 +157,7 @@ impl Default for YipsConfig {
             daemon: DaemonConfig::default(),
             agent: AgentConfig::default(),
             skills: SkillsConfig::default(),
+            gateway: GatewayConfig::default(),
         }
     }
 }
@@ -112,6 +199,73 @@ impl Default for SkillsConfig {
         Self {
             extra_dirs: Vec::new(),
             default_timeout_secs: 30,
+        }
+    }
+}
+
+impl Default for GatewayConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            daemon_socket_path: None,
+            auth: GatewayAuthConfig::default(),
+            rate_limit: GatewayRateLimitConfig::default(),
+            session: GatewaySessionConfig::default(),
+            discord: DiscordConfig::default(),
+            telegram: TelegramConfig::default(),
+        }
+    }
+}
+
+impl Default for GatewayAuthConfig {
+    fn default() -> Self {
+        Self {
+            allow_user_ids: Vec::new(),
+        }
+    }
+}
+
+impl Default for GatewayRateLimitConfig {
+    fn default() -> Self {
+        Self {
+            max_requests: 8,
+            window_secs: 60,
+        }
+    }
+}
+
+impl Default for GatewaySessionConfig {
+    fn default() -> Self {
+        Self {
+            prefix: "gw".to_string(),
+        }
+    }
+}
+
+impl Default for DiscordConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            token: None,
+            allowed_guild_ids: Vec::new(),
+            allow_dms: true,
+            trigger_mode: DiscordTriggerMode::default(),
+        }
+    }
+}
+
+impl Default for DiscordTriggerMode {
+    fn default() -> Self {
+        Self::AllMessages
+    }
+}
+
+impl Default for TelegramConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            token: None,
+            allowed_chat_ids: Vec::new(),
         }
     }
 }
@@ -188,6 +342,8 @@ mod tests {
         let config = YipsConfig::default();
         assert_eq!(config.agent.max_rounds, 6);
         assert_eq!(config.llm.base_url, "http://127.0.0.1:8080");
+        assert!(!config.gateway.enabled);
+        assert_eq!(config.gateway.rate_limit.max_requests, 8);
     }
 
     #[test]
@@ -196,5 +352,81 @@ mod tests {
         let serialized = toml::to_string(&config).unwrap();
         let deserialized: YipsConfig = toml::from_str(&serialized).unwrap();
         assert_eq!(deserialized.agent.max_rounds, config.agent.max_rounds);
+        assert!(deserialized.gateway.discord.allow_dms);
+        assert_eq!(
+            deserialized.gateway.discord.trigger_mode,
+            DiscordTriggerMode::AllMessages
+        );
+        assert!(!deserialized.gateway.telegram.enabled);
+        assert!(deserialized.gateway.telegram.allowed_chat_ids.is_empty());
+    }
+
+    #[test]
+    fn telegram_config_parses_fields() {
+        let config: YipsConfig = toml::from_str(
+            r#"
+                [gateway]
+                [gateway.telegram]
+                enabled = true
+                token = "telegram-token"
+                allowed_chat_ids = ["123", "-100456"]
+            "#,
+        )
+        .unwrap();
+
+        assert!(config.gateway.telegram.enabled);
+        assert_eq!(
+            config.gateway.telegram.token.as_deref(),
+            Some("telegram-token")
+        );
+        assert_eq!(
+            config.gateway.telegram.allowed_chat_ids,
+            vec!["123".to_string(), "-100456".to_string()]
+        );
+    }
+
+    #[test]
+    fn discord_allow_dms_parses_false() {
+        let config: YipsConfig = toml::from_str(
+            r#"
+                [gateway]
+                [gateway.discord]
+                allow_dms = false
+            "#,
+        )
+        .unwrap();
+
+        assert!(!config.gateway.discord.allow_dms);
+    }
+
+    #[test]
+    fn discord_trigger_mode_parses_mention_only() {
+        let config: YipsConfig = toml::from_str(
+            r#"
+                [gateway]
+                [gateway.discord]
+                trigger_mode = "mention_only"
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.gateway.discord.trigger_mode,
+            DiscordTriggerMode::MentionOnly
+        );
+    }
+
+    #[test]
+    fn discord_trigger_mode_rejects_invalid_value() {
+        let err = toml::from_str::<YipsConfig>(
+            r#"
+                [gateway]
+                [gateway.discord]
+                trigger_mode = "invalid_mode"
+            "#,
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("unknown variant"));
     }
 }

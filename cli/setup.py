@@ -11,14 +11,60 @@ from pathlib import Path
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, DownloadColumn, TransferSpeedColumn
 from cli.color_utils import console
 from cli.llamacpp import LLAMA_MODELS_DIR, LLAMA_DEFAULT_MODEL, get_llama_server_candidates
+from cli.hw_utils import detect_cuda_toolkit
+
+
+def detect_llama_build_mode(install_dir: Path | None = None) -> str:
+    """Detect whether the existing llama.cpp build is CUDA-enabled or CPU-only."""
+    if install_dir is None:
+        install_dir = Path.home() / "llama.cpp"
+
+    cache_path = install_dir / "build" / "CMakeCache.txt"
+    if cache_path.exists():
+        try:
+            cache = cache_path.read_text()
+        except OSError:
+            cache = ""
+        if "GGML_CUDA:BOOL=ON" in cache:
+            return "cuda"
+        if "GGML_CUDA:BOOL=OFF" in cache:
+            return "cpu"
+
+    binary_candidates = [
+        Path(candidate) for candidate in get_llama_server_candidates()
+        if Path(candidate).exists()
+    ]
+    for candidate in binary_candidates:
+        try:
+            output = subprocess.check_output(
+                [str(candidate), "--version"],
+                text=True,
+                stderr=subprocess.STDOUT,
+            )
+        except (subprocess.SubprocessError, FileNotFoundError, OSError):
+            continue
+        lowered = output.lower()
+        if "cuda" in lowered or "cublas" in lowered:
+            return "cuda"
+
+    return "unknown"
+
+
+def get_llama_cmake_args(cuda_enabled: bool, cuda_toolkit_root: str | None = None) -> list[str]:
+    """Return the cmake configuration arguments for llama.cpp."""
+    args = ["-DLLAMA_BUILD_SERVER=ON"]
+    args.append(f"-DGGML_CUDA={'ON' if cuda_enabled else 'OFF'}")
+    if cuda_enabled and cuda_toolkit_root:
+        args.append(f"-DCUDAToolkit_ROOT={cuda_toolkit_root}")
+    return args
 
 def check_build_tools() -> bool:
-    """Check if git, make, and compiler are available."""
+    """Check if git, cmake, and compiler are available."""
     missing: List[str] = []
     if not shutil.which("git"):
         missing.append("git")
-    if not shutil.which("make"):
-        missing.append("make")
+    if not shutil.which("cmake"):
+        missing.append("cmake")
     if not shutil.which("g++") and not shutil.which("clang++"):
         missing.append("g++ or clang++")
     
@@ -37,6 +83,9 @@ def install_llama_server() -> str | None:
         return None
 
     install_dir = Path.home() / "llama.cpp"
+    cuda_support = detect_cuda_toolkit()
+    prefer_cuda = cuda_support["available"]
+    existing_mode = detect_llama_build_mode(install_dir) if install_dir.exists() else "unknown"
     
     if install_dir.exists():
         console.print(f"[yellow]Directory {install_dir} already exists. Updating...[/yellow]")
@@ -57,54 +106,54 @@ def install_llama_server() -> str | None:
             console.print(f"[red]Failed to clone llama.cpp: {e}[/red]")
             return None
 
-    console.print("[cyan]Building llama.cpp (this may take a few minutes)...[/cyan]")
+    if prefer_cuda:
+        console.print(f"[cyan]CUDA detected ({cuda_support['reason']}). Building llama.cpp with CUDA support...[/cyan]")
+    elif existing_mode == "cuda":
+        console.print("[yellow]CUDA is not currently available. Reconfiguring llama.cpp for CPU-only use...[/yellow]")
+    else:
+        console.print(f"[cyan]Building llama.cpp without CUDA ({cuda_support['reason']})...[/cyan]")
 
     jobs = str(max(1, (os.cpu_count() or 4)))
-    build_attempts: list[list[str]] = []
-    if shutil.which("cmake"):
-        build_attempts.extend([
-            ["cmake", "-S", str(install_dir), "-B", str(install_dir / "build"), "-DLLAMA_BUILD_SERVER=ON"],
-            ["cmake", "--build", str(install_dir / "build"), "--config", "Release", "-j", jobs, "--target", "llama-server"],
-        ])
-    if shutil.which("make"):
-        build_attempts.append(["make", "-j", jobs, "llama-server"])
-
-    if not build_attempts:
-        console.print("[red]Neither cmake nor make is available to build llama.cpp.[/red]")
-        return None
+    cmake_config = [
+        "cmake", "-S", str(install_dir), "-B", str(install_dir / "build"),
+        *get_llama_cmake_args(prefer_cuda, cuda_support.get("toolkit_root")),
+    ]
+    cmake_build = [
+        "cmake", "--build", str(install_dir / "build"), "--config", "Release", "-j", jobs, "--target", "llama-server",
+    ]
+    env = os.environ.copy()
+    nvcc_path = cuda_support.get("nvcc_path")
+    toolkit_root = cuda_support.get("toolkit_root")
+    if nvcc_path and toolkit_root:
+        env["PATH"] = f"{Path(nvcc_path).parent}:{env.get('PATH', '')}"
+        env["CUDAToolkit_ROOT"] = toolkit_root
 
     try:
         with console.status("[bold green]Compiling...[/bold green]"):
-            if build_attempts[0][0] == "cmake":
-                subprocess.run(
-                    build_attempts[0],
-                    cwd=install_dir,
-                    check=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                )
-                subprocess.run(
-                    build_attempts[1],
-                    cwd=install_dir,
-                    check=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                )
-            elif build_attempts[0][0] == "make":
-                subprocess.run(
-                    build_attempts[0],
-                    cwd=install_dir,
-                    check=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                )
+            subprocess.run(
+                cmake_config,
+                cwd=install_dir,
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env,
+            )
+            subprocess.run(
+                cmake_build,
+                cwd=install_dir,
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env,
+            )
     except subprocess.CalledProcessError as e:
         console.print(f"[red]Build failed: {e.stderr.decode()}[/red]")
         return None
 
     for candidate in get_llama_server_candidates():
         if Path(candidate).exists():
-            console.print(f"[green]Successfully built llama-server at {candidate}[/green]")
+            final_mode = detect_llama_build_mode(install_dir)
+            console.print(f"[green]Successfully built llama-server at {candidate} ({final_mode}).[/green]")
             return candidate
 
     console.print("[red]Build completed but binary not found.[/red]")

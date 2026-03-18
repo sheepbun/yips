@@ -41,6 +41,24 @@ print(LLAMA_DEFAULT_MODEL)
 PY
 }
 
+detect_cuda_support() {
+    "$PROJECT_ROOT/.venv/bin/python" - <<'PY'
+from cli.hw_utils import detect_cuda_toolkit
+support = detect_cuda_toolkit()
+print("1" if support["available"] else "0")
+print(support["reason"])
+print(support.get("toolkit_root") or "")
+print(support.get("nvcc_path") or "")
+PY
+}
+
+detect_llama_build_mode() {
+    "$PROJECT_ROOT/.venv/bin/python" - <<'PY'
+from cli.setup import detect_llama_build_mode
+print(detect_llama_build_mode())
+PY
+}
+
 command_exists() {
     command -v "$1" &> /dev/null
 }
@@ -73,35 +91,64 @@ install_llama_server_link() {
 
 build_llama_cpp() {
     local jobs
+    local cuda_enabled="$1"
+    local cuda_toolkit_root="$2"
+    local nvcc_path="$3"
     jobs="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
 
-    if command_exists cmake; then
+    if [ "$cuda_enabled" = "1" ]; then
+        status "Building llama.cpp with CMake and CUDA..."
+    else
         status "Building llama.cpp with CMake..."
-        if cmake -S "$LLAMA_DIR" -B "$LLAMA_DIR/build" -DLLAMA_BUILD_SERVER=ON \
-            && cmake --build "$LLAMA_DIR/build" --config Release -j "$jobs" --target llama-server; then
-            return 0
-        fi
-        warning "CMake build failed."
     fi
 
-    if command_exists make; then
-        status "Building llama.cpp with make..."
-        if make -C "$LLAMA_DIR" -j "$jobs" llama-server; then
-            return 0
-        fi
-        warning "make build failed."
+    local -a cmake_args
+    cmake_args=(-S "$LLAMA_DIR" -B "$LLAMA_DIR/build" -DLLAMA_BUILD_SERVER=ON -DGGML_CUDA=$([ "$cuda_enabled" = "1" ] && echo ON || echo OFF))
+    if [ "$cuda_enabled" = "1" ] && [ -n "$cuda_toolkit_root" ]; then
+        cmake_args+=("-DCUDAToolkit_ROOT=$cuda_toolkit_root")
     fi
 
+    local old_path="$PATH"
+    if [ -n "$nvcc_path" ]; then
+        export PATH="$(dirname "$nvcc_path"):$PATH"
+    fi
+    if [ -n "$cuda_toolkit_root" ]; then
+        export CUDAToolkit_ROOT="$cuda_toolkit_root"
+    fi
+
+    if cmake "${cmake_args[@]}" \
+        && cmake --build "$LLAMA_DIR/build" --config Release -j "$jobs" --target llama-server; then
+        return 0
+    fi
+
+    export PATH="$old_path"
+    warning "CMake build failed."
     return 1
 }
 
 ensure_llama_cpp() {
     local binary_path
+    local cuda_enabled
+    local cuda_reason
+    local cuda_toolkit_root
+    local nvcc_path
+    local build_mode
+
+    mapfile -t cuda_probe < <(detect_cuda_support 2>/dev/null || printf '0\nCUDA detection failed\n')
+    cuda_enabled="${cuda_probe[0]:-0}"
+    cuda_reason="${cuda_probe[1]:-CUDA detection failed}"
+    cuda_toolkit_root="${cuda_probe[2]:-}"
+    nvcc_path="${cuda_probe[3]:-}"
 
     if binary_path="$(llama_server_path)"; then
-        status "llama.cpp detected and built."
-        install_llama_server_link "$binary_path"
-        return 0
+        build_mode="$(detect_llama_build_mode 2>/dev/null || echo unknown)"
+        if [ "$cuda_enabled" = "1" ] && [ "$build_mode" != "cuda" ]; then
+            status "CUDA detected ($cuda_reason). Rebuilding existing llama.cpp with CUDA support..."
+        else
+            status "llama.cpp detected and built (${build_mode})."
+            install_llama_server_link "$binary_path"
+            return 0
+        fi
     fi
 
     if ! command_exists git; then
@@ -124,13 +171,20 @@ ensure_llama_cpp() {
         fi
     fi
 
-    if ! command_exists cmake && ! command_exists make; then
-        warning "Neither cmake nor make is installed, so llama.cpp cannot be built automatically."
+    if ! command_exists cmake; then
+        warning "cmake is not installed, so llama.cpp cannot be built automatically."
         return 1
     fi
 
-    if build_llama_cpp && binary_path="$(llama_server_path)"; then
-        status "llama.cpp built successfully."
+    if [ "$cuda_enabled" = "1" ]; then
+        status "CUDA detected: $cuda_reason"
+    else
+        status "CUDA not available: $cuda_reason"
+    fi
+
+    if build_llama_cpp "$cuda_enabled" "$cuda_toolkit_root" "$nvcc_path" && binary_path="$(llama_server_path)"; then
+        build_mode="$(detect_llama_build_mode 2>/dev/null || echo unknown)"
+        status "llama.cpp built successfully (${build_mode})."
         install_llama_server_link "$binary_path"
         return 0
     fi

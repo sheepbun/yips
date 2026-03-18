@@ -2,6 +2,8 @@
 Hardware detection utilities for Yips.
 """
 
+import os
+import shutil
 import psutil
 import subprocess
 from typing import TypedDict
@@ -11,6 +13,13 @@ class SystemSpecs(TypedDict):
     ram_gb: float
     vram_gb: float
     gpu_type: str | None
+
+
+class CudaSupport(TypedDict):
+    available: bool
+    reason: str
+    toolkit_root: str | None
+    nvcc_path: str | None
 
 
 def get_system_specs() -> SystemSpecs:
@@ -41,6 +50,59 @@ def get_system_specs() -> SystemSpecs:
             pass
             
     return specs
+
+
+def detect_cuda_toolkit() -> CudaSupport:
+    """Detect whether a CUDA toolkit is installed locally for building llama.cpp."""
+    nvcc_path = shutil.which("nvcc")
+    if nvcc_path:
+        toolkit_root = os.path.dirname(os.path.dirname(nvcc_path))
+        return {"available": True, "reason": "nvcc detected", "toolkit_root": toolkit_root, "nvcc_path": nvcc_path}
+
+    cuda_roots = [
+        "/usr/local/cuda",
+        "/opt/cuda",
+    ]
+    for root in cuda_roots:
+        candidate_nvcc = os.path.join(root, "bin", "nvcc")
+        if os.path.isfile(candidate_nvcc):
+            return {
+                "available": True,
+                "reason": f"nvcc detected at {candidate_nvcc}",
+                "toolkit_root": root,
+                "nvcc_path": candidate_nvcc,
+            }
+
+    return {"available": False, "reason": "CUDA toolkit not found", "toolkit_root": None, "nvcc_path": None}
+
+
+def detect_cuda_support() -> CudaSupport:
+    """Detect whether the local environment can support a CUDA llama.cpp build."""
+    if not shutil.which("nvidia-smi"):
+        return {"available": False, "reason": "nvidia-smi not found", "toolkit_root": None, "nvcc_path": None}
+
+    try:
+        output = subprocess.check_output(
+            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except (subprocess.SubprocessError, FileNotFoundError):
+        return {"available": False, "reason": "nvidia-smi query failed", "toolkit_root": None, "nvcc_path": None}
+
+    if not output:
+        return {"available": False, "reason": "no NVIDIA GPUs detected", "toolkit_root": None, "nvcc_path": None}
+
+    toolkit = detect_cuda_toolkit()
+    if toolkit["available"]:
+        return {
+            "available": True,
+            "reason": toolkit["reason"],
+            "toolkit_root": toolkit["toolkit_root"],
+            "nvcc_path": toolkit["nvcc_path"],
+        }
+
+    return toolkit
 
 def is_model_suitable(specs: SystemSpecs, model_size_gb: float) -> str | None:
     """Check if a model fits in VRAM or RAM."""

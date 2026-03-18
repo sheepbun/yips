@@ -13,7 +13,7 @@ import requests
 import shutil
 from pathlib import Path
 from cli.color_utils import console
-from cli.hw_utils import get_system_specs
+from cli.hw_utils import detect_cuda_support, get_system_specs
 
 # llama.cpp configuration
 def get_llama_server_candidates() -> list[str]:
@@ -49,6 +49,34 @@ def _resolve_llama_server_path() -> str:
     # Fallback to the preferred CMake build location.
     return str(Path.home() / "llama.cpp" / "build" / "bin" / "llama-server")
 
+
+def get_llama_build_mode() -> str:
+    """Detect whether llama.cpp was built with CUDA support."""
+    cache_path = Path.home() / "llama.cpp" / "build" / "CMakeCache.txt"
+    if cache_path.exists():
+        try:
+            cache = cache_path.read_text()
+        except OSError:
+            cache = ""
+        if "GGML_CUDA:BOOL=ON" in cache:
+            return "cuda"
+        if "GGML_CUDA:BOOL=OFF" in cache:
+            return "cpu"
+
+    if os.path.exists(LLAMA_SERVER_PATH):
+        try:
+            output = subprocess.check_output(
+                [LLAMA_SERVER_PATH, "--version"],
+                text=True,
+                stderr=subprocess.STDOUT,
+            ).lower()
+        except (subprocess.SubprocessError, FileNotFoundError, OSError):
+            output = ""
+        if "cuda" in output or "cublas" in output:
+            return "cuda"
+
+    return "unknown"
+
 LLAMA_SERVER_PATH = _resolve_llama_server_path()
 LLAMA_MODELS_DIR = Path.home() / ".lmstudio" / "models"
 
@@ -69,6 +97,15 @@ def get_llama_server_url() -> str:
 def get_last_llama_server_error() -> str:
     """Return the last captured llama.cpp startup error."""
     return _last_server_error
+
+
+def get_llama_runtime_mode() -> str:
+    """Return the preferred runtime mode based on hardware and build capability."""
+    cuda_support = detect_cuda_support()
+    build_mode = get_llama_build_mode()
+    if cuda_support["available"] and build_mode == "cuda":
+        return "cuda"
+    return "cpu"
 
 
 def _set_llama_server_url(port: int) -> None:
@@ -183,14 +220,30 @@ def start_llamacpp(model_path: str | None = None) -> bool:
             _set_llama_server_url(fallback_port)
             port = fallback_port
 
+    cuda_support = detect_cuda_support()
+    build_mode = get_llama_build_mode()
+
+    if cuda_support["available"] and build_mode != "cuda":
+        _last_server_error = (
+            "CUDA-capable NVIDIA GPU detected, but llama.cpp was built without CUDA support. "
+            "Rerun setup to rebuild llama.cpp with CUDA enabled."
+        )
+    elif not cuda_support["available"] and build_mode == "cuda":
+        _last_server_error = f"CUDA build detected, but CUDA is not currently available ({cuda_support['reason']})."
+
     # Define strategies: (name, list_of_flags)
-    # We request 999 layers to force max GPU offload. 
+    # We request 999 layers to force max GPU offload.
     # llama.cpp will automatically fallback to CPU/RAM for layers that don't fit.
-    strategies: list[tuple[str, list[str]]] = [
-        ("GPU (Auto-Offload)", ["-ngl", "999"]),
-        ("Hybrid (Default)", []),
-        ("CPU Only", ["-ngl", "0"]),
-    ]
+    if cuda_support["available"] and build_mode == "cuda":
+        strategies: list[tuple[str, list[str]]] = [
+            ("GPU (Auto-Offload)", ["-ngl", "999"]),
+            ("Hybrid (Default)", []),
+            ("CPU Only", ["-ngl", "0"]),
+        ]
+    else:
+        strategies = [
+            ("CPU Only", ["-ngl", "0"]),
+        ]
 
     ctx_size = get_optimal_context_size()
     # console.print(f"[dim]Calculated optimal context size: {ctx_size} tokens[/dim]")

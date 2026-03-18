@@ -53,6 +53,33 @@ if TYPE_CHECKING:
 class AgentUIMixin:
     """Mixin providing UI rendering capabilities to YipsAgent."""
 
+    def format_stream_status(self: YipsAgentProtocol, tps: float | None) -> str:
+        """Format the prompt status text for the most recent streamed response."""
+        if tps is None or tps <= 0:
+            return ""
+        return f"{tps:.1f} tk/s"
+
+    def update_stream_status(self: YipsAgentProtocol, output_tokens: int | None, duration_seconds: float) -> None:
+        """Store throughput from the last successful streamed response."""
+        if output_tokens is None or output_tokens <= 0 or duration_seconds <= 0:
+            return
+        self.last_stream_tps = output_tokens / duration_seconds
+        self.last_stream_status_text = self.format_stream_status(self.last_stream_tps)
+
+    def get_prompt_status_fragments(self: YipsAgentProtocol) -> list[tuple[str, str]]:
+        """Build a right-aligned status line shown directly under the >>> prompt."""
+        status_text = getattr(self, "last_stream_status_text", "")
+        terminal_width = max(self.console.width, len(status_text))
+        padding = " " * max(terminal_width - len(status_text), 0)
+
+        fragments: list[tuple[str, str]] = [("", padding)]
+        if not status_text:
+            return fragments
+
+        for char in status_text:
+            fragments.append(("fg:#89CFF0", char))
+        return fragments
+
     def render_title_box(self: YipsAgentProtocol) -> None:
         """Render the title box with responsive layout."""
         terminal_width = self.console.width

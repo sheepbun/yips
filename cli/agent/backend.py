@@ -517,11 +517,13 @@ class AgentBackendMixin:
     def stream_llamacpp(self: YipsAgentProtocol, messages: list[dict[str, Any]]) -> str:
         """Stream response from llama-server API with real-time display."""
         try:
+            stream_start_time = time.time()
             prefix = get_yips_prefix()
             indent = " " * len(prefix)
             all_content = "".join([str(m["content"]) for m in messages])
             est_tokens = len(all_content) // 4
             spinner = PulsingSpinner("Thinking...", token_count=est_tokens)
+            output_tokens: int | None = None
 
             accumulated_text = ""
             in_thinking_block = False
@@ -629,6 +631,7 @@ class AgentBackendMixin:
                             else: live.update(Group(*renderables, spinner))
                         usage = data.get("usage")
                         if usage:
+                            output_tokens = usage.get("completion_tokens")
                             spinner.update_tokens(
                                 input_tokens=usage.get("prompt_tokens"),
                                 output_tokens=usage.get("completion_tokens")
@@ -653,6 +656,9 @@ class AgentBackendMixin:
                     if i > 0: final_text.append("\n" + indent)
                     final_text.append(gradient_text(line))
                 self.console.print(final_text)
+                if output_tokens is None:
+                    output_tokens = max(len(cleaned_text) // 4, 0)
+                self.update_stream_status(output_tokens, time.time() - stream_start_time)
             return accumulated_text
         except Exception as e:
             return f"[Error streaming from llama.cpp: {e}]"
@@ -702,6 +708,7 @@ class AgentBackendMixin:
     def stream_claude_cli(self: YipsAgentProtocol, full_prompt: str) -> str:
         """Stream response from Claude CLI with real-time display."""
         try:
+            stream_start_time = time.time()
             cmd = [CLAUDE_CLI_PATH, "-p", "--model", str(self.current_model)]
             if self.verbose_mode: cmd.append("--verbose")
             accumulated_text = ""
@@ -751,6 +758,8 @@ class AgentBackendMixin:
                     if i > 0: final_text.append("\n" + indent)
                     final_text.append(gradient_text(line))
                 self.console.print(final_text)
+                output_tokens = max(len(cleaned_text) // 4, 0)
+                self.update_stream_status(output_tokens, time.time() - stream_start_time)
             stderr_output = process.stderr.read()
             process.wait()
             if self.verbose_mode and stderr_output: self.display_claude_tool_calls(stderr_output)

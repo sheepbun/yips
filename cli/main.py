@@ -10,12 +10,17 @@ import subprocess
 import termios
 from typing import Any, cast
 
+from prompt_toolkit.application import Application
 from prompt_toolkit import PromptSession
+from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
-from prompt_toolkit.formatted_text import HTML as HTMLText
 from prompt_toolkit.styles import Style as PromptStyle
 from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.layout.containers import HSplit, Window
+from prompt_toolkit.layout.controls import FormattedTextControl
+from prompt_toolkit.layout.layout import Layout
 from prompt_toolkit.output import ColorDepth
+from prompt_toolkit.widgets import TextArea
 import time
 from rich.live import Live
 from rich.console import RenderableType
@@ -34,6 +39,49 @@ from cli.color_utils import (
 from cli.commands import handle_command
 from cli.tool_execution import parse_tool_requests, execute_tool, clean_response
 from cli.completer import SlashCommandCompleter
+
+
+def run_inline_prompt(
+    agent: YipsAgentProtocol,
+    completer: SlashCommandCompleter,
+    style: PromptStyle,
+    bindings: KeyBindings,
+) -> str:
+    """Run the normal CLI prompt with a fixed status row directly underneath."""
+    result: dict[str, str] = {"text": ""}
+
+    def _accept(buff: Any) -> bool:
+        result["text"] = buff.text
+        app.exit(result=buff.text)
+        return True
+
+    input_area = TextArea(
+        multiline=False,
+        prompt=[(PROMPT_COLOR, ">>> ")],
+        style=PROMPT_COLOR,
+        completer=completer,
+        complete_while_typing=True,
+        accept_handler=_accept,
+        wrap_lines=False,
+    )
+
+    status_row = Window(
+        content=FormattedTextControl(agent.get_prompt_status_fragments),
+        height=1,
+        dont_extend_height=True,
+    )
+
+    root = HSplit([input_area, status_row])
+    app: Application[str] = Application(
+        layout=Layout(root, focused_element=input_area.window),
+        key_bindings=bindings,
+        style=style,
+        color_depth=ColorDepth.TRUE_COLOR,
+        full_screen=False,
+    )
+
+    app.run()
+    return result["text"]
 
 
 def process_response_and_tools(agent: YipsAgentProtocol, response: str, depth: int = 0) -> None:
@@ -437,9 +485,11 @@ def main() -> None:
 
                 # Agent prompt below the closed box
                 session.style = style
-                user_input = session.prompt(
-                    HTMLText(f'<style fg="{PROMPT_COLOR}">>>> </style>'),
-                    complete_while_typing=True,
+                user_input = run_inline_prompt(
+                    agent=agent,
+                    completer=completer,
+                    style=style,
+                    bindings=bindings,
                 ).strip()
 
                 if user_input == VT_TOGGLE_SENTINEL:

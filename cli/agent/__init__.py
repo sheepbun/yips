@@ -73,6 +73,8 @@ class YipsAgent(
         self.session_created = False
         self.current_session_name: str | None = None
         self.thinking_lines_shown = 0
+        self.last_stream_tps: float | None = None
+        self.last_stream_status_text = ""
 
         # Interactive session selection state
         self.session_selection_active = False

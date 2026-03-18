@@ -12,6 +12,9 @@ NC='\033[0m' # No Color
 
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$PROJECT_ROOT"
+LOCAL_BIN_DIR="$HOME/.local/bin"
+YIPS_COMMAND_PATH="$LOCAL_BIN_DIR/yips"
+YIPS_LAUNCHER_PATH="$PROJECT_ROOT/yips-launcher.sh"
 
 # Function to print status
 status() {
@@ -97,7 +100,32 @@ fi
 mkdir -p .yips/memory
 mkdir -p .yips/logs
 
-# 7. Priority Check: llama.cpp
+# 7. Install portable shell command
+chmod +x "$PROJECT_ROOT/startup.sh" "$YIPS_LAUNCHER_PATH"
+CURRENT_COMMAND_TARGET=""
+if [ -L "$YIPS_COMMAND_PATH" ] || [ -e "$YIPS_COMMAND_PATH" ]; then
+    CURRENT_COMMAND_TARGET="$(readlink -f "$YIPS_COMMAND_PATH" 2>/dev/null || true)"
+fi
+
+if [ "$CURRENT_COMMAND_TARGET" = "$YIPS_LAUNCHER_PATH" ]; then
+    status "Shell command already installed: $YIPS_COMMAND_PATH"
+else
+    mkdir -p "$LOCAL_BIN_DIR"
+    if ln -sfn "$YIPS_LAUNCHER_PATH" "$YIPS_COMMAND_PATH"; then
+        status "Installed shell command: $YIPS_COMMAND_PATH -> $YIPS_LAUNCHER_PATH"
+    else
+        warning "Could not install $YIPS_COMMAND_PATH automatically. Run this setup script from a normal shell to refresh the launcher."
+    fi
+fi
+
+case ":$PATH:" in
+    *":$LOCAL_BIN_DIR:"*) ;;
+    *)
+        warning "$LOCAL_BIN_DIR is not in PATH. Add 'export PATH=\"$LOCAL_BIN_DIR:\$PATH\"' to your shell profile to run 'yips' directly."
+        ;;
+esac
+
+# 8. Priority Check: llama.cpp
 LLAMA_DIR="$HOME/llama.cpp"
 if [ -d "$LLAMA_DIR" ]; then
     # Check if llama-server exists (usually in build/bin/llama-server or bin/llama-server)
@@ -111,7 +139,7 @@ else
     warning "llama.cpp not found at $LLAMA_DIR. This is the preferred backend for Yips."
 fi
 
-# 6. Check for Claude CLI
+# 9. Check for Claude CLI
 if ! command -v claude &> /dev/null; then
     warning "Claude CLI ('claude') not found in PATH. Some backends may not work."
 fi

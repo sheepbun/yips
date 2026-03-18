@@ -1,9 +1,7 @@
 # Automatic Git Versioning
 
-This repository maps the total git commit count straight into a `vMAJOR.MINOR.PATCH` string.
-
-- **Format**: `vmajor.minor.patch` where each commit adds `+0.0.1`, rolling over at `v0.0.9 -> v0.1.0`, `v0.9.9 -> v1.0.0`, etc.
-- **Example**: 121 commits &rarr; `1.2.1`
+- **Format**: `vmajor.minor.patch` where each commit adds `+0.0.1`, patch rolls into minor after `v0.0.99 -> v0.1.00`, minor rolls into major after `v0.99.99 -> v1.0.00`.
+- **Example**: 121 commits &rarr; `v0.1.21`
 - **Usage**: Run `python version.py` to see the current version
 
 The version is recalculated from the commit count so it always reflects the repository history.

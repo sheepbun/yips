@@ -47,10 +47,10 @@ def get_commit_count() -> Optional[int]:
 
 
 def version_from_commits(count: int) -> str:
-    """Convert a commit count to a MAJOR.MINOR.PATCH string prefixed with v."""
-    major = count // 100
-    minor = (count // 10) % 10
-    patch = count % 10
+    """Convert a commit count to a `vMAJOR.MINOR.PATCH` string with patch/minor capped at 99 before rollover."""
+    patch = count % 100
+    minor = (count // 100) % 100
+    major = count // 10000
     return f"v{major}.{minor}.{patch}"
 
 

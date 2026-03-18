@@ -6,11 +6,14 @@ import os
 import shutil
 import asyncio
 import typing
+import time
 from typing import Optional, Any, Union
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import quote
+from urllib.request import Request, urlopen
 
-from huggingface_hub import HfApi, hf_hub_download  # type: ignore[reportUnknownVariableType]
+from huggingface_hub import HfApi  # type: ignore[reportUnknownVariableType]
 
 from prompt_toolkit import Application
 from prompt_toolkit.output.color_depth import ColorDepth
@@ -402,7 +405,16 @@ class DownloadUI:
         self.current_provider = "TheBloke" 
         self.current_sort = "Downloads" # Controlled by Tab now
         self.search_query = ""
-        self.active_view = "model_list" # model_list, file_list, download_confirm
+        self.active_view = "model_list" # model_list, quant_list, download_progress, download_success, download_error
+        self.download_task: Optional[asyncio.Task[None]] = None
+        self.download_status = "Idle"
+        self.download_error: Optional[str] = None
+        self.downloaded_path: Optional[str] = None
+        self.download_bytes = 0
+        self.download_total_bytes = 0
+        self.download_speed_bytes = 0.0
+        self.download_started_at: Optional[float] = None
+        self.active_download_file: Optional[dict[str, Any]] = None
         
         self.style = Style.from_dict({
             "frame.border": "#5f00ff", 
@@ -458,7 +470,7 @@ class DownloadUI:
         self.selected_model_index = 0
         self.list_scroll_offset = 0
         
-        # File List (Popup/Overlay)
+        # File List
         self.file_list_control = FormattedTextControl(
             text=self._get_file_list_text,
             focusable=True,
@@ -466,13 +478,31 @@ class DownloadUI:
             key_bindings=self._get_file_list_key_bindings(),
             get_cursor_position=self._get_file_list_cursor_position
         )
+        self.file_list_window = Window(
+            content=self.file_list_control,
+            height=12
+        )
         self.selected_file_index = 0
+        self.file_list_scroll_offset = 0
+
+        self.download_status_control = FormattedTextControl(
+            text=self._get_download_status_text,
+            focusable=True,
+            show_cursor=False,
+            key_bindings=self._get_download_key_bindings(),
+        )
+        self.download_status_window = Window(
+            content=self.download_status_control,
+            height=12
+        )
         self._refresh_task: Optional[asyncio.Task[None]] = None
         self._style_cache: dict[tuple[int, bool], list[str]] = {} # Cache for gradient styles
         
         # Layout construction
         
         # Main content inside the frame
+        self.body_container = DynamicContainer(self._get_active_body)
+
         main_content = HSplit([
             # Top Row: Tabs | Spacer | Info
             VSplit([
@@ -491,7 +521,7 @@ class DownloadUI:
             Window(height=1, char=" "),
             
             # The List
-            self.model_list_window,
+            self.body_container,
             
             # Status footer inside box
             Window(FormattedTextControl(self._get_status_text), height=1, style="class:status"),
@@ -540,13 +570,26 @@ class DownloadUI:
             setattr(self, '_task_started', True)
             self.app.create_background_task(self._initial_load())
 
+    def _get_active_body(self) -> AnyContainer:
+        if self.active_view == "model_list":
+            return self.model_list_window
+        if self.active_view == "quant_list":
+            return self.file_list_window
+        return self.download_status_window
+
     def _get_model_list_cursor_position(self) -> Optional[Point]:
-        row = self.selected_model_index - self.list_scroll_offset
-        return Point(x=0, y=row)
+        if self.is_loading or not self.models_data:
+            return None
+        visible_count = max(min(len(self.models_data) - self.list_scroll_offset, 10), 1)
+        row = self.selected_model_index - self.list_scroll_offset + 2
+        return Point(x=0, y=min(max(row, 2), visible_count + 1))
 
     def _get_file_list_cursor_position(self) -> Optional[Point]:
-        # The file list has a header of 2 lines
-        return Point(x=0, y=self.selected_file_index + 2)
+        if not self.files_data:
+            return None
+        visible_count = max(min(len(self.files_data) - self.file_list_scroll_offset, 9), 1)
+        row = self.selected_file_index - self.file_list_scroll_offset + 3
+        return Point(x=0, y=min(max(row, 3), visible_count + 2))
 
     def _get_tabs_text(self) -> list[tuple[str, str]]:
         tabs = ["Most Downloaded", "Top Rated", "Newest"]
@@ -573,9 +616,102 @@ class DownloadUI:
     def _get_status_text(self) -> str:
         if self.active_view == "model_list":
             return " [Tab] Focus  [Enter] Select  [←/→] Sort By  [Esc] Quit"
-        elif self.active_view == "file_list":
+        if self.active_view == "quant_list":
             return " [Enter] Download  [Esc] Back"
-        return ""
+        if self.download_task and not self.download_task.done():
+            return " Downloading... please wait"
+        if self.active_view == "download_success":
+            return " [Esc] Back  [Enter] Back to quants"
+        if self.active_view == "download_error":
+            return " [Esc] Back  [Enter] Retry"
+        return " [Esc] Back"
+
+    def _truncate(self, value: str, width: int) -> str:
+        if width <= 0:
+            return ""
+        if len(value) <= width:
+            return value
+        if width <= 3:
+            return value[:width]
+        return value[:width - 3] + "..."
+
+    def _format_bytes(self, size: float) -> str:
+        units = ["B", "KB", "MB", "GB", "TB"]
+        unit_idx = 0
+        size_val = float(size)
+        while size_val >= 1024 and unit_idx < len(units) - 1:
+            size_val /= 1024
+            unit_idx += 1
+        if unit_idx == 0:
+            return f"{int(size_val)} {units[unit_idx]}"
+        return f"{size_val:.1f} {units[unit_idx]}"
+
+    def _fit_status(self, file_info: dict[str, Any]) -> tuple[str, str]:
+        if file_info.get("can_run"):
+            return "OK", "fg:ansigreen"
+
+        reason = str(file_info.get("reason", "")).lower()
+        if "disk" in reason:
+            return "DISK", "fg:ansired"
+        if "large" in reason or "memory" in reason:
+            return "MEM", "fg:ansired"
+        return "NO", "fg:ansired"
+
+    def _selected_line_fragments(
+        self,
+        text: str,
+        is_focused: bool,
+        suffix: Optional[tuple[str, str]] = None,
+    ) -> list[tuple[str, str]]:
+        fragments: list[tuple[str, str]] = []
+        line_len = len(text)
+        cache_key = (line_len, is_focused)
+        if cache_key not in self._style_cache:
+            styles: list[str] = []
+            for col in range(line_len):
+                if col == 0 and is_focused:
+                    styles.append("bg:#ffccff #000000")
+                else:
+                    progress = col / max(line_len - 1, 1)
+                    r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, progress)
+                    styles.append(f"bg:#{r:02x}{g:02x}{b:02x} #000000")
+            self._style_cache[cache_key] = styles
+
+        for idx, char in enumerate(text):
+            fragments.append((self._style_cache[cache_key][idx], char))
+
+        if suffix:
+            suffix_text, suffix_style = suffix
+            for char in suffix_text:
+                fragments.append((suffix_style, char))
+
+        fragments.append(("", "\n"))
+        return fragments
+
+    def _get_model_table_line(self, model: dict[str, Any], is_selected: bool, is_focused: bool) -> list[tuple[str, str]]:
+        name_width = 52
+        downloads_width = 10
+        updated_width = 10
+
+        name = self._truncate(str(model.get("id", "Unknown")), name_width)
+        downloads_val = model.get('downloads', 0)
+        downloads = f"{downloads_val/1000:.1f}k" if downloads_val > 1000 else str(downloads_val)
+
+        last_mod = "Unknown"
+        if model.get('last_modified'):
+            m_date = model['last_modified']
+            if isinstance(m_date, datetime):
+                last_mod = m_date.strftime('%Y-%m-%d')
+            else:
+                last_mod = str(m_date)[:10]
+
+        cursor = ">" if is_selected else " "
+        text = f"{cursor} {name:<{name_width}}  {downloads:>{downloads_width}}  {last_mod:>{updated_width}}"
+        if not is_selected:
+            return [("", text + "\n")]
+        if self.is_dimmed:
+            return [("bg:#555555 #000000", text + "\n")]
+        return self._selected_line_fragments(text, is_focused)
 
     def _get_model_list_text(self) -> Union[StyleAndTextTuples, str]:
         if self.is_loading:
@@ -587,55 +723,17 @@ class DownloadUI:
         lines: list[Any] = []
         height = 12
         start = self.list_scroll_offset
-        end = start + height
+        end = start + max(height - 2, 1)
         
         visible_items = self.models_data[start:end]
         is_focused = self.layout.has_focus(self.model_list_control)
+
+        lines.append(("class:header", " Model                                                Downloads     Updated\n"))
+        lines.append(("class:status", " " + "─" * 76 + "\n"))
         
         for i, model in enumerate(visible_items):
             real_idx = start + i
-            is_selected = (real_idx == self.selected_model_index)
-            
-            name = str(model.get('id', 'Unknown'))
-            if len(name) > 50: name = name[:47] + "..."
-            
-            downloads_val = model.get('downloads', 0)
-            downloads = f"{downloads_val/1000:.1f}k" if downloads_val > 1000 else str(downloads_val)
-            
-            last_mod = "Unknown"
-            if model.get('last_modified'):
-                m_date = model['last_modified']
-                if isinstance(m_date, datetime):
-                    last_mod = m_date.strftime('%Y-%m-%d')
-                else:
-                    last_mod = str(m_date)[:10]
-
-            cursor = ">" if is_selected else " "
-            text = f"{cursor} {name:<50} | ↓ {downloads:<6} | {last_mod}"
-            
-            if is_selected:
-                if self.is_dimmed:
-                    lines.append(("bg:#555555 #000000", text + "\n"))
-                else:
-                    line_len = len(text)
-                    cache_key = (line_len, is_focused)
-                    if cache_key not in self._style_cache:
-                        styles: list[str] = []
-                        for col in range(line_len):
-                            if col == 0 and is_focused:
-                                styles.append("bg:#ffccff #000000")
-                            else:
-                                progress = col / max(line_len - 1, 1)
-                                r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, progress)
-                                styles.append(f"bg:#{r:02x}{g:02x}{b:02x} #000000")
-                        self._style_cache[cache_key] = styles
-                    
-                    cached_styles = self._style_cache[cache_key]
-                    for col, char in enumerate(text):
-                        lines.append((cached_styles[col], char))
-                    lines.append(("", "\n"))
-            else:
-                lines.append(("", text + "\n"))
+            lines.extend(self._get_model_table_line(model, real_idx == self.selected_model_index, is_focused))
             
         return to_formatted_text(lines)
 
@@ -644,54 +742,118 @@ class DownloadUI:
             return "No compatible files found."
             
         lines: list[Any] = []
-        lines.append(("", f"Select quantization for {self.selected_model_id}:\n\n"))
+        title = self.selected_model_id or "Unknown"
+        lines.append(("class:header", f" {self._truncate(title, 72)}\n"))
+        lines.append(("class:status", " Filename                                   Quant              Size      Fit\n"))
+        lines.append(("class:status", " " + "─" * 76 + "\n"))
         is_focused = self.layout.has_focus(self.file_list_control)
+        height = 12
+        start = self.file_list_scroll_offset
+        end = start + max(height - 3, 1)
         
-        for i, f in enumerate(self.files_data):
-            is_selected = (i == self.selected_file_index)
-            
+        for i, f in enumerate(self.files_data[start:end]):
+            real_idx = start + i
+            is_selected = (real_idx == self.selected_file_index)
             size_val = f.get('size') or 0
             size_gb = size_val / (1024*1024*1024)
             fname = str(f.get('filename', 'Unknown'))
-            if "/" in fname: fname = fname.split("/")[-1]
-            
-            status = "OK" if f.get('can_run') else "⚠️ TOO LARGE"
-            status_style = "fg:ansired" if not f.get('can_run') else "fg:ansigreen"
-            
+            if "/" in fname:
+                fname = fname.split("/")[-1]
+            quant = self._truncate(str(f.get('quant', 'Unknown')), 16)
+            fit_text, fit_style = self._fit_status(f)
             cursor = ">" if is_selected else " "
-            text = f"{cursor} {fname:<40} | {f.get('quant', 'Unknown'):<15} | {size_gb:.1f} GB | "
-            
+            text = f"{cursor} {self._truncate(fname, 40):<40}  {quant:<16}  {size_gb:>5.1f} GB  "
             if is_selected:
-                full_selected_text = text + status
                 if self.is_dimmed:
-                    lines.append(("bg:#555555 #000000", full_selected_text + "\n"))
+                    lines.append(("bg:#555555 #000000", text + fit_text + "\n"))
                 else:
-                    line_len = len(full_selected_text)
-                    cache_key = (line_len, is_focused)
-                    if cache_key not in self._style_cache:
-                        styles: list[str] = []
-                        for col in range(line_len):
-                            if col == 0 and is_focused:
-                                styles.append("bg:#ffccff #000000")
-                            else:
-                                progress = col / max(line_len - 1, 1)
-                                r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, progress)
-                                styles.append(f"bg:#{r:02x}{g:02x}{b:02x} #000000")
-                        self._style_cache[cache_key] = styles
-                    
-                    cached_styles = self._style_cache[cache_key]
-                    for col, char in enumerate(full_selected_text):
-                        lines.append((cached_styles[col], char))
-                    lines.append(("", "\n"))
+                    lines.extend(self._selected_line_fragments(text, is_focused, (fit_text, fit_style)))
             else:
                 lines.append(("", text))
-                lines.append((status_style, f"{status}\n"))
+                lines.append((fit_style, f"{fit_text}\n"))
             
         return to_formatted_text(lines)
+
+    def _render_progress_bar(self, width: int = 48) -> StyleAndTextTuples:
+        filled = 0
+        if self.download_total_bytes > 0:
+            filled = int(width * min(self.download_bytes / self.download_total_bytes, 1.0))
+        fragments: StyleAndTextTuples = [("class:status", " ")]
+        for idx in range(width):
+            if idx < filled:
+                progress = idx / max(width - 1, 1)
+                r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, progress)
+                fragments.append((f"bg:#{r:02x}{g:02x}{b:02x} #000000", " "))
+            else:
+                fragments.append(("bg:#222222", " "))
+        fragments.append(("", " "))
+        percent = 0.0
+        if self.download_total_bytes > 0:
+            percent = (self.download_bytes / self.download_total_bytes) * 100
+        fragments.append(("class:header", f"{percent:5.1f}%"))
+        return fragments
+
+    def _get_download_status_text(self) -> StyleAndTextTuples:
+        model_id = self.selected_model_id or "Unknown model"
+        file_name = "Unknown file"
+        if self.active_download_file:
+            file_name = str(self.active_download_file.get("filename", "Unknown"))
+            if "/" in file_name:
+                file_name = file_name.split("/")[-1]
+
+        elapsed = 0.0
+        if self.download_started_at is not None:
+            elapsed = max(time.time() - self.download_started_at, 0.0)
+
+        info_lines = [
+            ("class:header", f" {self.download_status}\n"),
+            ("", f" Model: {self._truncate(model_id, 68)}\n"),
+            ("", f" File:  {self._truncate(file_name, 68)}\n"),
+            ("", "\n"),
+        ]
+
+        fragments: StyleAndTextTuples = []
+        fragments.extend(info_lines)
+        fragments.extend(self._render_progress_bar())
+        fragments.append(("", "\n\n"))
+
+        total_text = self._format_bytes(self.download_total_bytes) if self.download_total_bytes > 0 else "Unknown"
+        fragments.append(("", f" Downloaded: {self._format_bytes(self.download_bytes)} / {total_text}\n"))
+        fragments.append(("", f" Speed:      {self._format_bytes(self.download_speed_bytes)}/s\n"))
+        fragments.append(("", f" Elapsed:    {elapsed:.1f}s\n"))
+        if self.downloaded_path:
+            display_path = self.downloaded_path
+            if str(Path.home()) in display_path:
+                display_path = display_path.replace(str(Path.home()), "~")
+            fragments.append(("", f" Path:       {self._truncate(display_path, 68)}\n"))
+        else:
+            fragments.append(("", f" Path:       {self._truncate(str(LLAMA_MODELS_DIR / (self.selected_model_id or '')), 68)}\n"))
+
+        if self.active_view == "download_success":
+            fragments.append(("fg:ansigreen", "\n Download complete.\n"))
+            fragments.append(("", f" Use with: /model {model_id}/{file_name}\n"))
+        elif self.active_view == "download_error":
+            fragments.append(("class:error", "\n Download failed.\n"))
+            if self.download_error:
+                fragments.append(("class:error", f" {self._truncate(self.download_error, 72)}\n"))
+
+        return fragments
 
     def _setup_global_bindings(self) -> None:
         @self.kb.add("escape")
         def _(event: KeyPressEvent) -> None:
+            if self.active_view == "quant_list":
+                self._return_to_model_list()
+                event.app.invalidate()
+                return
+
+            if self.active_view in {"download_progress", "download_success", "download_error"}:
+                if self.download_task and not self.download_task.done():
+                    return
+                self._return_to_quant_list()
+                event.app.invalidate()
+                return
+
             # Apply dimmed style for "greyed out" look on exit
             self.is_dimmed = True
             
@@ -730,6 +892,8 @@ class DownloadUI:
             
         @self.kb.add("tab")
         def _(event: KeyPressEvent) -> None:
+            if self.active_view != "model_list":
+                return
             if self.app.layout.has_focus(self.search_area):
                 self.app.layout.focus(self.model_list_control)
             else:
@@ -770,8 +934,7 @@ class DownloadUI:
             if self.selected_model_index < len(self.models_data) - 1:
                 self.selected_model_index += 1
                 # Scroll down if needed
-                # Fixed height 12
-                height = 12
+                height = 12 - 2
                 if self.selected_model_index >= self.list_scroll_offset + height:
                     self.list_scroll_offset = self.selected_model_index - height + 1
                 event.app.invalidate()
@@ -792,22 +955,18 @@ class DownloadUI:
         def _(event: KeyPressEvent) -> None:
             if self.selected_file_index > 0:
                 self.selected_file_index -= 1
+                if self.selected_file_index < self.file_list_scroll_offset:
+                    self.file_list_scroll_offset = self.selected_file_index
                 event.app.invalidate()
             
         @kb.add("down")
         def _(event: KeyPressEvent) -> None:
             if self.selected_file_index < len(self.files_data) - 1:
                 self.selected_file_index += 1
+                height = 12 - 3
+                if self.selected_file_index >= self.file_list_scroll_offset + height:
+                    self.file_list_scroll_offset = self.selected_file_index - height + 1
                 event.app.invalidate()
-            
-        @kb.add("escape")
-        def _(event: KeyPressEvent) -> None:
-            # Close popup
-            self.active_view = "model_list"
-            # Remove the popup float (last one added)
-            if len(self.floats) > 1:
-                self.floats.pop()
-            self.app.layout.focus(self.model_list_control)
 
         @kb.add("enter")
         def _(event: KeyPressEvent) -> None:
@@ -820,8 +979,24 @@ class DownloadUI:
                     # Just return, do nothing
                     return
                 else:
-                    event.app.exit(result=selected)
+                    self.start_download(selected)
         
+        return kb
+
+    def _get_download_key_bindings(self) -> KeyBindings:
+        kb = KeyBindings()
+
+        @kb.add("enter")
+        def _(event: KeyPressEvent) -> None:
+            if self.active_view == "download_success":
+                self._return_to_quant_list()
+                event.app.invalidate()
+                return
+
+            if self.active_view == "download_error" and self.active_download_file:
+                self.start_download(self.active_download_file)
+                event.app.invalidate()
+
         return kb
 
     def _on_text_changed(self, _: Any) -> None:
@@ -933,29 +1108,106 @@ class DownloadUI:
 
     def open_file_selection(self, model_id: str) -> None:
         self.selected_model_id = model_id
-        self.active_view = "file_list"
+        self.active_view = "quant_list"
         
         # Fetch files
         files = self.manager.get_model_files(model_id)
         self.files_data = files
         self.selected_file_index = 0
-        
-        # Switch layout to show overlay
-        # We create a FloatContainer wrapping the root
-        
-        popup_body = CustomFrame(
-            Window(self.file_list_control),
-            title=f"Files for {model_id}"
-        )
-        
-        # Add the popup to existing floats (keep completion menu etc)
-        self.floats.append(
-            Float(
-                content=popup_body,
-                top=5, bottom=5, left=10, right=10
-            )
-        )
+        self.file_list_scroll_offset = 0
         self.app.layout.focus(self.file_list_control)
+        self.app.invalidate()
+
+    def _return_to_model_list(self) -> None:
+        self.active_view = "model_list"
+        self.app.layout.focus(self.model_list_control)
+
+    def _return_to_quant_list(self) -> None:
+        self.active_view = "quant_list"
+        self.app.layout.focus(self.file_list_control)
+
+    def start_download(self, file_info: dict[str, Any]) -> None:
+        self.active_download_file = file_info
+        self.download_status = "Preparing download"
+        self.download_error = None
+        self.downloaded_path = None
+        self.download_bytes = 0
+        self.download_total_bytes = int(file_info.get("size") or 0)
+        self.download_speed_bytes = 0.0
+        self.download_started_at = time.time()
+        self.active_view = "download_progress"
+        self.app.layout.focus(self.download_status_control)
+        self.download_task = self.app.create_background_task(self._run_download(file_info))
+        self.app.invalidate()
+
+    async def _run_download(self, file_info: dict[str, Any]) -> None:
+        loop = asyncio.get_running_loop()
+        try:
+            await loop.run_in_executor(None, partial(self._download_file_sync, file_info, loop))
+            self.download_status = "Download complete"
+            self.active_view = "download_success"
+        except Exception as e:
+            self.download_error = str(e)
+            self.download_status = "Download failed"
+            self.active_view = "download_error"
+        finally:
+            self.app.invalidate()
+
+    def _download_file_sync(self, file_info: dict[str, Any], loop: asyncio.AbstractEventLoop) -> None:
+        model_id = self.selected_model_id
+        if not model_id:
+            raise RuntimeError("No model selected")
+
+        filename = str(file_info.get("filename", ""))
+        if not filename:
+            raise RuntimeError("No file selected")
+
+        target_dir = LLAMA_MODELS_DIR / model_id
+        target_path = target_dir / filename
+        temp_path = target_path.with_name(target_path.name + ".part")
+        target_dir.mkdir(parents=True, exist_ok=True)
+        temp_path.parent.mkdir(parents=True, exist_ok=True)
+
+        encoded_filename = "/".join(quote(part) for part in filename.split("/"))
+        url = f"https://huggingface.co/{model_id}/resolve/main/{encoded_filename}"
+
+        self.download_status = "Downloading"
+        loop.call_soon_threadsafe(self.app.invalidate)
+
+        try:
+            request = Request(url, headers={"User-Agent": "yips-cli"})
+            with urlopen(request, timeout=30) as response:
+                total = int(response.headers.get("content-length", "0"))
+                if total > 0:
+                    self.download_total_bytes = total
+                last_update = time.time()
+                last_bytes = 0
+
+                with open(temp_path, "wb") as handle:
+                    while True:
+                        chunk = response.read(1024 * 256)
+                        if not chunk:
+                            break
+                        handle.write(chunk)
+                        self.download_bytes += len(chunk)
+                        now = time.time()
+                        if now > last_update:
+                            self.download_speed_bytes = (self.download_bytes - last_bytes) / max(now - last_update, 0.001)
+                            last_update = now
+                            last_bytes = self.download_bytes
+                        loop.call_soon_threadsafe(self.app.invalidate)
+
+            if target_path.exists():
+                target_path.unlink()
+            temp_path.replace(target_path)
+            self.downloaded_path = str(target_path)
+        except Exception:
+            if temp_path.exists():
+                temp_path.unlink()
+            raise
+
+        self.download_status = "Finalizing"
+        loop.call_soon_threadsafe(self.app.invalidate)
 
     async def _initial_load(self) -> None:
         """Initial load task."""
@@ -973,41 +1225,6 @@ def run_download_ui() -> Optional[Union[str, dict[str, Any]]]:
     
     if isinstance(result, str):
         return result
-        
-    if result:
-        # Download the file
-        file_info: dict[str, Any] = result
-        model_id = ui.selected_model_id
-        if not model_id:
-            return None
-            
-        filename = str(file_info.get('filename', ''))
-        if not filename:
-            return None
-        
-        console.print(f"[cyan]Downloading {filename} from {model_id}...[/cyan]")
-        
-        try:
-            local_dir = LLAMA_MODELS_DIR / model_id
-            
-            # hf_hub_download returns a str by default
-            # Note: local_dir_use_symlinks is removed in newer HF Hub versions
-            downloaded_path = hf_hub_download(
-                repo_id=model_id,
-                filename=filename,
-                local_dir=local_dir
-            )
-            
-            console.print(f"[green]Successfully downloaded to:[/green] {downloaded_path}")
-            # Show friendly path relative to home if possible
-            display_path = str(downloaded_path)
-            if str(Path.home()) in display_path:
-                display_path = display_path.replace(str(Path.home()), "~")
-                
-            console.print(f"[dim]To use this model:[/dim] [bold]/model {model_id}/{os.path.basename(downloaded_path)}[/bold]")
-            
-        except Exception as e:
-            console.print(f"[red]Download failed: {e}[/red]")
     return None
 
 if __name__ == "__main__":

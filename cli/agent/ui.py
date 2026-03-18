@@ -597,7 +597,7 @@ class AgentUIMixin:
             elif role == "assistant":
                 if content:
                     thinking_match = re.search(r"<think>(.*?)</think>", content, re.DOTALL)
-                    if thinking_match:
+                    if thinking_match and self.verbose_mode:
                         thinking_content = thinking_match.group(1).strip()
                         if thinking_content:
                             self.console.print(render_thinking_block(thinking_content))

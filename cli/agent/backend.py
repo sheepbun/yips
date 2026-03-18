@@ -517,7 +517,8 @@ class AgentBackendMixin:
     def stream_llamacpp(self: YipsAgentProtocol, messages: list[dict[str, Any]]) -> str:
         """Stream response from llama-server API with real-time display."""
         try:
-            stream_start_time = time.time()
+            stream_start_time = time.perf_counter()
+            generation_start_time: float | None = None
             prefix = get_yips_prefix()
             indent = " " * len(prefix)
             all_content = "".join([str(m["content"]) for m in messages])
@@ -544,9 +545,9 @@ class AgentBackendMixin:
                 if response.status_code != 200:
                     return f"[Error from llama.cpp ({response.status_code}): {response.text}]"
 
-                for line in response.iter_lines():
+                for line in response.iter_lines(chunk_size=1, decode_unicode=True):
                     if not line: continue
-                    line_str = line.decode('utf-8').strip()
+                    line_str = line.strip()
                     if not line_str.startswith('data:'): continue
                     data_str = line_str[5:].strip()
                     if data_str == '[DONE]': break
@@ -564,6 +565,8 @@ class AgentBackendMixin:
                         if "content" in delta:
                             text = delta["content"]
                             if text:
+                                if generation_start_time is None:
+                                    generation_start_time = time.perf_counter()
                                 if in_thinking_block:
                                     accumulated_text += "\n</think>\n"
                                     start_idx = accumulated_text.rfind("<think>")
@@ -586,13 +589,14 @@ class AgentBackendMixin:
                                             live.update(spinner)
                                         
                                         live.refresh()
-                                        self.console.print(render_thinking_block(thinking_part))
-                                        time.sleep(0.3)
+                                        if self.verbose_mode:
+                                            self.console.print(render_thinking_block(thinking_part))
+                                            time.sleep(0.3)
                                         self.thinking_lines_shown = 0
                                 accumulated_text += text
                         if accumulated_text:
                             renderables: list[Any] = []
-                            if in_thinking_block:
+                            if in_thinking_block and self.verbose_mode:
                                 start_idx = accumulated_text.rfind("<think>")
                                 if start_idx != -1:
                                     thinking_part = accumulated_text[start_idx:]
@@ -644,8 +648,9 @@ class AgentBackendMixin:
                 in_thinking_block = False
                 if start_idx != -1 and end_idx != -1:
                     thinking_part = accumulated_text[start_idx:end_idx]
-                    self.console.print(render_thinking_block(thinking_part))
-                    time.sleep(0.3)
+                    if self.verbose_mode:
+                        self.console.print(render_thinking_block(thinking_part))
+                        time.sleep(0.3)
                     self.thinking_lines_shown = 0
             cleaned_text = clean_response(accumulated_text)
             if cleaned_text:
@@ -658,7 +663,8 @@ class AgentBackendMixin:
                 self.console.print(final_text)
                 if output_tokens is None:
                     output_tokens = max(len(cleaned_text) // 4, 0)
-                self.update_stream_status(output_tokens, time.time() - stream_start_time)
+                duration = (time.perf_counter() - generation_start_time) if generation_start_time is not None else (time.perf_counter() - stream_start_time)
+                self.update_stream_status(output_tokens, duration)
             return accumulated_text
         except Exception as e:
             return f"[Error streaming from llama.cpp: {e}]"

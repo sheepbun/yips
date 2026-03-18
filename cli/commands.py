@@ -343,7 +343,7 @@ def handle_slash_command(agent: YipsAgentProtocol, user_input: str) -> str | boo
         config["verbose"] = agent.verbose_mode
         save_config(config)
         status = "enabled" if agent.verbose_mode else "disabled"
-        console.print(f"[green]Verbose mode (Claude Code tool calls): {status}[/green]")
+        console.print(f"[green]Verbose mode (reasoning panels and tool details): {status}[/green]")
         return True
 
     if command == "stream":

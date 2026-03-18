@@ -16,7 +16,8 @@ from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
 from prompt_toolkit.styles import Style as PromptStyle
 from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.layout.containers import HSplit, Window
+from prompt_toolkit.layout.containers import ConditionalContainer, HSplit, Window
+from prompt_toolkit.filters import Condition
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.layout import Layout
 from prompt_toolkit.output import ColorDepth
@@ -70,8 +71,14 @@ def run_inline_prompt(
         height=1,
         dont_extend_height=True,
     )
-
-    root = HSplit([input_area, status_row])
+    had_status_row = bool(getattr(agent, "last_stream_status_text", ""))
+    root = HSplit([
+        input_area,
+        ConditionalContainer(
+            content=status_row,
+            filter=Condition(lambda: bool(getattr(agent, "last_stream_status_text", ""))),
+        ),
+    ])
     app: Application[str] = Application(
         layout=Layout(root, focused_element=input_area.window),
         key_bindings=bindings,
@@ -81,6 +88,9 @@ def run_inline_prompt(
     )
 
     app.run()
+    if had_status_row:
+        sys.stdout.write("\x1b[1A\x1b[2K\r")
+        sys.stdout.flush()
     return result["text"]
 
 

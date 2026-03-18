@@ -77,7 +77,7 @@ def detect_cuda_toolkit() -> CudaSupport:
 
 
 def detect_cuda_support() -> CudaSupport:
-    """Detect whether the local environment can support a CUDA llama.cpp build."""
+    """Detect whether the local environment can run a CUDA llama.cpp binary."""
     if not shutil.which("nvidia-smi"):
         return {"available": False, "reason": "nvidia-smi not found", "toolkit_root": None, "nvcc_path": None}
 
@@ -102,7 +102,15 @@ def detect_cuda_support() -> CudaSupport:
             "nvcc_path": toolkit["nvcc_path"],
         }
 
-    return toolkit
+    # Runtime CUDA availability does not require nvcc. If the driver can
+    # enumerate an NVIDIA GPU and llama.cpp is already built with CUDA, we
+    # should still allow GPU execution.
+    return {
+        "available": True,
+        "reason": "NVIDIA GPU detected via nvidia-smi",
+        "toolkit_root": None,
+        "nvcc_path": None,
+    }
 
 def is_model_suitable(specs: SystemSpecs, model_size_gb: float) -> str | None:
     """Check if a model fits in VRAM or RAM."""

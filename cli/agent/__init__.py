@@ -61,7 +61,7 @@ class YipsAgent(
         config: YipsConfig = load_config()
         saved_model = config.get("model")
         saved_backend = config.get("backend")
-        self.verbose_mode = config.get("verbose", True)
+        self.verbose_mode = config.get("verbose", False)
         self.streaming_enabled = config.get("streaming", True)
 
         # Terminal resize handling

@@ -2,6 +2,7 @@
 Setup utilities for Yips CLI dependencies.
 """
 
+import os
 import shutil
 import subprocess
 import requests
@@ -9,7 +10,7 @@ from typing import List
 from pathlib import Path
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, DownloadColumn, TransferSpeedColumn
 from cli.color_utils import console
-from cli.llamacpp import LLAMA_MODELS_DIR, LLAMA_DEFAULT_MODEL
+from cli.llamacpp import LLAMA_MODELS_DIR, LLAMA_DEFAULT_MODEL, get_llama_server_candidates
 
 def check_build_tools() -> bool:
     """Check if git, make, and compiler are available."""
@@ -57,35 +58,57 @@ def install_llama_server() -> str | None:
             return None
 
     console.print("[cyan]Building llama.cpp (this may take a few minutes)...[/cyan]")
+
+    jobs = str(max(1, (os.cpu_count() or 4)))
+    build_attempts: list[list[str]] = []
+    if shutil.which("cmake"):
+        build_attempts.extend([
+            ["cmake", "-S", str(install_dir), "-B", str(install_dir / "build"), "-DLLAMA_BUILD_SERVER=ON"],
+            ["cmake", "--build", str(install_dir / "build"), "--config", "Release", "-j", jobs, "--target", "llama-server"],
+        ])
+    if shutil.which("make"):
+        build_attempts.append(["make", "-j", jobs, "llama-server"])
+
+    if not build_attempts:
+        console.print("[red]Neither cmake nor make is available to build llama.cpp.[/red]")
+        return None
+
     try:
-        # Run make in the installation directory
         with console.status("[bold green]Compiling...[/bold green]"):
-            subprocess.run(
-                ["make", "-j4", "llama-server"], # Build only the server to save time
-                cwd=install_dir,
-                check=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
-            )
+            if build_attempts[0][0] == "cmake":
+                subprocess.run(
+                    build_attempts[0],
+                    cwd=install_dir,
+                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+                subprocess.run(
+                    build_attempts[1],
+                    cwd=install_dir,
+                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
+            elif build_attempts[0][0] == "make":
+                subprocess.run(
+                    build_attempts[0],
+                    cwd=install_dir,
+                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                )
     except subprocess.CalledProcessError as e:
         console.print(f"[red]Build failed: {e.stderr.decode()}[/red]")
         return None
 
-    # Verify binary exists
-    binary_path = install_dir / "llama-server" # Old path
-    if not binary_path.exists():
-        binary_path = install_dir / "build" / "bin" / "llama-server" # CMake path
-    
-    if not binary_path.exists():
-        # Fallback: just check for 'llama-server' in root (Makefile usually puts it there)
-        binary_path = install_dir / "llama-server"
+    for candidate in get_llama_server_candidates():
+        if Path(candidate).exists():
+            console.print(f"[green]Successfully built llama-server at {candidate}[/green]")
+            return candidate
 
-    if binary_path.exists():
-        console.print(f"[green]Successfully built llama-server at {binary_path}[/green]")
-        return str(binary_path)
-    else:
-        console.print("[red]Build completed but binary not found.[/red]")
-        return None
+    console.print("[red]Build completed but binary not found.[/red]")
+    return None
 
 def download_default_model() -> str | None:
     """

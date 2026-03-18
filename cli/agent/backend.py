@@ -24,10 +24,15 @@ from cli.color_utils import (
 from cli.config import (
     CLAUDE_CLI_PATH,
     CLAUDE_CLI_MODEL,
+    load_config,
+    save_config,
 )
 from cli.llamacpp import (
-    LLAMA_SERVER_URL,
+    LLAMA_DEFAULT_MODEL,
     LLAMA_SERVER_PATH,
+    get_available_models,
+    get_last_llama_server_error,
+    get_llama_server_url,
     is_llamacpp_running,
     start_llamacpp,
 )
@@ -73,13 +78,42 @@ class AgentBackendMixin:
                     
                     # Diagnose the issue
                     server_exists = os.path.exists(LLAMA_SERVER_PATH)
+                    available_models = get_available_models()
+                    current_model = self.current_model or LLAMA_DEFAULT_MODEL
+                    configured_model_path = os.path.expanduser(current_model)
+                    if not os.path.isabs(configured_model_path):
+                        configured_model_path = os.path.join(os.path.expanduser("~/.lmstudio/models"), current_model)
+                    model_exists = os.path.exists(configured_model_path)
                     
                     if not server_exists:
                         msg = "llama.cpp binary not found."
                         action = "attempt to download and build it"
                         should_ask = True
+                    elif not model_exists and not available_models:
+                        msg = f"llama.cpp model not found: {current_model}"
+                        action = "download the default model and start llama.cpp"
+                        should_ask = True
+                    elif not model_exists and available_models:
+                        fallback_model = available_models[0]
+                        self.console.print(f"[yellow]Configured llama.cpp model is missing: {current_model}[/yellow]")
+                        self.console.print(f"[cyan]Switching to available local model: {fallback_model}[/cyan]")
+                        self.current_model = fallback_model
+                        config = load_config()
+                        config["backend"] = "llamacpp"
+                        config["model"] = fallback_model
+                        save_config(config)
+                        if start_llamacpp(self.current_model):
+                            self.console.print("[green]Successfully started llama.cpp![/green]")
+                            self.backend_initialized = True
+                            return
+                        msg = "llama.cpp found a local model but still failed to start."
+                        action = "attempt to rebuild llama.cpp"
+                        should_ask = True
                     else:
                         msg = "llama.cpp failed to start (tried GPU and CPU modes)."
+                        last_error = get_last_llama_server_error()
+                        if last_error:
+                            msg = f"{msg}\n{last_error}"
                         action = "attempt to rebuild it (might fix compatibility issues)"
                         # If it exists but fails, it's risky to just rebuild without asking, 
                         # but we should offer it.
@@ -88,14 +122,23 @@ class AgentBackendMixin:
                     self.console.print(f"[red]{msg}[/red]")
 
                     if should_ask and Confirm.ask(f"Would you like me to {action}?"):
-                         # 1. Download Model (idempotent-ish)
-                         if not download_default_model():
-                             self.console.print("[red]Failed to verify default model.[/red]")
+                         # 1. Download model if needed.
+                         if not model_exists and not available_models:
+                             downloaded_model = download_default_model()
+                             if downloaded_model:
+                                 self.current_model = LLAMA_DEFAULT_MODEL
+                                 config = load_config()
+                                 config["backend"] = "llamacpp"
+                                 config["model"] = LLAMA_DEFAULT_MODEL
+                                 save_config(config)
+                             else:
+                                 self.console.print("[red]Failed to verify default model.[/red]")
+
+                         # 2. Install/Rebuild server if needed.
+                         if not server_exists or (model_exists or available_models):
+                             install_llama_server()
                          
-                         # 2. Install/Rebuild Server
-                         install_llama_server()
-                         
-                         # 3. Retry Start
+                         # 3. Retry start
                          if start_llamacpp(self.current_model):
                              self.console.print("[green]Successfully started llama.cpp![/green]")
                              self.backend_initialized = True
@@ -334,7 +377,7 @@ class AgentBackendMixin:
 
                     with show_loading(loading_msg, token_count=est_tokens):
                         response = requests.post(
-                            f"{LLAMA_SERVER_URL}/v1/chat/completions",
+                            f"{get_llama_server_url()}/v1/chat/completions",
                             json={
                                 "model": self.current_model,
                                 "messages": messages,
@@ -485,7 +528,7 @@ class AgentBackendMixin:
             self.thinking_lines_shown = 0
             with Live(spinner, console=self.console, refresh_per_second=20, transient=True) as live:
                 response = requests.post(
-                    f"{LLAMA_SERVER_URL}/v1/chat/completions",
+                    f"{get_llama_server_url()}/v1/chat/completions",
                     json={
                         "model": self.current_model,
                         "messages": messages,

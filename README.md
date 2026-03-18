@@ -28,7 +28,7 @@ The script will:
 *   Verify Python 3 installation.
 *   Create a virtual environment (`.venv`) if missing.
 *   Install/Update all dependencies from `requirements.txt`.
-*   Check for `llama.cpp` (the preferred backend).
+*   Clone/update and build `llama.cpp` automatically when build tools are available.
 *   Initialize your `.yips_config.json` on the first run.
 *   Launch the Yips CLI.
 

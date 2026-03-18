@@ -5,7 +5,9 @@ Handles starting and stopping the llama-server and checking its status.
 """
 
 import os
+import socket
 import subprocess
+import tempfile
 import time
 import requests
 import shutil
@@ -14,35 +16,91 @@ from cli.color_utils import console
 from cli.hw_utils import get_system_specs
 
 # llama.cpp configuration
-def _resolve_llama_server_path() -> str:
-    """Resolve the path to the llama-server binary."""
-    # 1. Trust Env var if set
+def get_llama_server_candidates() -> list[str]:
+    """Return supported llama-server locations in priority order."""
+    candidates: list[str] = []
+
     env_path = os.environ.get("LLAMA_SERVER_PATH")
     if env_path:
-        return env_path
-    
-    # 2. Check default build location
-    default_build = Path.home() / "llama.cpp" / "build" / "bin" / "llama-server"
-    if default_build.exists():
-        return str(default_build)
+        candidates.append(env_path)
 
-    # 3. Check system PATH
+    home = Path.home() / "llama.cpp"
+    candidates.extend([
+        str(home / "build" / "bin" / "llama-server"),
+        str(home / "bin" / "llama-server"),
+        str(home / "llama-server"),
+    ])
+
     which_path = shutil.which("llama-server")
     if which_path:
-        return which_path
-        
-    # 4. Fallback to default build location
-    return str(default_build)
+        candidates.append(which_path)
+
+    # Preserve order while removing duplicates.
+    return list(dict.fromkeys(candidates))
+
+
+def _resolve_llama_server_path() -> str:
+    """Resolve the path to the llama-server binary."""
+    candidates = get_llama_server_candidates()
+    for candidate in candidates:
+        if os.path.exists(candidate):
+            return candidate
+
+    # Fallback to the preferred CMake build location.
+    return str(Path.home() / "llama.cpp" / "build" / "bin" / "llama-server")
 
 LLAMA_SERVER_PATH = _resolve_llama_server_path()
 LLAMA_MODELS_DIR = Path.home() / ".lmstudio" / "models"
 
 LLAMA_DEFAULT_MODEL = "lmstudio-community/Qwen3-4B-Thinking-2507-GGUF/Qwen3-4B-Thinking-2507-Q4_K_M.gguf"
-LLAMA_SERVER_URL = os.environ.get("LLAMA_SERVER_URL", "http://localhost:8080")
+LLAMA_SERVER_URL = os.environ.get("LLAMA_SERVER_URL", "http://127.0.0.1:8080")
 
 _server_process: subprocess.Popen[bytes] | None = None
 _current_model_path: str | None = None
 _current_strategy: str | None = None
+_last_server_error = ""
+
+
+def get_llama_server_url() -> str:
+    """Return the active llama.cpp server URL."""
+    return LLAMA_SERVER_URL
+
+
+def get_last_llama_server_error() -> str:
+    """Return the last captured llama.cpp startup error."""
+    return _last_server_error
+
+
+def _set_llama_server_url(port: int) -> None:
+    """Update the active llama.cpp server URL."""
+    global LLAMA_SERVER_URL
+    LLAMA_SERVER_URL = f"http://127.0.0.1:{port}"
+
+
+def _get_llama_server_port() -> int:
+    """Extract the configured server port from the current URL."""
+    return int(LLAMA_SERVER_URL.rsplit(":", 1)[-1])
+
+
+def _is_port_available(port: int) -> bool:
+    """Return True when a localhost TCP port can be bound."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.bind(("127.0.0.1", port))
+    except OSError:
+        return False
+    return True
+
+
+def _find_available_port() -> int:
+    """Ask the OS for a free localhost TCP port."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.bind(("127.0.0.1", 0))
+            return int(sock.getsockname()[1])
+    except OSError:
+        return _get_llama_server_port()
 
 def is_llamacpp_running() -> bool:
     """Check if llama-server is responding."""
@@ -69,7 +127,8 @@ def get_optimal_context_size() -> int:
 
 def start_llamacpp(model_path: str | None = None) -> bool:
     """Start llama-server with the specified model, using fallbacks if necessary."""
-    global _server_process, _current_model_path, _current_strategy
+    global _server_process, _current_model_path, _current_strategy, _last_server_error
+    _last_server_error = ""
 
     # Resolve model path first
     if not model_path:
@@ -116,6 +175,14 @@ def start_llamacpp(model_path: str | None = None) -> bool:
     # Force cleanup of any potential zombie processes before starting
     stop_llamacpp()
 
+    port = _get_llama_server_port()
+    if not _is_port_available(port):
+        fallback_port = _find_available_port()
+        if fallback_port != port:
+            console.print(f"[yellow]Port {port} is unavailable. Using port {fallback_port} for llama.cpp.[/yellow]")
+            _set_llama_server_url(fallback_port)
+            port = fallback_port
+
     # Define strategies: (name, list_of_flags)
     # We request 999 layers to force max GPU offload. 
     # llama.cpp will automatically fallback to CPU/RAM for layers that don't fit.
@@ -134,15 +201,19 @@ def start_llamacpp(model_path: str | None = None) -> bool:
             LLAMA_SERVER_PATH,
             "-m", resolved_path,
             "-c", str(ctx_size),
-            "--port", "8080",
+            "--port", str(port),
             "--embedding", # Enable embeddings for tools if needed
             "--log-disable"
         ] + flags
 
+        error_log = tempfile.NamedTemporaryFile(prefix="yips-llama-", suffix=".log", delete=False)
+        error_log_path = error_log.name
+        error_log.close()
+
         _server_process = subprocess.Popen(
             cmd,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stderr=open(error_log_path, "wb"),
             start_new_session=True
         )
 
@@ -150,6 +221,10 @@ def start_llamacpp(model_path: str | None = None) -> bool:
         start_time = time.time()
         while time.time() - start_time < 60:
             if _server_process.poll() is not None:
+                try:
+                    _last_server_error = Path(error_log_path).read_text().strip()
+                except OSError:
+                    _last_server_error = ""
                 break
             
             if is_llamacpp_running():

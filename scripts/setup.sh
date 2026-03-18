@@ -15,6 +15,8 @@ cd "$PROJECT_ROOT"
 LOCAL_BIN_DIR="$HOME/.local/bin"
 YIPS_COMMAND_PATH="$LOCAL_BIN_DIR/yips"
 YIPS_LAUNCHER_PATH="$PROJECT_ROOT/yips-launcher.sh"
+LLAMA_DIR="$HOME/llama.cpp"
+LLAMA_COMMAND_PATH="$LOCAL_BIN_DIR/llama-server"
 
 # Function to print status
 status() {
@@ -30,6 +32,141 @@ warning() {
 error() {
     echo -e "${RED}Error:${NC} $1"
     exit 1
+}
+
+default_llama_model() {
+    "$PROJECT_ROOT/.venv/bin/python" - <<'PY'
+from cli.llamacpp import LLAMA_DEFAULT_MODEL
+print(LLAMA_DEFAULT_MODEL)
+PY
+}
+
+command_exists() {
+    command -v "$1" &> /dev/null
+}
+
+llama_server_path() {
+    local candidates=(
+        "$LLAMA_DIR/build/bin/llama-server"
+        "$LLAMA_DIR/bin/llama-server"
+        "$LLAMA_DIR/llama-server"
+    )
+    local candidate
+    for candidate in "${candidates[@]}"; do
+        if [ -f "$candidate" ]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+install_llama_server_link() {
+    local binary_path="$1"
+    mkdir -p "$LOCAL_BIN_DIR"
+    if ln -sfn "$binary_path" "$LLAMA_COMMAND_PATH"; then
+        status "Installed llama-server launcher: $LLAMA_COMMAND_PATH -> $binary_path"
+    else
+        warning "Could not install $LLAMA_COMMAND_PATH automatically."
+    fi
+}
+
+build_llama_cpp() {
+    local jobs
+    jobs="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
+
+    if command_exists cmake; then
+        status "Building llama.cpp with CMake..."
+        if cmake -S "$LLAMA_DIR" -B "$LLAMA_DIR/build" -DLLAMA_BUILD_SERVER=ON \
+            && cmake --build "$LLAMA_DIR/build" --config Release -j "$jobs" --target llama-server; then
+            return 0
+        fi
+        warning "CMake build failed."
+    fi
+
+    if command_exists make; then
+        status "Building llama.cpp with make..."
+        if make -C "$LLAMA_DIR" -j "$jobs" llama-server; then
+            return 0
+        fi
+        warning "make build failed."
+    fi
+
+    return 1
+}
+
+ensure_llama_cpp() {
+    local binary_path
+
+    if binary_path="$(llama_server_path)"; then
+        status "llama.cpp detected and built."
+        install_llama_server_link "$binary_path"
+        return 0
+    fi
+
+    if ! command_exists git; then
+        warning "git is not installed, so llama.cpp cannot be installed automatically."
+        return 1
+    fi
+
+    if [ -d "$LLAMA_DIR/.git" ]; then
+        status "Updating existing llama.cpp checkout..."
+        if ! git -C "$LLAMA_DIR" pull --ff-only; then
+            warning "Failed to update llama.cpp. Trying to build the existing checkout."
+        fi
+    elif [ -d "$LLAMA_DIR" ]; then
+        warning "Found $LLAMA_DIR, but it is not a git checkout. Trying to build it as-is."
+    else
+        status "Cloning llama.cpp to $LLAMA_DIR..."
+        if ! git clone https://github.com/ggerganov/llama.cpp "$LLAMA_DIR"; then
+            warning "Failed to clone llama.cpp."
+            return 1
+        fi
+    fi
+
+    if ! command_exists cmake && ! command_exists make; then
+        warning "Neither cmake nor make is installed, so llama.cpp cannot be built automatically."
+        return 1
+    fi
+
+    if build_llama_cpp && binary_path="$(llama_server_path)"; then
+        status "llama.cpp built successfully."
+        install_llama_server_link "$binary_path"
+        return 0
+    fi
+
+    warning "llama.cpp is present but llama-server could not be built automatically."
+    warning "Install build tools and retry setup, or build manually in $LLAMA_DIR."
+    return 1
+}
+
+ensure_default_llama_model() {
+    local model_count
+    local default_model
+
+    model_count="$(find "$HOME/.lmstudio/models" -type f -name '*.gguf' 2>/dev/null | wc -l | tr -d ' ')"
+    if [ "${model_count:-0}" -gt 0 ]; then
+        status "llama.cpp model files detected."
+        return 0
+    fi
+
+    status "No local GGUF models found. Downloading the default llama.cpp model..."
+    if ! default_model="$(default_llama_model 2>/dev/null)"; then
+        warning "Could not determine the default llama.cpp model."
+        return 1
+    fi
+
+    if "$PROJECT_ROOT/.venv/bin/python" - <<'PY'
+from cli.setup import download_default_model
+raise SystemExit(0 if download_default_model() else 1)
+PY
+    then
+        status "Default llama.cpp model ready: $default_model"
+        return 0
+    fi
+
+    warning "Failed to download the default llama.cpp model automatically."
+    return 1
 }
 
 ensure_path_in_file() {
@@ -110,13 +247,16 @@ fi
 
 # 5. Initialize config if missing
 if [ ! -f ".yips_config.json" ]; then
+    DEFAULT_MODEL="$(default_llama_model)"
     status "Initializing default configuration..."
-    echo '{
+    cat > .yips_config.json <<EOF
+{
   "backend": "llamacpp",
-  "model": "lmstudio-community/gemma-3-12b-it-GGUF/gemma-3-12b-it-Q4_K_M.gguf",
+  "model": "$DEFAULT_MODEL",
   "verbose": true,
   "streaming": true
-}' > .yips_config.json
+}
+EOF
 fi
 
 # 6. Ensure required directories exist
@@ -149,19 +289,11 @@ case ":$PATH:" in
     *) export PATH="$LOCAL_BIN_DIR:$PATH" ;;
 esac
 
-# 8. Priority Check: llama.cpp
-LLAMA_DIR="$HOME/llama.cpp"
-if [ -d "$LLAMA_DIR" ]; then
-    # Check if llama-server exists (usually in build/bin/llama-server or bin/llama-server)
-    if [ -f "$LLAMA_DIR/build/bin/llama-server" ] || [ -f "$LLAMA_DIR/bin/llama-server" ]; then
-        status "llama.cpp detected and built."
-    else
-        warning "llama.cpp directory found at $LLAMA_DIR, but llama-server binary is missing."
-        warning "You may need to build it: cd $LLAMA_DIR && cmake -B build && cmake --build build --config Release -j"
-    fi
-else
-    warning "llama.cpp not found at $LLAMA_DIR. This is the preferred backend for Yips."
-fi
+# 8. Ensure llama.cpp is installed and built
+ensure_llama_cpp || true
+
+# 8b. Ensure a default llama.cpp model exists on fresh installs
+ensure_default_llama_model || true
 
 # 9. Check for Claude CLI
 if ! command -v claude &> /dev/null; then

@@ -548,6 +548,24 @@ def execute_tool(
 
     return "[Unknown request type]"
 
+def _restore_utf8(text: str) -> str:
+    """Fix text decoded as latin-1 by re-encoding it as utf-8."""
+    if not text:
+        return text
+    try:
+        restored = text.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return text
+    return restored
+
+
+def _strip_non_ascii(text: str) -> str:
+    """Drop characters outside the ASCII printable range to avoid mojibake."""
+    if not text:
+        return text
+    allowed = set("\n\r\t")
+    return "".join(ch for ch in text if (ord(ch) >= 32 and ord(ch) < 127) or ch in allowed)
+
 
 def clean_response(response: str) -> str:
     """Remove tool request tags from response for display, but keep those in code blocks."""
@@ -621,5 +639,9 @@ def clean_response(response: str) -> str:
 
     # Remove repeated blank lines left after stripping internal content.
     cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+
+    # Repair responses that were decoded with latin-1 instead of utf-8.
+    cleaned = _restore_utf8(cleaned)
+    cleaned = _strip_non_ascii(cleaned)
 
     return cleaned.strip()

@@ -386,6 +386,7 @@ class AgentBackendMixin:
                             },
                             timeout=120
                         )
+                        response.encoding = "utf-8"
                         
                         if response.status_code == 400:
                             # Check for context overflow
@@ -541,6 +542,7 @@ class AgentBackendMixin:
                     timeout=120,
                     stream=True
                 )
+                response.encoding = "utf-8"
 
                 if response.status_code != 200:
                     return f"[Error from llama.cpp ({response.status_code}): {response.text}]"

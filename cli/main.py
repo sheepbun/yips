@@ -354,7 +354,6 @@ def main() -> None:
         buffer.validate_and_handle()
 
     vt_mode = False
-    just_exited_vt = False
 
     VT_TOGGLE_SENTINEL = "::VT_TOGGLE::"
 
@@ -486,8 +485,6 @@ def main() -> None:
                 vt_app = VTApplication(agent=agent)
                 result = vt_app.run()
 
-                just_exited_vt = True  # Flag to suppress immediate summary re-render
-
                 if result.type == "agent":
                     user_input = result.text
                     vt_mode = False
@@ -495,26 +492,6 @@ def main() -> None:
                     vt_mode = False
                     continue
             else:
-                from commands.tools.VT.VT import (
-                    render_vt_top, render_vt_content_rows, render_vt_bottom,
-                    vt_history_len, get_vt_box_width, has_vt_history,
-                )
-
-                _vt_box_lines = 0
-                width = get_vt_box_width()
-
-                # Agent mode: fully closed box showing PTY history
-                # Suppress rendering if we just exited the interactive VT (it's already on screen)
-                if has_vt_history() and not just_exited_vt:
-                    console.print(render_vt_top("VT", width=width))
-                    for row in render_vt_content_rows(width=width):
-                        console.print(row)
-                    console.print(render_vt_bottom(width=width))
-                    _vt_box_lines = vt_history_len() + 2  # top + content + bottom
-                
-                just_exited_vt = False  # Reset flag after one suppression
-
-                # Agent prompt below the closed box
                 session.style = style
                 user_input = run_inline_prompt(
                     agent=agent,
@@ -524,11 +501,7 @@ def main() -> None:
                 ).strip()
 
                 if user_input == VT_TOGGLE_SENTINEL:
-                    if _vt_box_lines > 0:
-                        sys.stdout.write(f"\033[{_vt_box_lines + 1}A\033[J")
-                        sys.stdout.flush()
-                    else:
-                        agent.refresh_display()
+                    agent.refresh_display()
                     vt_mode = True
                     continue
         except (EOFError, KeyboardInterrupt):
@@ -584,6 +557,10 @@ def main() -> None:
         import shutil
         if first_word in SIMPLE_BASH_COMMANDS or (first_word and shutil.which(first_word)):
             from commands.tools.VT.VT import get_pty_session
+            agent.conversation_history.append({
+                "role": "user",
+                "content": user_input
+            })
             vt_mode = True
             pty = get_pty_session()
             pty.write((user_input + '\n').encode())

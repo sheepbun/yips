@@ -806,21 +806,13 @@ def _pyte_color_to_hex(color: str) -> str | None:
 
 
 def main(initial_command: str | None = None):
-    """Run the Virtual Terminal inline (execute initial_command and return)."""
+    """Run the Yips Virtual Terminal and optionally inject an initial command."""
+    pty_session = get_pty_session()
     if initial_command:
-        pty_session = get_pty_session()
         pty_session.write((initial_command + '\n').encode())
-        # Give it a moment to execute
-        import time
-        time.sleep(0.3)
-        pty_session.read()
-        lines = get_visible_lines()
-        if lines:
-            width = get_vt_box_width()
-            console.print(render_vt_top("VT", width=width))
-            for row in render_vt_content_rows(width=width):
-                console.print(row)
-            console.print(render_vt_bottom(width=width))
+
+    vt_app = VTApplication()
+    vt_app.run()
 
 
 if __name__ == "__main__":

@@ -19,7 +19,7 @@ Yips can perform complex tasks using specialized skills and tools:
 - `/memorize [fact]` - Save a fact to long-term memory.
 - `/todos` - List and manage project TODOs.
 - `/build` - Run project build commands.
-- `/vt` - Toggle the Virtual Terminal (also accessible via Shift+Tab).
+- `/vt` - Open the Yips Virtual Terminal (also accessible via `Tab` on an empty prompt or `Shift+Tab`).
 
 ## General Tips
 - **Be Specific**: The more detail you provide in your requests, the better Yips can help.

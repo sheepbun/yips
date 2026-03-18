@@ -12,9 +12,11 @@ import json
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, cast, Any
+from collections.abc import Callable
 
 if TYPE_CHECKING:
     from cli.type_defs import YipsAgentProtocol
+    from rich.console import RenderableType
 
 import difflib
 from cli.color_utils import console, PROMPT_COLOR
@@ -196,20 +198,48 @@ def is_in_working_zone(path: str | Path) -> bool:
         return False
 
 
-def confirm_action(description: str, is_destructive: bool = False) -> bool:
+def confirm_action(
+    description: str,
+    is_destructive: bool = False,
+    pause_live: Callable[[], None] | None = None,
+    resume_live: Callable[[], None] | None = None,
+) -> bool:
     """Ask user for confirmation."""
-    if is_destructive:
-        console.print(f"\n[bold red]Warning: Destructive command detected![/bold red]")
+    if pause_live:
+        pause_live()
+    try:
+        if is_destructive:
+            console.print(f"\n[bold red]Warning: Destructive command detected![/bold red]")
+        else:
+            console.print(f"\n[bold yellow]Notice: Action outside working zone[/bold yellow]")
+
+        console.print(f"[yellow]{description}[/yellow]")
+        console.print("Allow? (y/n): ", style=PROMPT_COLOR, end="")
+        response = input().strip().lower()
+        return response in ("y", "yes")
+    finally:
+        if resume_live:
+            resume_live()
+
+
+def emit_preview(
+    renderable: "RenderableType",
+    preview_callback: Callable[["RenderableType"], None] | None = None,
+) -> None:
+    """Display a preview renderable inline with the current UI when possible."""
+    if preview_callback:
+        preview_callback(renderable)
     else:
-        console.print(f"\n[bold yellow]Notice: Action outside working zone[/bold yellow]")
-        
-    console.print(f"[yellow]{description}[/yellow]")
-    console.print("Allow? (y/n): ", style=PROMPT_COLOR, end="")
-    response = input().strip().lower()
-    return response in ("y", "yes")
+        console.print(renderable)
 
 
-def execute_tool(request: ToolRequest, agent: "YipsAgentProtocol | None" = None) -> str:
+def execute_tool(
+    request: ToolRequest,
+    agent: "YipsAgentProtocol | None" = None,
+    preview_callback: Callable[["RenderableType"], None] | None = None,
+    pause_live: Callable[[], None] | None = None,
+    resume_live: Callable[[], None] | None = None,
+) -> str:
     """Execute a tool request (autonomously unless destructive or out of bounds)."""
 
     if request["type"] == "action":
@@ -219,7 +249,7 @@ def execute_tool(request: ToolRequest, agent: "YipsAgentProtocol | None" = None)
         if tool == "read_file":
             path = params.strip()
             if not is_in_working_zone(path):
-                if not confirm_action(f"Read file outside working zone: {path}"):
+                if not confirm_action(f"Read file outside working zone: {path}", pause_live=pause_live, resume_live=resume_live):
                     return "[Read cancelled by user]"
             try:
                 content = Path(path).expanduser().read_text()
@@ -233,7 +263,7 @@ def execute_tool(request: ToolRequest, agent: "YipsAgentProtocol | None" = None)
                 return "[Error: write_file requires path:content]"
             path, content = parts[0].strip(), parts[1]
             if not is_in_working_zone(path):
-                if not confirm_action(f"Write file outside working zone: {path}"):
+                if not confirm_action(f"Write file outside working zone: {path}", pause_live=pause_live, resume_live=resume_live):
                     return "[Write cancelled by user]"
             try:
                 p = Path(path).expanduser()
@@ -247,14 +277,26 @@ def execute_tool(request: ToolRequest, agent: "YipsAgentProtocol | None" = None)
                     ))
                     if diff_lines:
                         diff_text = "\n".join(diff_lines)
-                        console.print(render_text_preview(path, diff_text, mode="diff", title="📝 Write Preview"))
-                        console.print("Apply this write? (y/n): ", style=PROMPT_COLOR, end="")
-                        response = input().strip().lower()
-                        if response not in ("y", "yes"):
-                            return "[Write cancelled by user]"
+                        emit_preview(
+                            render_text_preview(path, diff_text, mode="diff", title="📝 Write Preview"),
+                            preview_callback,
+                        )
+                        if pause_live:
+                            pause_live()
+                        try:
+                            console.print("Apply this write? (y/n): ", style=PROMPT_COLOR, end="")
+                            response = input().strip().lower()
+                            if response not in ("y", "yes"):
+                                return "[Write cancelled by user]"
+                        finally:
+                            if resume_live:
+                                resume_live()
                 else:
                     # New file: show preview of what will be created
-                    console.print(render_text_preview(path, content, mode="preview", title="📝 New File"))
+                    emit_preview(
+                        render_text_preview(path, content, mode="preview", title="📝 New File"),
+                        preview_callback,
+                    )
                 p.write_text(content)
                 return f"[File written: {path}]"
             except Exception as e:
@@ -265,12 +307,12 @@ def execute_tool(request: ToolRequest, agent: "YipsAgentProtocol | None" = None)
 
             # Check for destructive commands
             if is_destructive_command(command):
-                if not confirm_action(f"Run: {command}", is_destructive=True):
+                if not confirm_action(f"Run: {command}", is_destructive=True, pause_live=pause_live, resume_live=resume_live):
                     return "[Command cancelled by user]"
             
             # Check for out-of-zone activity (heuristically)
             if not any(is_in_working_zone(p) for p in [".", os.getcwd()]):
-                 if not confirm_action(f"Run command in non-working directory: {os.getcwd()}"):
+                 if not confirm_action(f"Run command in non-working directory: {os.getcwd()}", pause_live=pause_live, resume_live=resume_live):
                     return "[Command cancelled by user]"
 
             try:
@@ -293,7 +335,7 @@ def execute_tool(request: ToolRequest, agent: "YipsAgentProtocol | None" = None)
         elif tool == "ls":
             path = params.strip() or "."
             if not is_in_working_zone(path):
-                if not confirm_action(f"List directory outside working zone: {path}"):
+                if not confirm_action(f"List directory outside working zone: {path}", pause_live=pause_live, resume_live=resume_live):
                     return "[ls cancelled by user]"
             try:
                 # Use -F for file type indicators and -1 for one-per-line
@@ -310,7 +352,7 @@ def execute_tool(request: ToolRequest, agent: "YipsAgentProtocol | None" = None)
             pattern = parts[0].strip()
             path = parts[1].strip() if len(parts) > 1 else "."
             if not is_in_working_zone(path):
-                if not confirm_action(f"Grep outside working zone: {path}"):
+                if not confirm_action(f"Grep outside working zone: {path}", pause_live=pause_live, resume_live=resume_live):
                     return "[grep cancelled by user]"
             try:
                 # Use -r for recursive, -n for line numbers, -I to ignore binary files
@@ -340,7 +382,7 @@ def execute_tool(request: ToolRequest, agent: "YipsAgentProtocol | None" = None)
                 return "[Error: sed requires expression:path]"
             expression, path = parts[0].strip(), parts[1].strip()
             if not is_in_working_zone(path):
-                if not confirm_action(f"Sed outside working zone: {path}"):
+                if not confirm_action(f"Sed outside working zone: {path}", pause_live=pause_live, resume_live=resume_live):
                     return "[sed cancelled by user]"
             try:
                 # and return output unless it's clearly an in-place edit request.
@@ -361,7 +403,7 @@ def execute_tool(request: ToolRequest, agent: "YipsAgentProtocol | None" = None)
                 return "[Error: edit_file requires path:::old_string:::new_string]"
             path, old_string, new_string = parts[0].strip(), parts[1], parts[2]
             if not is_in_working_zone(path):
-                if not confirm_action(f"Edit file outside working zone: {path}"):
+                if not confirm_action(f"Edit file outside working zone: {path}", pause_live=pause_live, resume_live=resume_live):
                     return "[Edit cancelled by user]"
             try:
                 p = Path(path).expanduser()
@@ -379,12 +421,21 @@ def execute_tool(request: ToolRequest, agent: "YipsAgentProtocol | None" = None)
                     file_content.splitlines(), new_content.splitlines(),
                     fromfile=f"a/{path}", tofile=f"b/{path}", lineterm=""
                 ))
-                diff_text = "\n".join(diff_lines)
-                console.print(render_text_preview(path, diff_text, mode="diff", title="✏️ Edit Preview"))
-                console.print("Apply this change? (y/n): ", style=PROMPT_COLOR, end="")
-                response = input().strip().lower()
-                if response not in ("y", "yes"):
-                    return "[Edit cancelled by user]"
+                diff_text = "\n".join(diff_lines) if diff_lines else "(No textual changes detected)"
+                emit_preview(
+                    render_text_preview(path, diff_text, mode="diff", title="✏️ Edit Preview"),
+                    preview_callback,
+                )
+                if pause_live:
+                    pause_live()
+                try:
+                    console.print("Apply this change? (y/n): ", style=PROMPT_COLOR, end="")
+                    response = input().strip().lower()
+                    if response not in ("y", "yes"):
+                        return "[Edit cancelled by user]"
+                finally:
+                    if resume_live:
+                        resume_live()
                 p.write_text(new_content)
                 return f"[File edited: {path}]"
             except Exception as e:
@@ -399,7 +450,10 @@ def execute_tool(request: ToolRequest, agent: "YipsAgentProtocol | None" = None)
             try:
                 PLANS_DIR.mkdir(parents=True, exist_ok=True)
                 plan_path = PLANS_DIR / f"{name}.md"
-                console.print(render_text_preview(str(plan_path), content, mode="preview", title="📋 Plan"))
+                emit_preview(
+                    render_text_preview(str(plan_path), content, mode="preview", title="📋 Plan"),
+                    preview_callback,
+                )
                 plan_path.write_text(content)
                 return f"[Plan created: {plan_path}]"
             except Exception as e:
@@ -446,8 +500,14 @@ def execute_tool(request: ToolRequest, agent: "YipsAgentProtocol | None" = None)
             
             # Special handling for interactive VT skill
             if skill_name.upper() == "VT":
-                subprocess.run(cmd, env=env) # Interactive, no capture, no timeout
-                return "[Virtual Terminal session ended]"
+                if pause_live:
+                    pause_live()
+                try:
+                    subprocess.run(cmd, env=env) # Interactive, no capture, no timeout
+                    return "[Virtual Terminal session ended]"
+                finally:
+                    if resume_live:
+                        resume_live()
 
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=env)
             
@@ -514,7 +574,37 @@ def clean_response(response: str) -> str:
         return ""
         
     cleaned = re.sub(pattern, replace_fn, response, flags=re.DOTALL)
-    
+
+    # Strip session-memory dumps or leaked persisted transcript content if the model
+    # echoes them back into the visible response.
+    session_markers = [
+        r"(?ms)^# Session Memory.*?(?=\n{2,}|\Z)",
+        r"(?ms)^## Conversation.*?(?=\n{2,}|\Z)",
+        r"(?m)^\*\[System:.*$",
+        r"(?m)^\*Last updated:.*$",
+        r"(?m)^### Active Conversation.*$",
+        r"(?m)^### Archived Conversation.*$",
+        r"(?m)^### Running Summary.*$",
+        r"(?m)^\*\*Created\*\*:.*$",
+        r"(?m)^\*\*Type\*\*:.*$",
+    ]
+    for marker in session_markers:
+        cleaned = re.sub(marker, "", cleaned)
+
+    # If a persisted transcript leaks into the model output, drop everything from
+    # the first session-memory marker onward rather than trying to display it.
+    session_cut_markers = [
+        "\n## 20",
+        "\n# Session Memory",
+        "\n## Conversation",
+        "\n### Active Conversation",
+        "\n### Archived Conversation",
+        "\n### Running Summary",
+    ]
+    cut_positions = [cleaned.find(marker) for marker in session_cut_markers if cleaned.find(marker) != -1]
+    if cut_positions:
+        cleaned = cleaned[:min(cut_positions)]
+
     # Final pass: if the entire remaining content is just a JSON blob, hide it
     # (This handles cases where the model only outputs tool parameters)
     stripped = cleaned.strip()
@@ -528,5 +618,8 @@ def clean_response(response: str) -> str:
     # Also handle <think> blocks - hide them from display
     cleaned = re.sub(r"<think>.*?</think>", "", cleaned, flags=re.DOTALL)
     cleaned = re.sub(r"<think>.*$", "", cleaned, flags=re.DOTALL) # Handle open thinking blocks
-            
+
+    # Remove repeated blank lines left after stripping internal content.
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+
     return cleaned.strip()

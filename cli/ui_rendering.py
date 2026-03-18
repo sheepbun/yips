@@ -272,7 +272,7 @@ def _add_tool_node_to_tree(tree: Tree, tool_name: str, parameters: dict[str, Any
     
     icon = "⚙️"
     if "read" in clean_name.lower(): icon = "📖"
-    elif "edit" in clean_name.lower(): icon = "✏️"
+    elif "edit" in clean_name.lower(): icon = "✎"
     elif "plan" in clean_name.lower(): icon = "📋"
     elif "write" in clean_name.lower(): icon = "📝"
     elif "command" in clean_name.lower(): icon = "💻"
@@ -398,7 +398,14 @@ def render_tool_batch(tools: list[dict[str, Any]], title: str | None = None, com
     for t in display_tools:
         _add_tool_node_to_tree(tree, t['name'], t['params'], t.get('result'), t.get('is_running', False))
     
-    return Panel(tree, title=blue_gradient_text(title_text), border_style=TOOL_COLOR, expand=False, padding=(0, 1))
+    return Panel(
+        tree,
+        title=blue_gradient_text(title_text),
+        title_align="left",
+        border_style=TOOL_COLOR,
+        expand=False,
+        padding=(0, 1),
+    )
 
 
 def calculate_optimal_summary_lines(thinking_text: str, is_streaming: bool = False) -> int:
@@ -669,13 +676,14 @@ def render_text_preview(
 
     Args:
         file_path: Path to display in the header.
-        content: The text content to display. In diff mode, lines starting with
-                 '+ ' or '- ' get green/red styling.
+        content: The text content to display.
         mode: "preview" for plain content, "diff" for unified diff display.
         title: Optional custom title (defaults to "📝 Text Preview").
     """
     header_plain = title or "📝 Text Preview"
     lines = content.split("\n")
+    if mode == "diff" and not lines:
+        lines = ["(No changes)"]
 
     # Build styled content lines
     content_lines: list[tuple[str, str | None]] = []
@@ -685,12 +693,14 @@ def render_text_preview(
 
     for i, line in enumerate(lines):
         if mode == "diff":
-            if line.startswith("+ "):
-                content_lines.append((line, "green"))
-            elif line.startswith("- "):
-                content_lines.append((line, "red"))
+            if line.startswith(("--- ", "+++ ")):
+                content_lines.append((line, "bold cyan"))
             elif line.startswith("@@ "):
                 content_lines.append((line, "cyan"))
+            elif line.startswith("+") and not line.startswith("+++ "):
+                content_lines.append((line, "green"))
+            elif line.startswith("-") and not line.startswith("--- "):
+                content_lines.append((line, "red"))
             else:
                 content_lines.append((line, None))
         else:
@@ -711,7 +721,10 @@ def render_text_preview(
         if cell_len(text_str) <= inner_width:
             wrapped.append((text_str, style))
         else:
-            wrapped.append((text_str[:inner_width - 3] + "...", style))
+            if inner_width <= 3:
+                wrapped.append((text_str[:inner_width], style))
+            else:
+                wrapped.append((text_str[:inner_width - 3] + "...", style))
     content_lines = wrapped
 
     total_rows = 2 + len(content_lines)
@@ -768,4 +781,3 @@ def render_text_preview(
     renderables.append(get_border_text("╰" + "─" * (width - 2) + "╯", total_rows - 1))
 
     return Group(*renderables)
-

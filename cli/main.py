@@ -24,7 +24,7 @@ from prompt_toolkit.output import ColorDepth
 from prompt_toolkit.widgets import TextArea
 import time
 from rich.live import Live
-from rich.console import RenderableType
+from rich.console import RenderableType, Group
 
 from cli.agent import YipsAgent
 from cli.type_defs import YipsAgentProtocol
@@ -179,8 +179,27 @@ def process_response_and_tools(agent: YipsAgentProtocol, response: str, depth: i
                 reprompt_msg = result[17:]
     else:
         # Terminal Mode: Use Live for batch tool rendering
-        renderable = cast(RenderableType, render_tool_batch(tool_history, summary_text, compact=True))
+        preview_history: list[RenderableType] = []
+
+        def build_tool_renderable(compact: bool) -> RenderableType:
+            batch = cast(RenderableType, render_tool_batch(tool_history, summary_text, compact=compact))
+            if not preview_history:
+                return batch
+            return Group(batch, *preview_history)
+
+        renderable = build_tool_renderable(compact=True)
         with Live(renderable, console=console, refresh_per_second=10, transient=False) as live:
+            def queue_preview(renderable: RenderableType) -> None:
+                preview_history.append(renderable)
+                live.update(build_tool_renderable(compact=True))
+
+            def pause_live() -> None:
+                live.stop()
+
+            def resume_live() -> None:
+                live.start(refresh=True)
+                live.update(build_tool_renderable(compact=True))
+
             for i, request in enumerate(tool_requests, 1):
                 if request["type"] == "thought":
                     agent.session_state["thought_signature"] = request["signature"]
@@ -208,20 +227,22 @@ def process_response_and_tools(agent: YipsAgentProtocol, response: str, depth: i
                     "result": None
                 }
                 tool_history.append(current_tool_info)
-                live.update(cast(RenderableType, render_tool_batch(tool_history, summary_text, compact=True)))
+                live.update(build_tool_renderable(compact=True))
 
                 if i > 1:
                     time.sleep(0.3)
 
-                # Stop Live display before executing tools — any tool may
-                # prompt for user input (confirmation dialogs, diff previews)
-                live.stop()
-                result = execute_tool(request, agent)
-                live.start()
+                result = execute_tool(
+                    request,
+                    agent,
+                    preview_callback=queue_preview,
+                    pause_live=pause_live,
+                    resume_live=resume_live,
+                )
 
                 current_tool_info["is_running"] = False
                 current_tool_info["result"] = result
-                live.update(cast(RenderableType, render_tool_batch(tool_history, summary_text, compact=True)))
+                live.update(build_tool_renderable(compact=True))
 
                 if "[Error" in result or "failed" in result.lower():
                     agent.session_state["error_count"] = agent.session_state.get("error_count", 0) + 1
@@ -262,7 +283,7 @@ def process_response_and_tools(agent: YipsAgentProtocol, response: str, depth: i
                     reprompt_msg = result[17:]
 
             # Final update
-            live.update(cast(RenderableType, render_tool_batch(tool_history, summary_text, compact=False)))
+            live.update(build_tool_renderable(compact=False))
 
     # Standardized ReAct loop: Always trigger next turn if tools were called
     if not has_reprompt:

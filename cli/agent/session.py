@@ -19,6 +19,11 @@ if TYPE_CHECKING:
 class AgentSessionMixin:
     """Mixin providing session and memory management to YipsAgent."""
 
+    def _format_system_preview(self: YipsAgentProtocol, content: str, limit: int = 200) -> str:
+        """Collapse system content to a single line preview safe for session files."""
+        flattened = " ".join(content.split())
+        return flattened[:limit] + "..." if len(flattened) > limit else flattened
+
     def calculate_context_limits(self: YipsAgentProtocol) -> None:
         """Calculate dynamic context limits based on available RAM."""
         # Defaults
@@ -158,7 +163,7 @@ class AgentSessionMixin:
                 elif role == "assistant":
                     conversation_lines.append(f"**Yips**: {content}")
                 elif role == "system":
-                    conversation_lines.append(f"*[System: {content[:100]}...]*")
+                    conversation_lines.append(f"*[System: {self._format_system_preview(content, 100)}]*")
             
             conversation_lines.append("\n### Active Conversation")
 
@@ -172,9 +177,7 @@ class AgentSessionMixin:
             elif role == "assistant":
                 conversation_lines.append(f"**Yips**: {content}")
             elif role == "system":
-                # Truncate long system messages
-                preview = content[:200] + "..." if len(content) > 200 else content
-                conversation_lines.append(f"*[System: {preview}]*")
+                conversation_lines.append(f"*[System: {self._format_system_preview(content, 200)}]*")
 
         memory_content = f"""# Session Memory
 

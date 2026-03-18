@@ -32,6 +32,29 @@ error() {
     exit 1
 }
 
+ensure_path_in_file() {
+    local target_file="$1"
+    local start_marker="# >>> yips path >>>"
+    local end_marker="# <<< yips path <<<"
+
+    touch "$target_file"
+
+    if grep -Fq "$start_marker" "$target_file"; then
+        return
+    fi
+
+    cat >> "$target_file" <<EOF
+
+$start_marker
+if [[ ":\$PATH:" != *":\$HOME/.local/bin:"* ]]; then
+    export PATH="\$HOME/.local/bin:\$PATH"
+fi
+$end_marker
+EOF
+
+    status "Updated shell PATH in $target_file"
+}
+
 # 1. Check for Python 3
 if ! command -v python3 &> /dev/null; then
     error "python3 is not installed. Please install Python 3."
@@ -118,11 +141,12 @@ else
     fi
 fi
 
+ensure_path_in_file "$HOME/.bashrc"
+ensure_path_in_file "$HOME/.bash_profile"
+
 case ":$PATH:" in
     *":$LOCAL_BIN_DIR:"*) ;;
-    *)
-        warning "$LOCAL_BIN_DIR is not in PATH. Add 'export PATH=\"$LOCAL_BIN_DIR:\$PATH\"' to your shell profile to run 'yips' directly."
-        ;;
+    *) export PATH="$LOCAL_BIN_DIR:$PATH" ;;
 esac
 
 # 8. Priority Check: llama.cpp

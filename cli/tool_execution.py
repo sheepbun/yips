@@ -567,6 +567,48 @@ def _strip_non_ascii(text: str) -> str:
     return "".join(ch for ch in text if (ord(ch) >= 32 and ord(ch) < 127) or ch in allowed)
 
 
+def _strip_internal_plan_blocks(text: str) -> str:
+    """Remove redundant plan-style python blocks emitted early in the response."""
+    pattern = re.compile(
+        r"```python\s+(?:#.*\n)*def\s+main\(\):[\s\S]*?if\s+__name__\s*==\s*['\"]__main__['\"]\s*:\s*main\(\)\s*```",
+        flags=re.MULTILINE,
+    )
+
+    def is_plain_print_plan(block: str) -> bool:
+        lower_block = block.lower()
+        if lower_block.count("print(") < 3:
+            return False
+        parts = block.split("def main():", 1)
+        if len(parts) < 2:
+            return False
+        body = parts[1]
+        statements = [
+            line.strip()
+            for line in body.splitlines()
+            if line.strip() and not line.strip().startswith("if __name__")
+        ]
+        if not statements:
+            return False
+        has_non_print = any(
+            not stmt.startswith("print(") and not stmt.startswith("print ")
+            for stmt in statements
+        )
+        if has_non_print:
+            return False
+        keywords = ("import ", "from ", "class ", "def ", "for ", "while ", "with ", "return ", "if ")
+        if any(keyword in stmt for stmt in statements for keyword in keywords):
+            return False
+        return True
+
+    def replace(match: re.Match[str]) -> str:
+        block = match.group(0)
+        if match.start() <= 400 and is_plain_print_plan(block):
+            return ""
+        return block
+
+    return pattern.sub(replace, text)
+
+
 def clean_response(response: str) -> str:
     """Remove tool request tags from response for display, but keep those in code blocks."""
     tags_to_remove = [
@@ -643,5 +685,17 @@ def clean_response(response: str) -> str:
     # Repair responses that were decoded with latin-1 instead of utf-8.
     cleaned = _restore_utf8(cleaned)
     cleaned = _strip_non_ascii(cleaned)
+    cleaned = _strip_internal_plan_blocks(cleaned)
+
+    code_only_in_action = "{ACTION:write_file:" in response and "```" in cleaned
+    if code_only_in_action:
+        code_removed = re.sub(r"```[\s\S]*?```", "", cleaned)
+        if code_removed.strip():
+            cleaned = code_removed
+        else:
+            # There was no other text, so show a fallback message referencing the file path.
+            match = re.search(r"\{ACTION:write_file:([^:}]+):", response)
+            path = match.group(1) if match else "the target file"
+            cleaned = f"[Script moved to {path}; code blocks suppressed in the terminal.]"
 
     return cleaned.strip()

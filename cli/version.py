@@ -2,8 +2,8 @@
 """
 Version management for Yips.
 
-Automatically generates date-based versions from git commits.
-Format: vYYYY.M.D-SHORTHASH
+Generates MAJOR.MINOR.PATCH versions derived from the total git commit count
+so every commit adds +0.0.1 (rolls into +0.1.0 and +1.0.0 as digits overflow).
 
 Usage:
     python version.py              # Display current version
@@ -11,7 +11,6 @@ Usage:
 """
 
 import subprocess
-from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -29,62 +28,38 @@ def _get_project_root() -> Path:
 PROJECT_ROOT = _get_project_root()
 
 
-def get_git_info() -> Optional[tuple[datetime, str]]:
-    """
-    Get commit date and SHA from latest commit.
-    Returns (datetime, short_sha) or None if no commits.
-    """
+def get_commit_count() -> Optional[int]:
+    """Return the total number of commits present in the repository."""
     try:
-        # Get commit timestamp
         result = subprocess.run(
-            ["git", "log", "-1", "--format=%ct"],
+            ["git", "rev-list", "--count", "HEAD"],
             cwd=PROJECT_ROOT,
             capture_output=True,
             text=True,
-            timeout=5
+            timeout=5,
         )
         if result.returncode != 0 or not result.stdout.strip():
             return None
 
-        timestamp = int(result.stdout.strip())
-        commit_date = datetime.fromtimestamp(timestamp)
-
-        # Get short SHA
-        result = subprocess.run(
-            ["git", "rev-parse", "--short=7", "HEAD"],
-            cwd=PROJECT_ROOT,
-            capture_output=True,
-            text=True,
-            timeout=5
-        )
-        if result.returncode != 0 or not result.stdout.strip():
-            return None
-
-        short_sha = result.stdout.strip()
-        return (commit_date, short_sha)
-
+        return int(result.stdout.strip())
     except Exception:
         return None
 
 
-def generate_version(commit_date: datetime, short_sha: str) -> str:
-    """
-    Generate version string from commit info.
-    Format: vYYYY.M.D-SHORTHASH
-    """
-    return f"v{commit_date.year}.{commit_date.month}.{commit_date.day}-{short_sha}"
+def version_from_commits(count: int) -> str:
+    """Convert a commit count to a MAJOR.MINOR.PATCH string prefixed with v."""
+    major = count // 100
+    minor = (count // 10) % 10
+    patch = count % 10
+    return f"v{major}.{minor}.{patch}"
 
 
 def get_version() -> str:
-    """
-    Get current version dynamically from git, or fallback to default.
-    This is calculated on-the-fly, not stored in a file.
-    """
-    git_info = get_git_info()
-    if git_info:
-        commit_date, short_sha = git_info
-        return generate_version(commit_date, short_sha)
-    return "1.0.0"  # Fallback version when git is not available
+    """Return version derived from git commit count or fallback."""
+    count = get_commit_count()
+    if count is not None:
+        return version_from_commits(count)
+    return "v0.0.0"
 
 
 # Module-level version that's calculated when imported

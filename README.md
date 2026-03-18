@@ -1,12 +1,12 @@
 # Automatic Git Versioning
 
-This repository uses automatic version numbering based on git commits.
+This repository maps the total git commit count straight into a `vMAJOR.MINOR.PATCH` string.
 
-- **Format**: vYYYY.M.D-SHORTHASH
-- **Example**: v2026.1.31-134ae0f
+- **Format**: `vmajor.minor.patch` where each commit adds `+0.0.1`, rolling over at `v0.0.9 -> v0.1.0`, `v0.9.9 -> v1.0.0`, etc.
+- **Example**: 121 commits &rarr; `1.2.1`
 - **Usage**: Run `python version.py` to see the current version
 
-The version is calculated dynamically from the latest git commit, so it always stays in sync with the repository state.
+The version is recalculated from the commit count so it always reflects the repository history.
 
 ## 🚀 Quick Start
 

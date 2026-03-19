@@ -16,10 +16,11 @@ from prompt_toolkit.formatted_text import FormattedText
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
 from prompt_toolkit.styles import Style as PromptStyle
 from prompt_toolkit.key_binding import KeyBindings
-from prompt_toolkit.layout.containers import ConditionalContainer, HSplit, Window
+from prompt_toolkit.layout.containers import ConditionalContainer, Float, FloatContainer, HSplit, Window
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.layout import Layout
+from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.output import ColorDepth
 from prompt_toolkit.widgets import TextArea
 import time
@@ -79,8 +80,18 @@ def run_inline_prompt(
             filter=Condition(lambda: bool(getattr(agent, "last_stream_status_text", ""))),
         ),
     ])
+    layout_root = FloatContainer(
+        content=root,
+        floats=[
+            Float(
+                xcursor=True,
+                ycursor=True,
+                content=CompletionsMenu(max_height=16),
+            )
+        ],
+    )
     app: Application[str] = Application(
-        layout=Layout(root, focused_element=input_area.window),
+        layout=Layout(layout_root, focused_element=input_area.window),
         key_bindings=bindings,
         style=style,
         color_depth=ColorDepth.TRUE_COLOR,
@@ -372,10 +383,16 @@ def main() -> None:
 
     @bindings.add('tab')
     def _(event: KeyPressEvent):
-        """Tab toggles VT mode when buffer is empty, otherwise do nothing (no completion)."""
-        if not event.current_buffer.text.strip():
+        """Tab toggles VT mode when empty, otherwise drives prompt completion."""
+        buffer = event.current_buffer
+        if not buffer.text.strip():
             _do_vt_toggle(event)
-        # If buffer has text, swallow Tab (no tab-completion in this app)
+            return
+
+        if buffer.complete_state:
+            buffer.complete_next()
+        else:
+            buffer.start_completion(select_first=False)
 
     # Initialize PromptSession
     session: PromptSession[str] = PromptSession(

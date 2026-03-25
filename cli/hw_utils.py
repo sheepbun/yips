@@ -53,31 +53,105 @@ def get_system_specs() -> SystemSpecs:
     return specs
 
 
+def _get_driver_max_cuda_version() -> tuple[int, int] | None:
+    """Return the max CUDA version the installed GPU driver supports as (major, minor), or None."""
+    try:
+        output = subprocess.check_output(
+            ["nvidia-smi"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+        # nvidia-smi header contains "CUDA Version: X.Y"
+        import re
+        match = re.search(r"CUDA Version:\s*(\d+)\.(\d+)", output)
+        if match:
+            return int(match.group(1)), int(match.group(2))
+    except (subprocess.SubprocessError, FileNotFoundError):
+        pass
+    return None
+
+
+def _get_nvcc_version(nvcc_path: str) -> tuple[int, int] | None:
+    """Return the CUDA version for a given nvcc binary as (major, minor), or None."""
+    try:
+        output = subprocess.check_output(
+            [nvcc_path, "--version"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+        import re
+        match = re.search(r"release (\d+)\.(\d+)", output)
+        if match:
+            return int(match.group(1)), int(match.group(2))
+    except (subprocess.SubprocessError, FileNotFoundError, OSError):
+        pass
+    return None
+
+
 def detect_cuda_toolkit() -> CudaSupport:
-    """Detect whether a CUDA toolkit is installed locally for building llama.cpp."""
-    nvcc_path = shutil.which("nvcc")
-    if nvcc_path:
-        toolkit_root = os.path.dirname(os.path.dirname(nvcc_path))
-        return {"available": True, "reason": "nvcc detected", "toolkit_root": toolkit_root, "nvcc_path": nvcc_path}
+    """Detect a CUDA toolkit compatible with the installed GPU driver.
+
+    Prefers the highest compatible toolkit version. If the nvcc on PATH is
+    newer than the driver supports, scans installed CUDA directories for a
+    compatible version instead.
+    """
+    import glob
+
+    driver_max = _get_driver_max_cuda_version()
+
+    # Build list of candidate nvcc paths: PATH first, then installed dirs
+    candidates: list[str] = []
+    path_nvcc = shutil.which("nvcc")
+    if path_nvcc:
+        candidates.append(path_nvcc)
 
     if sys.platform == 'win32':
-        import glob
         win_cuda_base = r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA"
+        # Sort descending so highest version is tried first
         cuda_roots = sorted(glob.glob(win_cuda_base + r"\v*"), reverse=True)
     else:
-        cuda_roots = [
-            "/usr/local/cuda",
-            "/opt/cuda",
-        ]
+        cuda_roots = ["/usr/local/cuda", "/opt/cuda"]
+    nvcc_exe = "nvcc.exe" if sys.platform == "win32" else "nvcc"
     for root in cuda_roots:
-        candidate_nvcc = os.path.join(root, "bin", "nvcc")
-        if os.path.isfile(candidate_nvcc):
+        candidate_nvcc = os.path.join(root, "bin", nvcc_exe)
+        if os.path.isfile(candidate_nvcc) and candidate_nvcc not in candidates:
+            candidates.append(candidate_nvcc)
+
+    best: CudaSupport | None = None
+    incompatible_reason = ""
+
+    for nvcc in candidates:
+        if not os.path.isfile(nvcc):
+            continue
+        toolkit_root = os.path.dirname(os.path.dirname(nvcc))
+        ver = _get_nvcc_version(nvcc)
+
+        if driver_max is None or ver is None:
+            # Cannot compare versions — accept the first one we find
             return {
                 "available": True,
-                "reason": f"nvcc detected at {candidate_nvcc}",
-                "toolkit_root": root,
-                "nvcc_path": candidate_nvcc,
+                "reason": f"nvcc detected at {nvcc}",
+                "toolkit_root": toolkit_root,
+                "nvcc_path": nvcc,
             }
+
+        if ver <= driver_max:
+            # Compatible — use it (first match is highest version due to sort order)
+            return {
+                "available": True,
+                "reason": f"CUDA {ver[0]}.{ver[1]} toolkit compatible with driver (max CUDA {driver_max[0]}.{driver_max[1]})",
+                "toolkit_root": toolkit_root,
+                "nvcc_path": nvcc,
+            }
+        else:
+            if not incompatible_reason:
+                incompatible_reason = (
+                    f"CUDA toolkit {ver[0]}.{ver[1]} is newer than the GPU driver supports "
+                    f"(driver max: CUDA {driver_max[0]}.{driver_max[1]})"
+                )
+
+    if incompatible_reason:
+        return {"available": False, "reason": incompatible_reason, "toolkit_root": None, "nvcc_path": None}
 
     return {"available": False, "reason": "CUDA toolkit not found", "toolkit_root": None, "nvcc_path": None}
 

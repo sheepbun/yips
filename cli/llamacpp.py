@@ -234,7 +234,7 @@ def start_llamacpp(model_path: str | None = None) -> bool:
     cuda_support = detect_cuda_support()
     build_mode = get_llama_build_mode()
 
-    if cuda_support["available"] and build_mode != "cuda":
+    if cuda_support["available"] and build_mode == "cpu":
         _last_server_error = (
             "CUDA-capable NVIDIA GPU detected, but llama.cpp was built without CUDA support. "
             "Rerun setup to rebuild llama.cpp with CUDA enabled."
@@ -245,7 +245,9 @@ def start_llamacpp(model_path: str | None = None) -> bool:
     # Define strategies: (name, list_of_flags)
     # We request 999 layers to force max GPU offload.
     # llama.cpp will automatically fallback to CPU/RAM for layers that don't fit.
-    if cuda_support["available"] and build_mode == "cuda":
+    # Allow GPU strategies when build_mode is "cuda" or "unknown" — only skip GPU
+    # when we've confirmed the binary was built without CUDA support ("cpu").
+    if cuda_support["available"] and build_mode != "cpu":
         strategies: list[tuple[str, list[str]]] = [
             ("GPU (Auto-Offload)", ["-ngl", "999"]),
             ("Hybrid (Default)", []),

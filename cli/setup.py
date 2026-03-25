@@ -79,19 +79,133 @@ def check_build_tools() -> bool:
         return False
     return True
 
-def install_llama_server() -> str | None:
-    """
-    Downloads and builds llama.cpp.
-    Returns the path to the built binary, or None if failed.
-    """
-    if not check_build_tools():
+def _get_llama_release_tag(install_dir: Path) -> str | None:
+    """Return the llama.cpp git tag (e.g. 'b8522') from the install directory."""
+    try:
+        tag = subprocess.check_output(
+            ["git", "describe", "--tags", "--abbrev=0"],
+            cwd=install_dir,
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+        return tag if tag else None
+    except (subprocess.SubprocessError, FileNotFoundError):
         return None
 
+
+def _download_prebuilt_llama_cuda(install_dir: Path, cuda_major: int) -> bool:
+    """Download a pre-built Windows CUDA binary from the llama.cpp GitHub release.
+
+    Picks the highest compatible CUDA major version available for the release.
+    Returns True if successful.
+    """
+    if sys.platform != "win32":
+        return False
+
+    tag = _get_llama_release_tag(install_dir)
+    if not tag:
+        return False
+
+    bin_dir = install_dir / "build" / "bin" / "Release"
+    bin_dir.mkdir(parents=True, exist_ok=True)
+
+    base_url = f"https://github.com/ggerganov/llama.cpp/releases/download/{tag}"
+
+    # Try cuda_major, then fall back to lower versions
+    for try_major in range(cuda_major, 10, -1):
+        # GitHub releases use minor version in the name; try common suffixes
+        for suffix in [f"cuda-{try_major}.4", f"cuda-{try_major}.2", f"cuda-{try_major}.0",
+                       f"cuda-{try_major}.6", f"cuda-{try_major}.5"]:
+            zip_name = f"llama-{tag}-bin-win-{suffix}-x64.zip"
+            cudart_name = f"cudart-llama-bin-win-{suffix}-x64.zip"
+            url = f"{base_url}/{zip_name}"
+            try:
+                import io
+                import zipfile
+                console.print(f"[cyan]Trying pre-built binary: {zip_name}...[/cyan]")
+                r = requests.get(url, stream=True, timeout=10)
+                if r.status_code == 404:
+                    continue
+                r.raise_for_status()
+                total = int(r.headers.get("content-length", 0))
+                data = b""
+                with Progress(
+                    SpinnerColumn(),
+                    TextColumn("[progress.description]{task.description}"),
+                    BarColumn(),
+                    DownloadColumn(),
+                    TransferSpeedColumn(),
+                    console=console,
+                ) as progress:
+                    task = progress.add_task(f"Downloading {zip_name}", total=total or None)
+                    for chunk in r.iter_content(chunk_size=65536):
+                        data += chunk
+                        progress.update(task, advance=len(chunk))
+                with zipfile.ZipFile(io.BytesIO(data)) as z:
+                    for member in z.namelist():
+                        fname = Path(member).name
+                        if not fname:
+                            continue
+                        dest = bin_dir / fname
+                        with z.open(member) as src, open(dest, "wb") as dst:
+                            import shutil as _shutil
+                            _shutil.copyfileobj(src, dst)
+
+                # Also download the matching cudart DLLs (cublas, cudart)
+                cudart_url = f"{base_url}/{cudart_name}"
+                try:
+                    rc = requests.get(cudart_url, stream=True, timeout=10)
+                    if rc.status_code == 200:
+                        cudart_data = b""
+                        total_c = int(rc.headers.get("content-length", 0))
+                        with Progress(
+                            SpinnerColumn(),
+                            TextColumn("[progress.description]{task.description}"),
+                            BarColumn(),
+                            DownloadColumn(),
+                            TransferSpeedColumn(),
+                            console=console,
+                        ) as progress:
+                            task = progress.add_task(f"Downloading {cudart_name}", total=total_c or None)
+                            for chunk in rc.iter_content(chunk_size=65536):
+                                cudart_data += chunk
+                                progress.update(task, advance=len(chunk))
+                        with zipfile.ZipFile(io.BytesIO(cudart_data)) as z:
+                            for member in z.namelist():
+                                fname = Path(member).name
+                                if not fname:
+                                    continue
+                                dest = bin_dir / fname
+                                with z.open(member) as src, open(dest, "wb") as dst:
+                                    import shutil as _shutil
+                                    _shutil.copyfileobj(src, dst)
+                except Exception:
+                    pass  # cudart download is best-effort
+
+                console.print(f"[green]Pre-built CUDA {suffix} binary installed successfully.[/green]")
+                return True
+            except Exception as e:
+                console.print(f"[dim]  {zip_name}: {e}[/dim]")
+                continue
+
+    return False
+
+
+def install_llama_server() -> str | None:
+    """
+    Downloads and builds llama.cpp (or installs a compatible pre-built binary on Windows).
+    Returns the path to the built binary, or None if failed.
+
+    On Windows with an NVIDIA GPU, prefers downloading a pre-built CUDA binary that
+    matches the driver's maximum supported CUDA version, avoiding cmake's tendency to
+    always pick the latest CUDA toolkit from the registry regardless of driver support.
+    """
     install_dir = Path.home() / "llama.cpp"
     cuda_support = detect_cuda_toolkit()
     prefer_cuda = cuda_support["available"]
     existing_mode = detect_llama_build_mode(install_dir) if install_dir.exists() else "unknown"
-    
+
+    # Clone/update the source repo so we know the tag and can build if needed
     if install_dir.exists():
         console.print(f"[yellow]Directory {install_dir} already exists. Updating...[/yellow]")
         try:
@@ -110,6 +224,28 @@ def install_llama_server() -> str | None:
         except subprocess.CalledProcessError as e:
             console.print(f"[red]Failed to clone llama.cpp: {e}[/red]")
             return None
+
+    # On Windows with CUDA, try downloading a pre-built binary first.
+    # cmake on Windows always picks the CUDA version registered in the registry
+    # (typically the newest), which may be incompatible with the GPU driver.
+    # Downloading the matching pre-built binary sidesteps this entirely.
+    if sys.platform == "win32" and prefer_cuda and cuda_support.get("nvcc_path"):
+        from cli.hw_utils import _get_nvcc_version
+        nvcc_ver = _get_nvcc_version(cuda_support["nvcc_path"])
+        if nvcc_ver:
+            cuda_major = nvcc_ver[0]
+            console.print(
+                f"[cyan]NVIDIA GPU detected. Trying pre-built CUDA {cuda_major}.x binary "
+                f"(avoids cmake registry issues)...[/cyan]"
+            )
+            if _download_prebuilt_llama_cuda(install_dir, cuda_major):
+                for candidate in get_llama_server_candidates():
+                    if Path(candidate).exists():
+                        console.print(f"[green]llama-server installed at {candidate}[/green]")
+                        return candidate
+
+    if not check_build_tools():
+        return None
 
     if prefer_cuda:
         console.print(f"[cyan]CUDA detected ({cuda_support['reason']}). Building llama.cpp with CUDA support...[/cyan]")

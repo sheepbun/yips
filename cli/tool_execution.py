@@ -338,8 +338,10 @@ def execute_tool(
                 if not confirm_action(f"List directory outside working zone: {path}", pause_live=pause_live, resume_live=resume_live):
                     return "[ls cancelled by user]"
             try:
-                # Use -F for file type indicators and -1 for one-per-line
-                result = subprocess.run(f"ls -F1 {path}", shell=True, capture_output=True, text=True, timeout=10)
+                if os.name == 'nt':
+                    result = subprocess.run(f'dir "{path}"', shell=True, capture_output=True, text=True, timeout=10)
+                else:
+                    result = subprocess.run(f"ls -F1 {path}", shell=True, capture_output=True, text=True, timeout=10)
                 if result.returncode == 0:
                     return f"[Directory listing for {path}]:\n{result.stdout}"
                 return f"[Error listing {path}]: {result.stderr}"
@@ -355,8 +357,10 @@ def execute_tool(
                 if not confirm_action(f"Grep outside working zone: {path}", pause_live=pause_live, resume_live=resume_live):
                     return "[grep cancelled by user]"
             try:
-                # Use -r for recursive, -n for line numbers, -I to ignore binary files
-                result = subprocess.run(f"grep -rnI \"{pattern}\" {path}", shell=True, capture_output=True, text=True, timeout=30)
+                if os.name == 'nt':
+                    result = subprocess.run(f'findstr /s /n /i "{pattern}" "{path}"', shell=True, capture_output=True, text=True, timeout=30)
+                else:
+                    result = subprocess.run(f"grep -rnI \"{pattern}\" {path}", shell=True, capture_output=True, text=True, timeout=30)
                 if result.stdout:
                     return f"[Grep matches for '{pattern}' in {path}]:\n{result.stdout}"
                 return f"[No matches found for '{pattern}' in {path}]"
@@ -385,6 +389,8 @@ def execute_tool(
                 if not confirm_action(f"Sed outside working zone: {path}", pause_live=pause_live, resume_live=resume_live):
                     return "[sed cancelled by user]"
             try:
+                if os.name == 'nt':
+                    return "[Error: sed is not available on Windows. Use the edit_file tool instead.]"
                 # and return output unless it's clearly an in-place edit request.
                 # Actually, most agents want to modify files.
                 # Let's support both. If expression contains -i, we handle it.
@@ -492,7 +498,10 @@ def execute_tool(
 
         try:
             # Prefer venv python for skill execution if available
-            venv_python = PROJECT_ROOT / ".venv" / "bin" / "python3"
+            if sys.platform == 'win32':
+                venv_python = PROJECT_ROOT / ".venv" / "Scripts" / "python.exe"
+            else:
+                venv_python = PROJECT_ROOT / ".venv" / "bin" / "python3"
             executable = str(venv_python) if venv_python.exists() else sys.executable
 
             cmd = [executable, str(skill_path)] + (args.split() if args else [])

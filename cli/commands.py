@@ -125,8 +125,19 @@ def handle_sessions_command(agent: YipsAgentProtocol) -> None:
         ch = data[0]
         if ch == 0x1b:  # Escape
             # Check if more bytes follow (escape sequence) or bare Escape
-            r, _, _ = select.select([fd], [], [], 0.05)
-            if r:
+            if os.name == 'nt':
+                import msvcrt, time as _t
+                _end = _t.monotonic() + 0.05
+                r_avail = False
+                while _t.monotonic() < _end:
+                    if msvcrt.kbhit():
+                        r_avail = True
+                        break
+                    _t.sleep(0.005)
+            else:
+                r, _, _ = select.select([fd], [], [], 0.05)
+                r_avail = bool(r)
+            if r_avail:
                 data2 = os.read(fd, 1)
                 if data2 and data2[0] == 0x5b:  # '['
                     data3 = os.read(fd, 1)
@@ -155,9 +166,14 @@ def handle_sessions_command(agent: YipsAgentProtocol) -> None:
 
                     while True:
                         # Check for input availability
-                        r, _, _ = select.select([fd], [], [], 0)
-                        if not r:
-                            break
+                        if os.name == 'nt':
+                            import msvcrt
+                            if not msvcrt.kbhit():
+                                break
+                        else:
+                            r, _, _ = select.select([fd], [], [], 0)
+                            if not r:
+                                break
 
                         key = _read_key(fd)
                         if key == 'up':

@@ -8,13 +8,21 @@ A single bash shell session persists across VT mode toggles.
 
 import os
 import sys
-import pty
+import queue
 import select
 import signal
 import struct
-import fcntl
+import subprocess
+import threading
 
 import pyte
+
+IS_WINDOWS = sys.platform == 'win32'
+
+if not IS_WINDOWS:
+    import pty
+    import fcntl
+
 from rich.console import Console
 from rich.text import Text
 from rich.cells import cell_len
@@ -45,66 +53,120 @@ class PatchedScreen(pyte.Screen):
 
 
 class PersistentPTY:
-    """A persistent bash shell with a pyte virtual-terminal backend."""
+    """A persistent shell with a pyte virtual-terminal backend (Unix: PTY; Windows: pipe)."""
 
     def __init__(self, cols: int = 80, rows: int = 24) -> None:
         self.cols = cols
         self.rows = rows
         self.screen = PatchedScreen(cols, rows)
         self.stream = pyte.ByteStream(self.screen)
+        # Unix PTY fields
         self.master_fd: int = -1
         self.child_pid: int = -1
+        # Windows subprocess fields
+        self._win_process: 'subprocess.Popen[bytes] | None' = None
+        self._win_queue: 'queue.Queue[bytes]' = queue.Queue()
+        self._win_reader_thread: 'threading.Thread | None' = None
+
+    def _win_reader_fn(self) -> None:
+        """Background thread: read process stdout and enqueue for pyte."""
+        assert self._win_process is not None
+        try:
+            while True:
+                data = self._win_process.stdout.read(256)  # type: ignore[union-attr]
+                if not data:
+                    break
+                self._win_queue.put(data)
+        except (OSError, ValueError):
+            pass
 
     def spawn(self) -> None:
         env = os.environ.copy()
         env["TERM"] = "xterm-256color"
 
-        master, slave = pty.openpty()
-        winsize = struct.pack('HHHH', self.rows, self.cols, 0, 0)
-        fcntl.ioctl(slave, __import__('termios').TIOCSWINSZ, winsize)
+        if IS_WINDOWS:
+            self._win_process = subprocess.Popen(
+                ['cmd.exe'],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+                env=env,
+            )
+            self._win_reader_thread = threading.Thread(
+                target=self._win_reader_fn, daemon=True
+            )
+            self._win_reader_thread.start()
+        else:
+            master, slave = pty.openpty()
+            winsize = struct.pack('HHHH', self.rows, self.cols, 0, 0)
+            fcntl.ioctl(slave, __import__('termios').TIOCSWINSZ, winsize)
 
-        pid = os.fork()
-        if pid == 0:  # child
-            os.setsid()
-            os.dup2(slave, 0)
-            os.dup2(slave, 1)
-            os.dup2(slave, 2)
-            os.close(master)
+            pid = os.fork()
+            if pid == 0:  # child
+                os.setsid()
+                os.dup2(slave, 0)
+                os.dup2(slave, 1)
+                os.dup2(slave, 2)
+                os.close(master)
+                os.close(slave)
+                os.execvpe('/bin/bash', ['bash', '-i'], env)
+
             os.close(slave)
-            os.execvpe('/bin/bash', ['bash', '-i'], env)
-
-        os.close(slave)
-        self.master_fd = master
-        self.child_pid = pid
+            self.master_fd = master
+            self.child_pid = pid
 
     def write(self, data: bytes) -> None:
-        if self.master_fd >= 0:
-            os.write(self.master_fd, data)
+        if IS_WINDOWS:
+            if self._win_process and self._win_process.stdin:
+                try:
+                    self._win_process.stdin.write(data)
+                    self._win_process.stdin.flush()
+                except (OSError, BrokenPipeError):
+                    pass
+        else:
+            if self.master_fd >= 0:
+                os.write(self.master_fd, data)
 
     def read(self) -> bool:
-        """Non-blocking read from PTY. Returns True if data arrived."""
-        if self.master_fd < 0:
+        """Non-blocking read from PTY/pipe. Returns True if data arrived."""
+        if IS_WINDOWS:
+            chunks: list[bytes] = []
+            while True:
+                try:
+                    chunks.append(self._win_queue.get_nowait())
+                except queue.Empty:
+                    break
+            if chunks:
+                data = b''.join(chunks)
+                import re
+                data = re.sub(b'\x1b\\[<[\\d;]*u', b'', data)
+                self.stream.feed(data)
+                return True
             return False
-        try:
-            rlist, _, _ = select.select([self.master_fd], [], [], 0)
-            if self.master_fd in rlist:
-                data = os.read(self.master_fd, 65536)
-                if data:
-                    # Filter out Kitty keyboard protocol sequences (CSI < ... u)
-                    # which pyte incorrectly parses, leading to leaked 'u' characters.
-                    import re
-                    data = re.sub(b'\x1b\\[<[\\d;]*u', b'', data)
-                    self.stream.feed(data)
-                    return True
-        except OSError:
-            pass
-        return False
+        else:
+            if self.master_fd < 0:
+                return False
+            try:
+                rlist, _, _ = select.select([self.master_fd], [], [], 0)
+                if self.master_fd in rlist:
+                    data = os.read(self.master_fd, 65536)
+                    if data:
+                        # Filter out Kitty keyboard protocol sequences (CSI < ... u)
+                        # which pyte incorrectly parses, leading to leaked 'u' characters.
+                        import re
+                        data = re.sub(b'\x1b\\[<[\\d;]*u', b'', data)
+                        self.stream.feed(data)
+                        return True
+            except OSError:
+                pass
+            return False
 
     def resize(self, cols: int, rows: int) -> None:
         self.cols = cols
         self.rows = rows
         self.screen.resize(rows, cols)
-        if self.master_fd >= 0:
+        if not IS_WINDOWS and self.master_fd >= 0:
             import termios
             winsize = struct.pack('HHHH', rows, cols, 0, 0)
             fcntl.ioctl(self.master_fd, termios.TIOCSWINSZ, winsize)
@@ -115,27 +177,38 @@ class PersistentPTY:
                     pass
 
     def is_alive(self) -> bool:
-        if self.child_pid < 0:
-            return False
-        try:
-            pid, _ = os.waitpid(self.child_pid, os.WNOHANG)
-            return pid == 0
-        except ChildProcessError:
-            return False
+        if IS_WINDOWS:
+            return self._win_process is not None and self._win_process.poll() is None
+        else:
+            if self.child_pid < 0:
+                return False
+            try:
+                pid, _ = os.waitpid(self.child_pid, os.WNOHANG)
+                return pid == 0
+            except ChildProcessError:
+                return False
 
     def kill(self) -> None:
-        if self.child_pid > 0 and self.is_alive():
-            try:
-                os.kill(self.child_pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-        if self.master_fd >= 0:
-            try:
-                os.close(self.master_fd)
-            except OSError:
-                pass
-            self.master_fd = -1
-        self.child_pid = -1
+        if IS_WINDOWS:
+            if self._win_process is not None:
+                try:
+                    self._win_process.terminate()
+                except Exception:
+                    pass
+                self._win_process = None
+        else:
+            if self.child_pid > 0 and self.is_alive():
+                try:
+                    os.kill(self.child_pid, signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
+            if self.master_fd >= 0:
+                try:
+                    os.close(self.master_fd)
+                except OSError:
+                    pass
+                self.master_fd = -1
+            self.child_pid = -1
 
     def get_display(self) -> list[str]:
         return list(self.screen.display)

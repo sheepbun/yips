@@ -8,13 +8,14 @@ Usage:
 
 import sys
 import os
+import tempfile
 from pathlib import Path
 
 def create_skill(name, content):
     project_root = Path(__file__).resolve().parent.parent.parent.parent
     
     # Check for temporary sandbox first (per roadmap)
-    sandbox_dir = Path("/tmp/yips")
+    sandbox_dir = Path(tempfile.gettempdir()) / "yips"
     sandbox_dir.mkdir(parents=True, exist_ok=True)
     
     # We'll allow the agent to specify if they want to go straight to production or use sandbox
@@ -30,7 +31,8 @@ def create_skill(name, content):
         
     try:
         skill_file.write_text(content)
-        skill_file.chmod(0o755) # Make executable
+        if sys.platform != 'win32':
+            skill_file.chmod(0o755)  # Make executable (Unix only)
         return f"Skill {name} created successfully at {skill_file}"
     except Exception as e:
         return f"Error creating skill: {e}"

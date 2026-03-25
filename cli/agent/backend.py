@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import sys
 import time
 from typing import Any, TYPE_CHECKING
 
@@ -56,7 +57,7 @@ if TYPE_CHECKING:
 class AgentBackendMixin:
     """Mixin providing backend communication capabilities to YipsAgent."""
 
-    def initialize_backend(self: YipsAgentProtocol) -> None:
+    def initialize_backend(self: YipsAgentProtocol, silent: bool = False) -> None:
         """Initialize backend after UI is displayed."""
         if getattr(self, 'backend_initialized', False):
             return
@@ -121,7 +122,7 @@ class AgentBackendMixin:
 
                     self.console.print(f"[red]{msg}[/red]")
 
-                    if should_ask and Confirm.ask(f"Would you like me to {action}?"):
+                    if should_ask and not silent and Confirm.ask(f"Would you like me to {action}?"):
                          # 1. Download model if needed.
                          if not model_exists and not available_models:
                              downloaded_model = download_default_model()

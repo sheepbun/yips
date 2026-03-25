@@ -7,8 +7,10 @@ Provides the main() function that initializes and runs the YipsAgent.
 import os
 import sys
 import subprocess
-import termios
 from typing import Any, cast
+
+if os.name != 'nt':
+    import termios
 
 from prompt_toolkit.application import Application
 from prompt_toolkit import PromptSession
@@ -411,26 +413,25 @@ def main() -> None:
     # Save original terminal settings
     fd = sys.stdin.fileno()
     is_tty = os.isatty(fd)
-    old_settings = termios.tcgetattr(fd) if is_tty else None
+    old_settings = termios.tcgetattr(fd) if (is_tty and os.name != 'nt') else None
     settings_changed = False
 
     try:
-        if not is_gui and is_tty:
-            # Disable echo during startup (keep other flags normal)
+        if not is_gui and is_tty and os.name != 'nt':
+            # Disable echo during startup (keep other flags normal) — Unix only
             new_settings = termios.tcgetattr(fd)
             new_settings[3] = new_settings[3] & ~termios.ECHO
             termios.tcsetattr(fd, termios.TCSANOW, new_settings)
             settings_changed = True
 
-            # Clear terminal
-            subprocess.run('clear' if os.name != 'nt' else 'cls', shell=True)
-
-            # Render the title box
+        if not is_gui and is_tty:
+            # Clear terminal and render the title box (all platforms)
+            subprocess.run('cls' if os.name == 'nt' else 'clear', shell=True)
             agent.render_title_box()
 
         # Initialize backend after displaying UI
         with show_booting("Booting Yips..."):
-            agent.initialize_backend()
+            agent.initialize_backend(silent=True)
 
             # Precache HF model data in background for snappy /download command
             try:
@@ -441,16 +442,17 @@ def main() -> None:
 
         # Flush any keystrokes buffered during startup BEFORE restoring echo
         # This prevents them from being echoed to the screen
-        termios.tcflush(sys.stdin, termios.TCIFLUSH)
+        if os.name != 'nt':
+            termios.tcflush(sys.stdin, termios.TCIFLUSH)
 
     except Exception:
         # Ensure terminal is restored if init fails so user sees the error
-        if settings_changed:
+        if settings_changed and os.name != 'nt':
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
         raise
 
     # Restore terminal settings (re-enables echo)
-    if settings_changed:
+    if settings_changed and os.name != 'nt':
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
     if args.command:
@@ -561,15 +563,23 @@ def main() -> None:
         elif command_result:
             continue
 
-        # Check if input is a simple bash command — auto-launch VT
-        SIMPLE_BASH_COMMANDS = {
-            'ls', 'pwd', 'cat', 'grep', 'find', 'mkdir', 'rmdir', 'rm', 'cp', 'mv',
-            'touch', 'chmod', 'chown', 'echo', 'ps', 'top', 'htop', 'df', 'du',
-            'tar', 'zip', 'unzip', 'curl', 'wget', 'ping', 'ssh', 'scp', 'man',
-            'apt', 'pacman', 'pip', 'npm', 'docker', 'tree', 'wc', 'nano', 'vim',
-            'clear', 'whoami', 'uname', 'uptime', 'free', 'lsblk', 'ip', 'ifconfig',
-            'systemctl', 'journalctl', 'env', 'export', 'source', 'bat', 'cd',
-        }
+        # Check if input is a simple shell command — auto-launch VT
+        if os.name == 'nt':
+            SIMPLE_BASH_COMMANDS = {
+                'dir', 'type', 'copy', 'move', 'del', 'ren', 'mkdir', 'rmdir', 'echo',
+                'ping', 'curl', 'npm', 'pip', 'whoami', 'cls', 'cd', 'tree', 'set',
+                'ipconfig', 'tasklist', 'taskkill', 'powershell', 'python', 'python3',
+                'netstat', 'systeminfo', 'where', 'attrib', 'xcopy', 'robocopy',
+            }
+        else:
+            SIMPLE_BASH_COMMANDS = {
+                'ls', 'pwd', 'cat', 'grep', 'find', 'mkdir', 'rmdir', 'rm', 'cp', 'mv',
+                'touch', 'chmod', 'chown', 'echo', 'ps', 'top', 'htop', 'df', 'du',
+                'tar', 'zip', 'unzip', 'curl', 'wget', 'ping', 'ssh', 'scp', 'man',
+                'apt', 'pacman', 'pip', 'npm', 'docker', 'tree', 'wc', 'nano', 'vim',
+                'clear', 'whoami', 'uname', 'uptime', 'free', 'lsblk', 'ip', 'ifconfig',
+                'systemctl', 'journalctl', 'env', 'export', 'source', 'bat', 'cd',
+            }
         first_word = user_input.split()[0] if user_input.split() else ''
         import shutil
         if first_word in SIMPLE_BASH_COMMANDS or (first_word and shutil.which(first_word)):

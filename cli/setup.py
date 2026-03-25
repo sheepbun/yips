@@ -5,6 +5,7 @@ Setup utilities for Yips CLI dependencies.
 import os
 import shutil
 import subprocess
+import sys
 import requests
 from typing import List
 from pathlib import Path
@@ -65,8 +66,12 @@ def check_build_tools() -> bool:
         missing.append("git")
     if not shutil.which("cmake"):
         missing.append("cmake")
-    if not shutil.which("g++") and not shutil.which("clang++"):
-        missing.append("g++ or clang++")
+    # On Windows CMake auto-detects MSVC via the registry, so skip the
+    # compiler check entirely — cl.exe is only on PATH inside a VS Developer
+    # Prompt, but CMake finds it without that.
+    if sys.platform != "win32":
+        if not shutil.which("g++") and not shutil.which("clang++"):
+            missing.append("g++ or clang++")
     
     if missing:
         console.print(f"[red]Missing build tools: {', '.join(missing)}[/red]")
@@ -125,7 +130,8 @@ def install_llama_server() -> str | None:
     nvcc_path = cuda_support.get("nvcc_path")
     toolkit_root = cuda_support.get("toolkit_root")
     if nvcc_path and toolkit_root:
-        env["PATH"] = f"{Path(nvcc_path).parent}:{env.get('PATH', '')}"
+        sep = ";" if sys.platform == "win32" else ":"
+        env["PATH"] = f"{Path(nvcc_path).parent}{sep}{env.get('PATH', '')}"
         env["CUDAToolkit_ROOT"] = toolkit_root
 
     try:

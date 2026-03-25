@@ -7,6 +7,7 @@ Handles starting and stopping the llama-server and checking its status.
 import os
 import socket
 import subprocess
+import sys
 import tempfile
 import time
 import requests
@@ -25,11 +26,19 @@ def get_llama_server_candidates() -> list[str]:
         candidates.append(env_path)
 
     home = Path.home() / "llama.cpp"
-    candidates.extend([
-        str(home / "build" / "bin" / "llama-server"),
-        str(home / "bin" / "llama-server"),
-        str(home / "llama-server"),
-    ])
+    if sys.platform == 'win32':
+        candidates.extend([
+            str(home / "build" / "bin" / "Release" / "llama-server.exe"),
+            str(home / "build" / "bin" / "llama-server.exe"),
+            str(home / "bin" / "llama-server.exe"),
+            str(home / "llama-server.exe"),
+        ])
+    else:
+        candidates.extend([
+            str(home / "build" / "bin" / "llama-server"),
+            str(home / "bin" / "llama-server"),
+            str(home / "llama-server"),
+        ])
 
     which_path = shutil.which("llama-server")
     if which_path:
@@ -47,6 +56,8 @@ def _resolve_llama_server_path() -> str:
             return candidate
 
     # Fallback to the preferred CMake build location.
+    if sys.platform == 'win32':
+        return str(Path.home() / "llama.cpp" / "build" / "bin" / "Release" / "llama-server.exe")
     return str(Path.home() / "llama.cpp" / "build" / "bin" / "llama-server")
 
 
@@ -263,12 +274,15 @@ def start_llamacpp(model_path: str | None = None) -> bool:
         error_log_path = error_log.name
         error_log.close()
 
-        _server_process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=open(error_log_path, "wb"),
-            start_new_session=True
-        )
+        popen_kwargs: dict = {
+            "stdout": subprocess.DEVNULL,
+            "stderr": open(error_log_path, "wb"),
+        }
+        if sys.platform == 'win32':
+            popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+        else:
+            popen_kwargs["start_new_session"] = True
+        _server_process = subprocess.Popen(cmd, **popen_kwargs)
 
         # Wait for server to be ready
         start_time = time.time()
@@ -312,7 +326,10 @@ def stop_llamacpp() -> bool:
 
     # Method 2: Cleanup any orphaned processes (try graceful first)
     try:
-        subprocess.run(["pkill", "-f", "llama-server"], check=False)
+        if sys.platform == 'win32':
+            subprocess.run(["taskkill", "/F", "/IM", "llama-server.exe"], check=False, capture_output=True)
+        else:
+            subprocess.run(["pkill", "-f", "llama-server"], check=False)
     except Exception:
         pass
 
@@ -322,9 +339,12 @@ def stop_llamacpp() -> bool:
             return True
         time.sleep(0.5)
 
-    # Method 3: Aggressive cleanup (SIGKILL)
+    # Method 3: Aggressive cleanup (force kill)
     try:
-        subprocess.run(["pkill", "-9", "-f", "llama-server"], check=False)
+        if sys.platform == 'win32':
+            subprocess.run(["taskkill", "/F", "/T", "/IM", "llama-server.exe"], check=False, capture_output=True)
+        else:
+            subprocess.run(["pkill", "-9", "-f", "llama-server"], check=False)
     except Exception:
         pass
     

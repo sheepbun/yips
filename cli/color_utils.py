@@ -98,7 +98,8 @@ def apply_gradient_to_text(text: str) -> Text:
 def get_yips_prefix() -> Text:
     """Create the 'Yips:' prefix with timestamp appearing before the nametag."""
     blue = f"rgb({GRADIENT_BLUE[0]},{GRADIENT_BLUE[1]},{GRADIENT_BLUE[2]})"
-    timestamp = datetime.now().strftime("[%-I:%M %p] ")
+    now = datetime.now()
+    timestamp = f"[{now.strftime('%I').lstrip('0') or '12'}:{now.strftime('%M %p')}] "
     
     prefix = Text()
     prefix.append(timestamp, style=blue)

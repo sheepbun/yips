@@ -4,6 +4,7 @@ Hardware detection utilities for Yips.
 
 import os
 import shutil
+import sys
 import psutil
 import subprocess
 from typing import TypedDict
@@ -59,10 +60,15 @@ def detect_cuda_toolkit() -> CudaSupport:
         toolkit_root = os.path.dirname(os.path.dirname(nvcc_path))
         return {"available": True, "reason": "nvcc detected", "toolkit_root": toolkit_root, "nvcc_path": nvcc_path}
 
-    cuda_roots = [
-        "/usr/local/cuda",
-        "/opt/cuda",
-    ]
+    if sys.platform == 'win32':
+        import glob
+        win_cuda_base = r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA"
+        cuda_roots = sorted(glob.glob(win_cuda_base + r"\v*"), reverse=True)
+    else:
+        cuda_roots = [
+            "/usr/local/cuda",
+            "/opt/cuda",
+        ]
     for root in cuda_roots:
         candidate_nvcc = os.path.join(root, "bin", "nvcc")
         if os.path.isfile(candidate_nvcc):

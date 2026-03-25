@@ -83,7 +83,7 @@ class AgentBackendMixin:
                     current_model = self.current_model or LLAMA_DEFAULT_MODEL
                     configured_model_path = os.path.expanduser(current_model)
                     if not os.path.isabs(configured_model_path):
-                        configured_model_path = os.path.join(os.path.expanduser("~/.lmstudio/models"), current_model)
+                        configured_model_path = os.path.join(os.path.expanduser("~/.yips/models"), current_model)
                     model_exists = os.path.exists(configured_model_path)
                     
                     if not server_exists:

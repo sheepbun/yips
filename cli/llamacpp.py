@@ -89,7 +89,7 @@ def get_llama_build_mode() -> str:
     return "unknown"
 
 LLAMA_SERVER_PATH = _resolve_llama_server_path()
-LLAMA_MODELS_DIR = Path.home() / ".lmstudio" / "models"
+LLAMA_MODELS_DIR = Path.home() / ".yips" / "models"
 
 LLAMA_DEFAULT_MODEL = "lmstudio-community/Qwen3-4B-Thinking-2507-GGUF/Qwen3-4B-Thinking-2507-Q4_K_M.gguf"
 LLAMA_SERVER_URL = os.environ.get("LLAMA_SERVER_URL", "http://127.0.0.1:8080")

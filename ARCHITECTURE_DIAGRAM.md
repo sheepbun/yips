@@ -135,7 +135,7 @@ Each update recalculates full gradient:
 
 ```json
 {
-  "backend": "llamacpp" | "lmstudio" | "claude",
+  "backend": "llamacpp" | "claude",
   "model": "model-name",
   "verbose": true | false,
   "streaming": true | false

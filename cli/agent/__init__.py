@@ -106,11 +106,10 @@ class YipsAgent(
             if not self.current_model:
                 self.current_model = CLAUDE_CLI_MODEL
             self.context_size = None
-        else: # llamacpp (default and fallback for deprecated lmstudio)
+        else: # llamacpp (default)
             self.backend = "llamacpp"
             self.use_claude_cli = False
-            if not self.current_model or cast(Any, saved_backend) == "lmstudio":
-                # If was using deprecated lmstudio, switch to llamacpp default
+            if not self.current_model:
                 self.current_model = LLAMA_DEFAULT_MODEL
             
             # Calculate context size for UI display

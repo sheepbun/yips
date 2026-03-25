@@ -198,7 +198,7 @@ ensure_default_llama_model() {
     local model_count
     local default_model
 
-    model_count="$(find "$HOME/.lmstudio/models" -type f -name '*.gguf' 2>/dev/null | wc -l | tr -d ' ')"
+    model_count="$(find "$HOME/.yips/models" -type f -name '*.gguf' 2>/dev/null | wc -l | tr -d ' ')"
     if [ "${model_count:-0}" -gt 0 ]; then
         status "llama.cpp model files detected."
         return 0

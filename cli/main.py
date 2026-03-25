@@ -29,7 +29,7 @@ import time
 from rich.live import Live
 from rich.console import RenderableType, Group
 
-from cli.agent import YipsAgent
+from cli.agent import YipsAgent, _RESIZE_SENTINEL
 from cli.type_defs import YipsAgentProtocol
 from cli.ui_rendering import (
     render_tool_batch,
@@ -53,54 +53,69 @@ def run_inline_prompt(
 ) -> str:
     """Run the normal CLI prompt with a fixed status row directly underneath."""
     result: dict[str, str] = {"text": ""}
+    app_ref: list[Any] = [None]
 
     def _accept(buff: Any) -> bool:
         result["text"] = buff.text
-        app.exit(result=buff.text)
+        app_ref[0].exit(result=buff.text)
         return True
 
-    input_area = TextArea(
-        multiline=False,
-        prompt=[(PROMPT_COLOR, ">>> ")],
-        style=PROMPT_COLOR,
-        completer=completer,
-        complete_while_typing=True,
-        accept_handler=_accept,
-        wrap_lines=False,
-    )
-
-    status_row = Window(
-        content=FormattedTextControl(agent.get_prompt_status_fragments),
-        height=1,
-        dont_extend_height=True,
-    )
     had_status_row = bool(getattr(agent, "last_stream_status_text", ""))
-    root = HSplit([
-        input_area,
-        ConditionalContainer(
-            content=status_row,
-            filter=Condition(lambda: bool(getattr(agent, "last_stream_status_text", ""))),
-        ),
-    ])
-    layout_root = FloatContainer(
-        content=root,
-        floats=[
-            Float(
-                xcursor=True,
-                ycursor=True,
-                content=CompletionsMenu(max_height=16),
-            )
-        ],
-    )
-    app: Application[str] = Application(
-        layout=Layout(layout_root, focused_element=input_area.window),
-        key_bindings=bindings,
-        style=style,
-        color_depth=ColorDepth.TRUE_COLOR,
-        full_screen=False,
-    )
 
-    app.run()
+    while True:
+        input_area = TextArea(
+            multiline=False,
+            prompt=[(PROMPT_COLOR, ">>> ")],
+            style=PROMPT_COLOR,
+            completer=completer,
+            complete_while_typing=True,
+            accept_handler=_accept,
+            wrap_lines=False,
+        )
+
+        status_row = Window(
+            content=FormattedTextControl(agent.get_prompt_status_fragments),
+            height=1,
+            dont_extend_height=True,
+        )
+        root = HSplit([
+            input_area,
+            ConditionalContainer(
+                content=status_row,
+                filter=Condition(lambda: bool(getattr(agent, "last_stream_status_text", ""))),
+            ),
+        ])
+        layout_root = FloatContainer(
+            content=root,
+            floats=[
+                Float(
+                    xcursor=True,
+                    ycursor=True,
+                    content=CompletionsMenu(max_height=16),
+                )
+            ],
+        )
+        app: Application[str] = Application(
+            layout=Layout(layout_root, focused_element=input_area.window),
+            key_bindings=bindings,
+            style=style,
+            color_depth=ColorDepth.TRUE_COLOR,
+            full_screen=False,
+        )
+
+        app_ref[0] = app
+        agent._prompt_app = app
+        try:
+            returned = app.run()
+        finally:
+            agent._prompt_app = None
+
+        if returned == _RESIZE_SENTINEL:
+            agent.refresh_display()
+            continue
+
+        break
+
     if had_status_row:
         sys.stdout.write("\x1b[1A\x1b[2K\r")
         sys.stdout.flush()

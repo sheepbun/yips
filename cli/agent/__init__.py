@@ -17,6 +17,10 @@ from typing import Any, cast, TYPE_CHECKING
 if TYPE_CHECKING:
     from types import FrameType
     from prompt_toolkit import PromptSession
+    from prompt_toolkit.application import Application
+
+# Sentinel value returned by the prompt app when a terminal resize interrupts input
+_RESIZE_SENTINEL = "__YIPS_RESIZE__"
 
 from cli.color_utils import console
 from cli.config import (
@@ -68,6 +72,7 @@ class YipsAgent(
         self.last_width: int = 0
         self.resize_pending: bool = False
         self._resize_timer: threading.Timer | None = None
+        self._prompt_app: "Application[str] | None" = None
 
         self.session_file_path: Path | None = None
         self.session_created = False
@@ -87,6 +92,10 @@ class YipsAgent(
         # Register SIGWINCH handler (Unix only)
         if hasattr(signal, 'SIGWINCH'):
             signal.signal(signal.SIGWINCH, self._handle_resize)
+
+        # Windows: poll for terminal size changes (no SIGWINCH on Windows)
+        if os.name == 'nt':
+            self._start_windows_resize_poller()
 
         # Determine backend and model
         self.backend: str = saved_backend or "llamacpp"
@@ -145,6 +154,28 @@ class YipsAgent(
         if self.conversation_history:
             self.update_session_file()
 
+    def _start_windows_resize_poller(self) -> None:
+        """Start a daemon thread that polls for terminal size changes on Windows."""
+        def _poll() -> None:
+            last_cols: int = 0
+            while True:
+                try:
+                    cols = os.get_terminal_size().columns
+                    if last_cols != 0 and cols != last_cols:
+                        # Size changed — immediately clear to avoid wrap artifacts
+                        print("\033[2J\033[H", end="", flush=True)
+                        if self._resize_timer is not None:
+                            self._resize_timer.cancel()
+                        self._resize_timer = threading.Timer(0.15, self._trigger_resize)
+                        self._resize_timer.start()
+                    last_cols = cols
+                except OSError:
+                    pass
+                time.sleep(0.1)
+
+        t = threading.Thread(target=_poll, daemon=True)
+        t.start()
+
     def _handle_resize(self, signum: int, frame: "FrameType | None") -> None:
         """Handle SIGWINCH signal with debouncing."""
         # Immediately clear screen to prevent line wrapping during resize
@@ -156,5 +187,11 @@ class YipsAgent(
         self._resize_timer.start()
 
     def _trigger_resize(self) -> None:
-        """Set flag to trigger resize on next main loop iteration."""
-        self.resize_pending = True
+        """Trigger resize: exit running prompt app (if any) or set pending flag."""
+        if self._prompt_app is not None:
+            try:
+                self._prompt_app.exit(result=_RESIZE_SENTINEL)
+            except Exception:
+                self.resize_pending = True
+        else:
+            self.resize_pending = True

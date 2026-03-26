@@ -85,16 +85,20 @@ class AgentUIMixin:
     def get_prompt_status_fragments(self: YipsAgentProtocol) -> list[tuple[str, str]]:
         """Build a right-aligned status line shown directly under the >>> prompt."""
         status_text = getattr(self, "last_stream_status_text", "")
-        terminal_width = max(self.console.width, len(status_text))
-        padding = " " * max(terminal_width - len(status_text), 0)
+        terminal_width = self.console.width
+        # Subtract 1 to avoid the terminal's last column, which prompt_toolkit reserves
+        # to prevent cursor wrap - without this the last character gets clipped
+        padding_count = max(terminal_width - len(status_text) - 1, 0)
 
-        fragments: list[tuple[str, str]] = [("", padding)]
-        if not status_text:
-            return fragments
+        # Build fragments with padding and styled text
+        fragments: list[tuple[str, str]] = []
+        if padding_count > 0:
+            fragments.append(("", " " * padding_count))
 
-        for char in status_text:
-            fragments.append(("fg:#89CFF0", char))
-        return fragments
+        if status_text:
+            fragments.append(("fg:#89CFF0", status_text))
+
+        return fragments if fragments else [("", "")]
 
     def render_title_box(self: YipsAgentProtocol) -> None:
         """Render the title box with responsive layout."""

@@ -50,6 +50,22 @@ if TYPE_CHECKING:
     from cli.type_defs import YipsAgentProtocol
 
 
+def _wrap_model_info_lines(model_info: str, content_width: int) -> list[str]:
+    """Split model info across two lines if it exceeds content_width.
+
+    Splits on the last ' · ' separator so the token count falls onto a
+    second line, keeping the backend/model name together on the first.
+    """
+    if len(model_info) <= content_width:
+        return [model_info]
+    parts = model_info.split(' · ')
+    if len(parts) < 2:
+        return [model_info]
+    line1 = ' · '.join(parts[:-1])
+    line2 = parts[-1]
+    return [line1, line2]
+
+
 class AgentUIMixin:
     """Mixin providing UI rendering capabilities to YipsAgent."""
 
@@ -163,8 +179,10 @@ class AgentUIMixin:
             # Show abbreviated "YIPS" text instead
             lines.append("YIPS")
 
-        model_info = self.get_model_info_string()
-        lines.append(model_info)
+        model_info_lines_list = _wrap_model_info_lines(self.get_model_info_string(), content_width)
+        model_info_start_idx = len(lines)
+        lines.extend(model_info_lines_list)
+        model_info_end_idx = len(lines)
         lines.append("")  # blank line
 
         logo_height = len(logo) if show_logo else 0
@@ -201,8 +219,8 @@ class AgentUIMixin:
                 yips_text = gradient_text(centered_text)
                 yips_text.stylize("bold")
                 styled_line.append(yips_text)
-            elif (show_logo and line_num == 7) or (not show_logo and line_num == 2):
-                # Model info - solid blue, truncated if needed
+            elif model_info_start_idx <= line_num < model_info_end_idx:
+                # Model info - solid blue
                 centered_text = safe_center(line_text, content_width)
                 r, g, b = GRADIENT_BLUE
                 styled_line.append(centered_text, style=f"rgb({r},{g},{b})")
@@ -257,7 +275,9 @@ class AgentUIMixin:
             lines.append("YIPS")  # [3] abbreviated text
             model_info_index = 4
 
-        lines.append(self.get_model_info_string())  # model info
+        model_info_lines_list = _wrap_model_info_lines(self.get_model_info_string(), content_width)
+        model_info_end_index = model_info_index + len(model_info_lines_list)
+        lines.extend(model_info_lines_list)  # model info (one or two lines)
         cwd_index = len(lines) if layout_mode == "single" else -1
         if layout_mode == "single":
             lines.append(cwd)
@@ -302,7 +322,7 @@ class AgentUIMixin:
                 welcome_text = gradient_text(centered_text)
                 welcome_text.stylize("bold")
                 styled_line.append(welcome_text)
-            elif line_num == model_info_index:  # Model info - solid blue
+            elif model_info_index <= line_num < model_info_end_index:  # Model info - solid blue
                 centered_text = safe_center(line_text, content_width)
                 r, g, b = GRADIENT_BLUE
                 styled_line.append(centered_text, style=f"rgb({r},{g},{b})")
@@ -367,9 +387,13 @@ class AgentUIMixin:
             "",  # [2] blank
         ]
         left_col.extend(logo)  # [3-8] logo lines (6 lines)
-        left_col.append(self.get_model_info_string())  # [9]
-        left_col.append(cwd)  # [10]
-        left_col.append("")  # [11] blank padding
+        model_info_start_idx = len(left_col)  # 9
+        model_info_lines_list = _wrap_model_info_lines(self.get_model_info_string(), left_width)
+        left_col.extend(model_info_lines_list)  # [9] or [9-10]
+        model_info_end_idx = len(left_col)  # 10 or 11
+        cwd_idx = len(left_col)
+        left_col.append(cwd)  # [10] or [11]
+        left_col.append("")  # [11] or [12] blank padding
 
         # Build right column
         right_col_data = [
@@ -441,11 +465,11 @@ class AgentUIMixin:
                 welcome_text = gradient_text(centered_text)
                 welcome_text.stylize("bold")
                 styled_line.append(welcome_text)
-            elif line_num == 9:  # Model info - solid blue
+            elif model_info_start_idx <= line_num < model_info_end_idx:  # Model info - solid blue
                 centered_text = safe_center(left_text, left_width)
                 r, g, b = GRADIENT_BLUE
                 styled_line.append(centered_text, style=f"rgb({r},{g},{b})")
-            elif line_num == 10:  # CWD - gradient
+            elif line_num == cwd_idx:  # CWD - gradient
                 centered_text = safe_center(left_text, left_width)
                 cwd_text = gradient_text(centered_text)
                 styled_line.append(cwd_text)

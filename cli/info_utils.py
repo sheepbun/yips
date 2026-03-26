@@ -335,16 +335,23 @@ def get_friendly_model_name(model_name: str | None) -> str:
     if model_name in nicknames:
         return nicknames[model_name]
     
-    # Handle long paths in llamacpp
-    if "/" in model_name:
-        pure_name = model_name.split("/")[-1]
+    # Handle HuggingFace-style paths in llamacpp (author/repo/file.gguf or author\repo\file.gguf)
+    sep = "/" if "/" in model_name else ("\\" if "\\" in model_name else None)
+    if sep:
+        parts = model_name.split(sep)
+        # Use the repo segment (second-to-last) when available, else fall back to filename
+        if len(parts) >= 2:
+            pure_name = parts[-2]
+        else:
+            pure_name = parts[-1]
+            if pure_name.endswith(".gguf"):
+                pure_name = pure_name[:-5]
     else:
         pure_name = model_name
+        if pure_name.endswith(".gguf"):
+            pure_name = pure_name[:-5]
 
-    if pure_name.endswith(".gguf"):
-        pure_name = pure_name[:-5]
-
-    # Also check nickname for the pure name (filename only)
+    # Also check nickname for the resolved name
     if pure_name in nicknames:
         return nicknames[pure_name]
 

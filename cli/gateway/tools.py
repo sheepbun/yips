@@ -113,6 +113,140 @@ GATEWAY_TOOLS_READ_ONLY: list[dict] = [_READ_FILE, _LIST_FILES]
 GATEWAY_TOOLS_EDIT: list[dict] = [_READ_FILE, _LIST_FILES, _WRITE_FILE, _EDIT_FILE]
 
 # ---------------------------------------------------------------------------
+#  Discord read-only tool schemas
+# ---------------------------------------------------------------------------
+
+_DISCORD_GET_SERVER_CONTEXT = {
+    "type": "function",
+    "function": {
+        "name": "discord_get_server_context",
+        "description": (
+            "Return a summary of the Discord server (guild) the current message came from, "
+            "including name, id, and member count."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+}
+
+_DISCORD_LIST_MEMBERS = {
+    "type": "function",
+    "function": {
+        "name": "discord_list_members",
+        "description": (
+            "List members of the current Discord server.  "
+            "Requires the 'members' privileged intent to be enabled.  "
+            "To mention a listed member, embed <@ID> in your reply text — "
+            "your reply IS the Discord message, so <@ID> produces a real @mention "
+            "that notifies the user without any extra send step."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Optional substring filter on username or display name.",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum number of members to return (default 25, max 100).",
+                },
+            },
+            "required": [],
+        },
+    },
+}
+
+_DISCORD_GET_MEMBER = {
+    "type": "function",
+    "function": {
+        "name": "discord_get_member",
+        "description": (
+            "Look up a single Discord server member by their ID (exact) or "
+            "by a substring of their username / display name.  "
+            "After calling this tool, embed <@ID> directly in your reply text "
+            "to produce a real @mention — e.g. write '<@255176556945735683> hey!' "
+            "and Discord will notify that user.  Your reply IS the Discord message, "
+            "so this works without any extra send step."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "identifier": {
+                    "type": "string",
+                    "description": "A Discord user ID or a name substring to search for.",
+                },
+            },
+            "required": ["identifier"],
+        },
+    },
+}
+
+_DISCORD_LIST_CHANNELS = {
+    "type": "function",
+    "function": {
+        "name": "discord_list_channels",
+        "description": "List all channels in the current Discord server.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+}
+
+_DISCORD_LIST_ROLES = {
+    "type": "function",
+    "function": {
+        "name": "discord_list_roles",
+        "description": "List all roles defined in the current Discord server.",
+        "parameters": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+}
+
+_DISCORD_FORMAT_MENTION = {
+    "type": "function",
+    "function": {
+        "name": "discord_format_mention",
+        "description": (
+            "Given a Discord user ID, returns the mention tag that — when included "
+            "verbatim in your reply — will ping that user in Discord.  "
+            "Workflow: (1) call discord_get_member to find the user's id field, "
+            "(2) call discord_format_mention with that id, "
+            "(3) paste the returned string directly into your response.  "
+            "Example return value: '<@255176556945735683>'  "
+            "You MUST include the return value in your reply for the ping to work."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "user_id": {
+                    "type": "string",
+                    "description": "The Discord user ID (numeric string) to format.",
+                },
+            },
+            "required": ["user_id"],
+        },
+    },
+}
+
+GATEWAY_TOOLS_DISCORD_READ_ONLY: list[dict] = [
+    _DISCORD_GET_SERVER_CONTEXT,
+    _DISCORD_LIST_MEMBERS,
+    _DISCORD_GET_MEMBER,
+    _DISCORD_LIST_CHANNELS,
+    _DISCORD_LIST_ROLES,
+    _DISCORD_FORMAT_MENTION,
+]
+
+# ---------------------------------------------------------------------------
 #  Executor
 # ---------------------------------------------------------------------------
 
@@ -125,7 +259,22 @@ def _resolve_path(raw: str) -> Path:
     return p.resolve()
 
 
-def execute_gateway_tool(name: str, arguments: dict, can_edit: bool) -> str:
+_DISCORD_TOOL_NAMES = {
+    "discord_get_server_context",
+    "discord_list_members",
+    "discord_get_member",
+    "discord_list_channels",
+    "discord_list_roles",
+    "discord_format_mention",
+}
+
+
+def execute_gateway_tool(
+    name: str,
+    arguments: dict,
+    can_edit: bool,
+    message_context: dict | None = None,
+) -> str:
     """Execute a gateway tool call and return a plain-text result string.
 
     Returns error descriptions (not exceptions) so the model can recover.
@@ -133,9 +282,16 @@ def execute_gateway_tool(name: str, arguments: dict, can_edit: bool) -> str:
     allowed_names = {"read_file", "list_files"}
     if can_edit:
         allowed_names |= {"write_file", "edit_file"}
+    if message_context is not None:
+        allowed_names |= _DISCORD_TOOL_NAMES
 
     if name not in allowed_names:
+        if name in _DISCORD_TOOL_NAMES:
+            return f"Error: tool '{name}' is only available in Discord conversations."
         return f"Error: tool '{name}' is not allowed (edit permission required)."
+
+    if name in _DISCORD_TOOL_NAMES:
+        return _execute_discord_tool(name, arguments, message_context)
 
     try:
         if name == "read_file":
@@ -147,6 +303,72 @@ def execute_gateway_tool(name: str, arguments: dict, can_edit: bool) -> str:
         if name == "edit_file":
             return _exec_edit_file(arguments)
         return f"Error: unknown tool '{name}'."
+    except Exception as exc:
+        return f"Error executing {name}: {exc}"
+
+
+def _execute_discord_tool(
+    name: str, arguments: dict, message_context: dict | None
+) -> str:
+    """Dispatch a Discord read-only tool call.  Returns a JSON string or an error."""
+    # Lazy import to avoid circular dependency: tools → runtime → service → bot → tools
+    from cli.gateway import discord_runtime  # noqa: PLC0415
+
+    if message_context is None:
+        return "Error: Discord tools require a message_context."
+
+    guild_id: str | None = message_context.get("guild_id")
+    if guild_id is None:
+        return (
+            "Error: This is a direct message — server-level Discord tools are not "
+            "available in DMs."
+        )
+
+    try:
+        if name == "discord_get_server_context":
+            result = discord_runtime.get_guild(guild_id)
+            if result is None:
+                return "Error: Guild not found or bot is not in that server."
+            return json.dumps(result, indent=2)
+
+        if name == "discord_list_members":
+            query = arguments.get("query")
+            raw_limit = arguments.get("limit", 25)
+            try:
+                limit = max(1, min(100, int(raw_limit)))
+            except (TypeError, ValueError):
+                limit = 25
+            members = discord_runtime.list_members(guild_id, query=query, limit=limit)
+            return json.dumps(members, indent=2)
+
+        if name == "discord_get_member":
+            identifier = arguments.get("identifier", "").strip()
+            if not identifier:
+                return "Error: 'identifier' is required for discord_get_member."
+            member = discord_runtime.get_member(guild_id, identifier)
+            if member is None:
+                return f"No member found matching '{identifier}'."
+            return json.dumps(member, indent=2)
+
+        if name == "discord_list_channels":
+            channels = discord_runtime.list_channels(guild_id)
+            return json.dumps(channels, indent=2)
+
+        if name == "discord_list_roles":
+            roles = discord_runtime.list_roles(guild_id)
+            return json.dumps(roles, indent=2)
+
+        if name == "discord_format_mention":
+            user_id = arguments.get("user_id", "").strip()
+            if not user_id:
+                return "Error: 'user_id' is required for discord_format_mention."
+            # Returns the raw mention tag; the model includes this in its reply.
+            return f"<@{user_id}>"
+
+        return f"Error: unknown Discord tool '{name}'."
+
+    except RuntimeError as exc:
+        return f"Error: {exc}"
     except Exception as exc:
         return f"Error executing {name}: {exc}"
 

@@ -117,3 +117,13 @@ def get_discord_bot_name() -> str:
     if _bot is not None and _bot.user is not None:
         return str(_bot.user)
     return ""
+
+
+def get_discord_bot() -> "YipsDiscordBot | None":
+    """Return the active YipsDiscordBot instance, or None if not running."""
+    return _bot
+
+
+def get_discord_loop() -> "asyncio.AbstractEventLoop | None":
+    """Return the event loop the Discord bot is running on, or None."""
+    return _loop

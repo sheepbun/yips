@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import Any
 
 import requests
 
 from cli.gateway.runners.base import AgentRunner
 from cli.gateway.tools import (
+    GATEWAY_TOOLS_DISCORD_READ_ONLY,
     GATEWAY_TOOLS_EDIT,
     GATEWAY_TOOLS_READ_ONLY,
     MAX_TOOL_ITERATIONS,
@@ -51,10 +53,71 @@ class LlamaCppRunner(AgentRunner):
     #  Main entry point
     # ------------------------------------------------------------------
 
-    def run(self, prompt: str, *, can_edit: bool = False) -> str:
+    def run(
+        self,
+        prompt: str,
+        *,
+        can_edit: bool = False,
+        history: list[dict[str, Any]] | None = None,
+        message_context: dict[str, Any] | None = None,
+    ) -> str:
         url = f"{self._base_url}/v1/chat/completions"
-        messages: list[dict] = [{"role": "user", "content": prompt}]
+
+        # Build message list: optional Discord context block → few-shot demo → history → current prompt
+        messages: list[dict] = []
+        if message_context:
+            messages.append({
+                "role": "system",
+                "content": _format_discord_context_block(message_context),
+            })
+            # Inject a synthetic few-shot example so the model sees the correct
+            # mention behaviour demonstrated rather than just instructed.
+            # This is placed after the system block and before real history so it
+            # acts as a prior exchange that establishes the pattern.
+            messages.append({
+                "role": "user",
+                "content": "Can you ping ExampleUser for me?",
+            })
+            messages.append({
+                "role": "assistant",
+                "content": "Sure! Looking them up now.",
+            })
+            messages.append({
+                "role": "user",
+                "content": (
+                    "[tool: discord_get_member('ExampleUser') → "
+                    "{\"id\": \"900000000000000001\", \"display_name\": \"ExampleUser\"}]"
+                ),
+            })
+            messages.append({
+                "role": "assistant",
+                "content": "Got their ID. Formatting the mention tag.",
+            })
+            messages.append({
+                "role": "user",
+                "content": (
+                    "[tool: discord_format_mention('900000000000000001') → "
+                    "<@900000000000000001>]"
+                ),
+            })
+            messages.append({
+                "role": "assistant",
+                "content": (
+                    "<@900000000000000001> — hey, Katherine wants your attention here!"
+                ),
+            })
+        if history:
+            for entry in history:
+                # Strip metadata key before sending to the API
+                messages.append({
+                    "role": entry["role"],
+                    "content": entry.get("content", ""),
+                })
+        messages.append({"role": "user", "content": prompt})
+
         tools = GATEWAY_TOOLS_EDIT if can_edit else GATEWAY_TOOLS_READ_ONLY
+        if message_context:
+            tools = tools + GATEWAY_TOOLS_DISCORD_READ_ONLY
 
         last_text = ""
         tool_results: list[str] = []  # collect for fallback
@@ -134,7 +197,9 @@ class LlamaCppRunner(AgentRunner):
                 else:
                     tool_args = raw_args
 
-                result = execute_gateway_tool(tool_name, tool_args, can_edit)
+                result = execute_gateway_tool(
+                    tool_name, tool_args, can_edit, message_context=message_context
+                )
                 tool_results.append(f"[{tool_name}] {result}")
 
                 log.debug("tool %s(%r) → %s", tool_name, tool_args, result[:200])
@@ -166,3 +231,54 @@ class LlamaCppRunner(AgentRunner):
         if tool_results:
             return "\n\n".join(tool_results)
         return (last_text or "(no response)") + f"\n\n(Warning: tool loop reached {MAX_TOOL_ITERATIONS} iterations limit)"
+
+
+# ---------------------------------------------------------------------------
+#  Helpers
+# ---------------------------------------------------------------------------
+
+def _format_discord_context_block(ctx: dict[str, Any]) -> str:
+    """Format a DiscordMessageContext dict into a human-readable system block."""
+    lines = [
+        "[Discord context]",
+        "To ping/mention a user: (1) call discord_get_member to get their id, "
+        "(2) call discord_format_mention with that id — it returns the tag, "
+        "(3) paste the tag into your reply. Your reply IS the Discord message.",
+    ]
+
+    guild_id = ctx.get("guild_id")
+    guild_name = ctx.get("guild_name")
+    if guild_name or guild_id:
+        guild_str = guild_name or ""
+        if guild_id:
+            guild_str += f" (id={guild_id})"
+        lines.append(f"Server: {guild_str.strip()}")
+
+    channel_name = ctx.get("channel_name", "")
+    channel_id = ctx.get("channel_id", "")
+    channel_type = ctx.get("channel_type", "")
+    ch_str = f"#{channel_name}" if channel_name else ""
+    if channel_id:
+        ch_str += f" (id={channel_id}"
+        if channel_type:
+            ch_str += f", type={channel_type}"
+        ch_str += ")"
+    if ch_str:
+        lines.append(f"Channel: {ch_str}")
+
+    author_display = ctx.get("author_display_name", "")
+    author_id = ctx.get("author_id", "")
+    author_str = author_display or ""
+    if author_id:
+        author_str += f" (id={author_id})"
+    if author_str:
+        lines.append(f"Author: {author_str.strip()}")
+
+    if ctx.get("is_bot_mentioned"):
+        lines.append("Note: The bot was @mentioned in this message.")
+
+    reply_to = ctx.get("reply_to_message_id")
+    if reply_to:
+        lines.append(f"This message is a reply to message id={reply_to}")
+
+    return "\n".join(lines)

@@ -4,7 +4,7 @@ Type definitions for Yips CLI.
 Provides TypedDict definitions for structured data used throughout the codebase.
 """
 
-from typing import Any, Literal, TypedDict, Protocol, TYPE_CHECKING
+from typing import Any, Literal, TypedDict, Protocol, TYPE_CHECKING, Union
 
 if TYPE_CHECKING:
     from rich.console import Console, Group
@@ -17,6 +17,32 @@ class Message(TypedDict):
     """A message in the conversation history."""
     role: Literal["user", "assistant", "system"]
     content: str
+
+
+# Discord context types
+
+class DiscordMessageContext(TypedDict, total=False):
+    """Structured metadata for a Discord message, injected into every runner invocation."""
+    source: Literal["discord"]
+    message_id: str
+    channel_id: str
+    channel_name: str
+    channel_type: Literal["dm", "guild_text", "thread", "other"]
+    guild_id: Union[str, None]
+    guild_name: Union[str, None]
+    author_id: str
+    author_username: str
+    author_display_name: str
+    is_bot_mentioned: bool
+    reply_to_message_id: Union[str, None]
+    timestamp: str  # ISO 8601 UTC
+
+
+class DiscordSessionEntry(TypedDict, total=False):
+    """A history entry stored in a Discord channel session, optionally carrying context."""
+    role: Literal["user", "assistant", "system"]
+    content: str
+    metadata: DiscordMessageContext
 
 
 # Tool request types (discriminated union)

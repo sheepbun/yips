@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
@@ -59,6 +60,7 @@ class YipsDiscordBot(discord.Client):
         intents = discord.Intents.default()
         intents.message_content = True  # privileged — enable in Discord Developer Portal
         intents.guilds = True
+        intents.members = True  # privileged — also enable in Discord Developer Portal
         super().__init__(intents=intents)
         self._on_activity = on_activity
         self._session_mgr = DiscordSessionManager(
@@ -83,6 +85,50 @@ class YipsDiscordBot(discord.Client):
         # Status is shown during the boot spinner — no print here to avoid
         # polluting the title box / prompt area after the screen clears.
         pass
+
+    @staticmethod
+    def _build_message_context(
+        message: discord.Message, bot_user: discord.ClientUser
+    ) -> dict:
+        """Return a DiscordMessageContext dict from a discord.Message."""
+        channel = message.channel
+
+        if isinstance(channel, discord.DMChannel):
+            channel_type = "dm"
+        elif isinstance(channel, discord.Thread):
+            channel_type = "thread"
+        elif isinstance(channel, discord.TextChannel):
+            channel_type = "guild_text"
+        else:
+            channel_type = "other"
+
+        guild = message.guild
+        guild_id: str | None = str(guild.id) if guild else None
+        guild_name: str | None = guild.name if guild else None
+
+        is_bot_mentioned = bot_user in message.mentions
+
+        reply_to_id: str | None = None
+        if message.reference is not None and message.reference.message_id is not None:
+            reply_to_id = str(message.reference.message_id)
+
+        return {
+            "source": "discord",
+            "message_id": str(message.id),
+            "channel_id": str(channel.id),
+            "channel_name": getattr(channel, "name", "dm"),
+            "channel_type": channel_type,
+            "guild_id": guild_id,
+            "guild_name": guild_name,
+            "author_id": str(message.author.id),
+            "author_username": message.author.name,
+            "author_display_name": message.author.display_name,
+            "is_bot_mentioned": is_bot_mentioned,
+            "reply_to_message_id": reply_to_id,
+            "timestamp": message.created_at.astimezone(timezone.utc).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            ),
+        }
 
     async def on_message(self, message: discord.Message) -> None:
         # Ignore own messages
@@ -130,6 +176,9 @@ class YipsDiscordBot(discord.Client):
         channel_name = getattr(message.channel, "name", "dm")
         username = message.author.display_name
 
+        # Build structured context for this message
+        msg_context = self._build_message_context(message, self.user)  # type: ignore[arg-type]
+
         # Try to reconnect a restored-from-disk session first
         self._session_mgr.reconnect_restored_session(channel_id, channel_name)
 
@@ -139,8 +188,10 @@ class YipsDiscordBot(discord.Client):
         # Grab history *before* adding the new message (so it's prior context)
         history = self._session_mgr.get_history_for_runner(channel_id)
 
-        # Record the user message
-        self._session_mgr.add_user_message(channel_id, username, message.content)
+        # Record the user message (with structured metadata)
+        self._session_mgr.add_user_message(
+            channel_id, username, message.content, metadata=msg_context
+        )
         self._session_mgr.save_session(channel_id)
 
         # Format prompt with username so the AI knows who's speaking
@@ -157,6 +208,7 @@ class YipsDiscordBot(discord.Client):
                     formatted_content,
                     can_edit=can_edit,
                     history=history,
+                    message_context=msg_context,
                 )
         except Exception as exc:
             error = exc

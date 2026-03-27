@@ -34,6 +34,8 @@ class DiscordChannelSession:
         "session_file_path",
         "session_created",
         "current_session_name",
+        "guild_id",
+        "guild_name",
     )
 
     def __init__(self, channel_id: str, channel_name: str) -> None:
@@ -43,6 +45,8 @@ class DiscordChannelSession:
         self.session_file_path: Path | None = None
         self.session_created: bool = False
         self.current_session_name: str | None = None
+        self.guild_id: str | None = None
+        self.guild_name: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -85,15 +89,25 @@ class DiscordSessionManager:
             return self._sessions[channel_id]
 
     def add_user_message(
-        self, channel_id: str, username: str, content: str
+        self,
+        channel_id: str,
+        username: str,
+        content: str,
+        metadata: dict | None = None,
     ) -> None:
         with self._lock:
             session = self._sessions.get(channel_id)
             if session is None:
                 return
-            session.conversation_history.append(
-                {"role": "user", "content": f"{username}: {content}"}
-            )
+            entry: dict = {"role": "user", "content": f"{username}: {content}"}
+            if metadata is not None:
+                entry["metadata"] = metadata
+                # Opportunistically cache guild identity from the first message that has it
+                if session.guild_id is None and metadata.get("guild_id"):
+                    session.guild_id = metadata["guild_id"]
+                if session.guild_name is None and metadata.get("guild_name"):
+                    session.guild_name = metadata["guild_name"]
+            session.conversation_history.append(entry)
 
     def add_assistant_message(self, channel_id: str, content: str) -> None:
         with self._lock:
@@ -153,18 +167,51 @@ class DiscordSessionManager:
             for entry in session.conversation_history:
                 role = entry.get("role", "unknown")
                 content = entry.get("content", "")
+                meta = entry.get("metadata")
                 if role == "user":
-                    lines.append(f"**{content.split(':', 1)[0]}**: {content.split(':', 1)[1].strip() if ':' in content else content}")
+                    if meta and meta.get("author_id"):
+                        # Rich format: **DisplayName** [discord_user_id=123]: text
+                        display = meta.get("author_display_name") or content.split(":", 1)[0]
+                        text = content.split(": ", 1)[1] if ": " in content else content
+                        lines.append(f"**{display}** [discord_user_id={meta['author_id']}]: {text}")
+                    else:
+                        # Legacy format
+                        name = content.split(":", 1)[0]
+                        text = content.split(": ", 1)[1].strip() if ": " in content else content
+                        lines.append(f"**{name}**: {text}")
                 elif role == "assistant":
                     lines.append(f"**Yips**: {content}")
 
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            channel_type = ""
+            # Determine channel type from the first message that has metadata
+            for entry in session.conversation_history:
+                m = entry.get("metadata")
+                if m and m.get("channel_type"):
+                    channel_type = m["channel_type"]
+                    break
+
+            header_lines = [
+                "# Session Memory",
+                "",
+                f"**Created**: {now}",
+                "**Type**: Ongoing Session",
+                f"**Source**: Discord",
+            ]
+            if channel_type:
+                header_lines.append(f"**Mode**: {channel_type}")
+            if session.guild_name or session.guild_id:
+                guild_str = session.guild_name or ""
+                if session.guild_id:
+                    guild_str += f" (id={session.guild_id})"
+                header_lines.append(f"**Guild**: {guild_str.strip()}")
+            header_lines.append(f"**Channel**: #{session.channel_name} (id={session.channel_id})")
+            header_lines.append(f"**ChannelId**: {session.channel_id}")
+            header_lines.append("")
+
             md = (
-                f"# Session Memory\n\n"
-                f"**Created**: {now}\n"
-                f"**Type**: Ongoing Session\n"
-                f"**Source**: Discord (#{session.channel_name})\n\n"
-                f"## Conversation\n\n"
+                "\n".join(header_lines)
+                + "\n## Conversation\n\n"
                 + "\n".join(lines)
                 + f"\n\n---\n*Last updated: {now}*"
             )
@@ -210,15 +257,45 @@ class DiscordSessionManager:
         if "## Conversation" not in content:
             return
 
-        # Extract channel name from Source line
+        # ------------------------------------------------------------------
+        # Parse header fields
+        # ------------------------------------------------------------------
         channel_name = "unknown"
+        channel_id_from_header: str | None = None
+        guild_id_from_header: str | None = None
+        guild_name_from_header: str | None = None
+
         for line in content.splitlines():
             if line.startswith("**Source**: Discord"):
+                # Legacy format: **Source**: Discord (#channel-name)
                 m = re.search(r"\(#(.+?)\)", line)
                 if m:
                     channel_name = m.group(1)
-                break
+            elif line.startswith("**Channel**:"):
+                # New format: **Channel**: #channel-name (id=123456)
+                m = re.search(r"#([^\s(]+)", line)
+                if m:
+                    channel_name = m.group(1)
+            elif line.startswith("**ChannelId**:"):
+                # New format: **ChannelId**: 123456789
+                m = re.search(r"\*\*ChannelId\*\*:\s*(\d+)", line)
+                if m:
+                    channel_id_from_header = m.group(1)
+            elif line.startswith("**Guild**:"):
+                # New format: **Guild**: My Server (id=123456789)
+                m = re.search(r"\*\*Guild\*\*:\s*(.+?)\s*\(id=(\d+)\)", line)
+                if m:
+                    guild_name_from_header = m.group(1).strip()
+                    guild_id_from_header = m.group(2)
+                else:
+                    # Name without id
+                    m2 = re.search(r"\*\*Guild\*\*:\s*(.+)", line)
+                    if m2:
+                        guild_name_from_header = m2.group(1).strip()
 
+        # ------------------------------------------------------------------
+        # Parse conversation section
+        # ------------------------------------------------------------------
         conv_section = content.split("## Conversation")[-1].split("---")[0].strip()
         history: list[dict] = []
 
@@ -229,11 +306,26 @@ class DiscordSessionManager:
             if line.startswith("**Yips**:"):
                 history.append({"role": "assistant", "content": line[len("**Yips**:"):].strip()})
             elif line.startswith("**"):
-                # User message: **Username**: content
-                m = re.match(r"\*\*(.+?)\*\*:\s*(.*)", line)
+                # Try new rich format: **DisplayName** [discord_user_id=123]: text
+                m = re.match(r"\*\*(.+?)\*\*\s+\[discord_user_id=(\d+)\]:\s*(.*)", line)
                 if m:
-                    username, msg = m.group(1), m.group(2)
-                    history.append({"role": "user", "content": f"{username}: {msg}"})
+                    display_name, user_id, msg = m.group(1), m.group(2), m.group(3)
+                    entry: dict = {
+                        "role": "user",
+                        "content": f"{display_name}: {msg}",
+                        "metadata": {
+                            "source": "discord",
+                            "author_id": user_id,
+                            "author_display_name": display_name,
+                        },
+                    }
+                    history.append(entry)
+                else:
+                    # Legacy format: **Username**: content
+                    m2 = re.match(r"\*\*(.+?)\*\*:\s*(.*)", line)
+                    if m2:
+                        username, msg = m2.group(1), m2.group(2)
+                        history.append({"role": "user", "content": f"{username}: {msg}"})
             elif history:
                 # Continuation of previous message
                 history[-1]["content"] += "\n" + line
@@ -241,28 +333,54 @@ class DiscordSessionManager:
         if not history:
             return
 
-        # We don't know the original channel_id, so we key by channel_name
-        # to at least avoid duplicates; the real channel_id will be set on
-        # the next incoming Discord message that matches.
-        # Use a synthetic key — actual reconnection happens via channel_name matching.
-        session = DiscordChannelSession(
-            channel_id=f"_restored_{channel_name}",
-            channel_name=channel_name,
-        )
-        session.conversation_history = history
-        session.session_file_path = path
-        session.session_created = True
+        # ------------------------------------------------------------------
+        # Build session object
+        # ------------------------------------------------------------------
+        if channel_id_from_header:
+            # New format: use real channel_id directly (no synthetic key needed)
+            session = DiscordChannelSession(
+                channel_id=channel_id_from_header,
+                channel_name=channel_name,
+            )
+            session.guild_id = guild_id_from_header
+            session.guild_name = guild_name_from_header
+            session.conversation_history = history
+            session.session_file_path = path
+            session.session_created = True
 
-        # Extract session name from filename (timestamp_discord_channel_slug.md)
-        stem = path.stem
-        parts = stem.split("_", 2)
-        session.current_session_name = parts[2] if len(parts) >= 3 else stem
+            stem = path.stem
+            parts = stem.split("_", 2)
+            session.current_session_name = parts[2] if len(parts) >= 3 else stem
 
-        with self._lock:
-            self._sessions[session.channel_id] = session
-            # Also store a mapping hint so we can reconnect on first message
-            self._sessions[f"_name_{channel_name}"] = session
-            log.debug("Restored Discord session for #%s (%d messages)", channel_name, len(history))
+            with self._lock:
+                self._sessions[channel_id_from_header] = session
+                log.debug(
+                    "Restored Discord session for #%s (id=%s, %d messages)",
+                    channel_name, channel_id_from_header, len(history),
+                )
+        else:
+            # Legacy format: use synthetic key + reconnect_restored_session approach
+            session = DiscordChannelSession(
+                channel_id=f"_restored_{channel_name}",
+                channel_name=channel_name,
+            )
+            session.guild_id = guild_id_from_header
+            session.guild_name = guild_name_from_header
+            session.conversation_history = history
+            session.session_file_path = path
+            session.session_created = True
+
+            stem = path.stem
+            parts = stem.split("_", 2)
+            session.current_session_name = parts[2] if len(parts) >= 3 else stem
+
+            with self._lock:
+                self._sessions[session.channel_id] = session
+                # Also store a mapping hint so we can reconnect on first message
+                self._sessions[f"_name_{channel_name}"] = session
+                log.debug(
+                    "Restored Discord session for #%s (%d messages)", channel_name, len(history)
+                )
 
     def reconnect_restored_session(
         self, channel_id: str, channel_name: str

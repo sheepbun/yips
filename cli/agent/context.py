@@ -107,12 +107,16 @@ class AgentContextMixin:
 
         # Recent memories (last 5)
         if MEMORIES_DIR.exists():
+            current_session = getattr(self, 'session_file_path', None)
             memories = sorted(MEMORIES_DIR.glob("*.md"), reverse=True)[:5]
             if memories:
                 mem_content: list[str] = []
                 for mem in memories:
+                    if current_session and mem.resolve() == current_session.resolve():
+                        continue  # Don't feed the model its own in-progress conversation
                     mem_content.append(f"## {mem.stem}\n{mem.read_text()}")
-                sections.append(f"# RECENT MEMORIES\n\n" + "\n\n".join(mem_content))
+                if mem_content:
+                    sections.append(f"# RECENT MEMORIES\n\n" + "\n\n".join(mem_content))
 
         # Available commands
         available_cmds: list[str] = []

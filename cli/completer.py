@@ -78,7 +78,9 @@ class SlashCommandCompleter(Completer):
             '/backend': {'desc': 'Switch AI backends (llamacpp, claude)', 'type': 'tool'},
             '/download': {'desc': 'Open the interactive model downloader', 'type': 'tool'},
             '/models': {'desc': 'Open the interactive Model Manager', 'type': 'tool'},
-            '/nick': {'desc': 'Set a custom nickname for a model', 'type': 'tool'}
+            '/nick': {'desc': 'Set a custom nickname for a model', 'type': 'tool'},
+            '/gateway': {'desc': 'Open the Model Gateway configuration screen', 'type': 'tool'},
+            '/gw': {'desc': 'Open the Model Gateway configuration screen', 'type': 'tool'},
         }
 
         # 2. Discover commands from directories

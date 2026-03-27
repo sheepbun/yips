@@ -380,6 +380,11 @@ def handle_slash_command(agent: YipsAgentProtocol, user_input: str) -> str | boo
             return handle_slash_command(agent, result)
         return True
 
+    if command in ("gateway", "gw"):
+        from cli.gateway.gateway_ui import run_gateway_ui
+        run_gateway_ui()
+        return True
+
     # Check for command directory (case-insensitive) in tools then skills
     cmd_dir = None
     # Priority 1: Tools
@@ -465,7 +470,7 @@ def handle_slash_command(agent: YipsAgentProtocol, user_input: str) -> str | boo
         available.extend([d.name.lower() for d in TOOLS_DIR.iterdir() if d.is_dir()])
     if SKILLS_DIR.exists():
         available.extend([d.name.lower() for d in SKILLS_DIR.iterdir() if d.is_dir()])
-    available.extend(["exit", "model", "backend", "verbose", "stream", "sessions", "clear", "new", "download", "models"])
+    available.extend(["exit", "model", "backend", "verbose", "stream", "sessions", "clear", "new", "download", "models", "gateway", "gw"])
     console.print(f"[dim]Available: /{', /'.join(sorted(list(set(available))))}[/dim]")
     return True
 

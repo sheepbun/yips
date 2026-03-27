@@ -277,13 +277,10 @@ def execute_tool(
                     ))
                     if diff_lines:
                         diff_text = "\n".join(diff_lines)
-                        emit_preview(
-                            render_text_preview(path, diff_text, mode="diff", title="📝 Write Preview"),
-                            preview_callback,
-                        )
                         if pause_live:
                             pause_live()
                         try:
+                            console.print(render_text_preview(path, diff_text, mode="diff", title="📝 Write Preview"))
                             console.print("Apply this write? (y/n): ", style=PROMPT_COLOR, end="")
                             response = input().strip().lower()
                             if response not in ("y", "yes"):
@@ -292,11 +289,18 @@ def execute_tool(
                             if resume_live:
                                 resume_live()
                 else:
-                    # New file: show preview of what will be created
-                    emit_preview(
-                        render_text_preview(path, content, mode="preview", title="📝 New File"),
-                        preview_callback,
-                    )
+                    # New file: show preview and ask for confirmation
+                    if pause_live:
+                        pause_live()
+                    try:
+                        console.print(render_text_preview(path, content, mode="preview", title="📝 New File"))
+                        console.print("Create this new file? (y/n): ", style=PROMPT_COLOR, end="")
+                        confirm = input().strip().lower()
+                        if confirm not in ("y", "yes"):
+                            return "[Write cancelled by user]"
+                    finally:
+                        if resume_live:
+                            resume_live()
                 p.write_text(content)
                 return f"[File written: {path}]"
             except Exception as e:
@@ -428,13 +432,10 @@ def execute_tool(
                     fromfile=f"a/{path}", tofile=f"b/{path}", lineterm=""
                 ))
                 diff_text = "\n".join(diff_lines) if diff_lines else "(No textual changes detected)"
-                emit_preview(
-                    render_text_preview(path, diff_text, mode="diff", title="✏️ Edit Preview"),
-                    preview_callback,
-                )
                 if pause_live:
                     pause_live()
                 try:
+                    console.print(render_text_preview(path, diff_text, mode="diff", title="✏️ Edit Preview"))
                     console.print("Apply this change? (y/n): ", style=PROMPT_COLOR, end="")
                     response = input().strip().lower()
                     if response not in ("y", "yes"):
@@ -644,6 +645,9 @@ def clean_response(response: str) -> str:
         
     cleaned = re.sub(pattern, replace_fn, response, flags=re.DOTALL)
 
+    # Strip incomplete trailing tags missing their closing '}' (truncated output or feedback loop)
+    cleaned = re.sub(r"\{(?:ACTION|INVOKE_SKILL|UPDATE_IDENTITY|THOUGHT):[^}]*$", "", cleaned, flags=re.DOTALL)
+
     # Strip session-memory dumps or leaked persisted transcript content if the model
     # echoes them back into the visible response.
     session_markers = [
@@ -669,6 +673,8 @@ def clean_response(response: str) -> str:
         "\n### Active Conversation",
         "\n### Archived Conversation",
         "\n### Running Summary",
+        "\n**Katherine**:",
+        "\n**Yips**:",
     ]
     cut_positions = [cleaned.find(marker) for marker in session_cut_markers if cleaned.find(marker) != -1]
     if cut_positions:

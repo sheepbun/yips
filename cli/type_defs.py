@@ -65,6 +65,18 @@ class YipsConfig(TypedDict, total=False):
     streaming: bool
     max_depth: int
     nicknames: dict[str, str]
+    # Gateway settings
+    gateway_agent: str          # "llamacpp" | "claude" | "claude-code" | "codex"
+    whatsapp_token: str
+    telegram_token: str
+    discord_token: str
+    discord_allowed_servers: list[str]   # Guild IDs; empty = allow all
+    discord_allowed_channels: list[str]  # Channel IDs; empty = allow all
+    discord_allowed_users: list[str]     # User IDs; empty = allow all
+    discord_edit_allowed_users: list[str]  # User IDs with file-edit access; empty = none
+    claude_code_bin_path: str   # path to claude binary; "" → use PATH
+    codex_bin_path: str         # path to codex binary; "" → use PATH
+    codex_api_key: str          # OpenAI API key for codex; "" → use OPENAI_API_KEY env
 
 
 # Session State for ReAct loop

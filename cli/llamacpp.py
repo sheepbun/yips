@@ -268,7 +268,8 @@ def start_llamacpp(model_path: str | None = None) -> bool:
             "-m", resolved_path,
             "-c", str(ctx_size),
             "--port", str(port),
-            "--embedding", # Enable embeddings for tools if needed
+            "--embedding",  # Enable embeddings for tools if needed
+            "--jinja",      # Enable Jinja templates for function/tool calling
             "--log-disable"
         ] + flags
 

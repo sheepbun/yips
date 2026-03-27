@@ -145,6 +145,13 @@ class YipsAgent(
                 from cli.llamacpp import stop_llamacpp
                 stop_llamacpp()
 
+        # Stop Discord bot if running
+        try:
+            from cli.gateway.discord_service import stop_discord_service
+            stop_discord_service()
+        except Exception:
+            pass
+
         # Cancel any pending resize timer
         if self._resize_timer is not None:
             self._resize_timer.cancel()

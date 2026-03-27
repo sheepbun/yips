@@ -225,6 +225,14 @@ def process_response_and_tools(agent: YipsAgentProtocol, response: str, depth: i
                 live.stop()
 
             def resume_live() -> None:
+                preview_history.clear()
+                # Reset Rich's internal render-height tracker so the first refresh
+                # after restart doesn't move the cursor UP past the preview content
+                # that was permanently printed during the pause.
+                try:
+                    live._live_render._shape = (0, 0)
+                except AttributeError:
+                    pass
                 live.start(refresh=True)
                 live.update(build_tool_renderable(compact=True))
 
@@ -445,7 +453,7 @@ def main() -> None:
             agent.render_title_box()
 
         # Initialize backend after displaying UI
-        with show_booting("Booting Yips..."):
+        with show_booting("Booting Yips...") as live:
             agent.initialize_backend(silent=True)
 
             # Precache HF model data in background for snappy /download command
@@ -454,6 +462,30 @@ def main() -> None:
                 HFModelManager.precache_background()
             except Exception:
                 pass # Silently fail if HF is unavailable during boot
+
+            # Auto-start Discord bot if a token is configured
+            try:
+                from cli.gateway.discord_service import (
+                    start_discord_service, is_discord_running,
+                    is_discord_ready, get_discord_bot_name,
+                )
+                from cli.ui_rendering import BootingSpinner
+                start_discord_service()  # No-op if no token configured
+                if is_discord_running():
+                    live.update(BootingSpinner("Booting Yips... connecting to Discord"))
+                    # Give the bot a moment to authenticate so we can confirm it's live
+                    import time as _t
+                    _deadline = _t.monotonic() + 5
+                    while _t.monotonic() < _deadline:
+                        if is_discord_ready():
+                            break
+                        _t.sleep(0.2)
+                    if is_discord_ready():
+                        name = get_discord_bot_name() or "unknown"
+                        live.update(BootingSpinner(f"Discord bot connected as {name}"))
+                        _t.sleep(0.6)  # brief flash so user sees confirmation
+            except Exception:
+                pass  # Don't block boot if Discord fails
 
         # Flush any keystrokes buffered during startup BEFORE restoring echo
         # This prevents them from being echoed to the screen

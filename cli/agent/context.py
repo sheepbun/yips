@@ -63,17 +63,17 @@ class AgentContextMixin:
         # Soul document
         agent_md = BASE_DIR / "AGENT.md"
         if agent_md.exists():
-            sections.append(f"# SOUL DOCUMENT\n\n{agent_md.read_text()}")
+            sections.append(f"# SOUL DOCUMENT\n\n{agent_md.read_text(encoding='utf-8')}")
 
         # Identity
         identity_md = BASE_DIR / "IDENTITY.md"
         if identity_md.exists():
-            sections.append(f"# IDENTITY\n\n{identity_md.read_text()}")
+            sections.append(f"# IDENTITY\n\n{identity_md.read_text(encoding='utf-8')}")
 
         # Human info
         human_md = BASE_DIR / "author" / "HUMAN.md"
         if human_md.exists():
-            sections.append(f"# ABOUT KATHERINE\n\n{human_md.read_text()}")
+            sections.append(f"# ABOUT KATHERINE\n\n{human_md.read_text(encoding='utf-8')}")
 
         # System Information (dynamic)
         sections.append(self.build_system_info())
@@ -81,13 +81,13 @@ class AgentContextMixin:
         # Focus Area
         focus_md = DOT_YIPS_DIR / "FOCUS.md"
         if focus_md.exists():
-            sections.append(f"# CURRENT FOCUS AREA\n\n{focus_md.read_text()}")
+            sections.append(f"# CURRENT FOCUS AREA\n\n{focus_md.read_text(encoding='utf-8')}")
 
         # User Preferences
         pref_json = DOT_YIPS_DIR / "preferences.json"
         if pref_json.exists():
             try:
-                prefs = json.loads(pref_json.read_text())
+                prefs = json.loads(pref_json.read_text(encoding='utf-8'))
                 sections.append(f"# USER PREFERENCES\n\n{json.dumps(prefs, indent=2)}")
             except Exception:
                 pass
@@ -114,7 +114,7 @@ class AgentContextMixin:
                 for mem in memories:
                     if current_session and mem.resolve() == current_session.resolve():
                         continue  # Don't feed the model its own in-progress conversation
-                    mem_content.append(f"## {mem.stem}\n{mem.read_text()}")
+                    mem_content.append(f"## {mem.stem}\n{mem.read_text(encoding='utf-8')}")
                 if mem_content:
                     sections.append(f"# RECENT MEMORIES\n\n" + "\n\n".join(mem_content))
 

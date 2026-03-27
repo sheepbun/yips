@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
     from cli.gateway.discord_bot import YipsDiscordBot
@@ -18,6 +18,23 @@ if TYPE_CHECKING:
 _bot: YipsDiscordBot | None = None
 _thread: threading.Thread | None = None
 _loop: asyncio.AbstractEventLoop | None = None
+_activity_callback: Callable[[], None] | None = None
+
+
+def set_discord_activity_callback(callback: Callable[[], None] | None) -> None:
+    """Register a callback fired when Discord session activity is persisted."""
+    global _activity_callback
+    _activity_callback = callback
+
+    bot = _bot
+    loop = _loop
+    if bot is None or loop is None or loop.is_closed():
+        return
+
+    def _apply_callback() -> None:
+        bot._on_activity = _activity_callback
+
+    loop.call_soon_threadsafe(_apply_callback)
 
 
 def start_discord_service() -> None:
@@ -40,7 +57,7 @@ def start_discord_service() -> None:
 
     from cli.gateway.discord_bot import YipsDiscordBot
 
-    _bot = YipsDiscordBot()
+    _bot = YipsDiscordBot(on_activity=_activity_callback)
     _loop = asyncio.new_event_loop()
 
     def _run() -> None:

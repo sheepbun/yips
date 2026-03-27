@@ -12,6 +12,9 @@ Requirements:
 from __future__ import annotations
 
 import asyncio
+import logging
+from pathlib import Path
+from typing import Callable
 
 import discord
 
@@ -25,7 +28,10 @@ from cli.gateway.config import (
     get_platform_token,
     is_edit_allowed,
 )
+from cli.gateway.discord_session import DiscordSessionManager
 from cli.gateway.runners.base import AgentRunner
+
+log = logging.getLogger(__name__)
 
 
 def get_runner() -> AgentRunner:
@@ -49,11 +55,29 @@ def get_runner() -> AgentRunner:
 class YipsDiscordBot(discord.Client):
     """Discord bot that routes messages to the configured Yips AgentRunner."""
 
-    def __init__(self) -> None:
+    def __init__(self, on_activity: Callable[[], None] | None = None) -> None:
         intents = discord.Intents.default()
         intents.message_content = True  # privileged — enable in Discord Developer Portal
         intents.guilds = True
         super().__init__(intents=intents)
+        self._on_activity = on_activity
+        self._session_mgr = DiscordSessionManager(
+            on_session_saved=self._handle_session_saved
+        )
+        self._session_mgr.load_sessions_from_disk()
+
+    def _handle_session_saved(self, channel_id: str, session_file_path: Path) -> None:
+        if self._on_activity is None:
+            return
+        try:
+            self._on_activity()
+        except Exception as exc:
+            log.warning(
+                "Discord activity callback failed for channel %s (%s): %s",
+                channel_id,
+                session_file_path,
+                exc,
+            )
 
     async def on_ready(self) -> None:
         # Status is shown during the boot spinner — no print here to avoid
@@ -86,6 +110,13 @@ class YipsDiscordBot(discord.Client):
         await self._handle_message(message)
 
     async def _handle_message(self, message: discord.Message) -> None:
+        # Handle reset commands
+        stripped = message.content.strip().lower()
+        if stripped in ("!reset", "!new"):
+            self._session_mgr.reset_session(str(message.channel.id))
+            await message.reply("Session cleared. Starting fresh!")
+            return
+
         # React with eyes to acknowledge receipt
         try:
             await message.add_reaction("👀")
@@ -95,16 +126,38 @@ class YipsDiscordBot(discord.Client):
         user_id = str(message.author.id)
         can_edit = is_edit_allowed(user_id)
 
+        channel_id = str(message.channel.id)
+        channel_name = getattr(message.channel, "name", "dm")
+        username = message.author.display_name
+
+        # Try to reconnect a restored-from-disk session first
+        self._session_mgr.reconnect_restored_session(channel_id, channel_name)
+
+        # Ensure session exists
+        self._session_mgr.get_or_create_session(channel_id, channel_name)
+
+        # Grab history *before* adding the new message (so it's prior context)
+        history = self._session_mgr.get_history_for_runner(channel_id)
+
+        # Record the user message
+        self._session_mgr.add_user_message(channel_id, username, message.content)
+        self._session_mgr.save_session(channel_id)
+
+        # Format prompt with username so the AI knows who's speaking
+        formatted_content = f"{username}: {message.content}"
+
         response: str | None = None
         error: Exception | None = None
 
         try:
             runner = get_runner()
             async with message.channel.typing():
-                # AgentRunner.run() is synchronous/blocking.
-                # asyncio.to_thread() offloads it to a thread pool so the
-                # Discord event loop remains free during the (potentially long) call.
-                response = await asyncio.to_thread(runner.run, message.content, can_edit=can_edit)
+                response = await asyncio.to_thread(
+                    runner.run,
+                    formatted_content,
+                    can_edit=can_edit,
+                    history=history,
+                )
         except Exception as exc:
             error = exc
 
@@ -118,8 +171,12 @@ class YipsDiscordBot(discord.Client):
             await message.reply(f"Error: {error}")
             return
 
-        # Discord hard limit is 2000 chars — chunk if needed
+        # Record assistant response and persist
         text = response or "(no response)"
+        self._session_mgr.add_assistant_message(channel_id, text)
+        self._session_mgr.save_session(channel_id)
+
+        # Discord hard limit is 2000 chars — chunk if needed
         chunks = [text[i : i + 1990] for i in range(0, len(text), 1990)]
         for chunk in chunks:
             await message.reply(chunk)

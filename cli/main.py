@@ -29,7 +29,11 @@ import time
 from rich.live import Live
 from rich.console import RenderableType, Group
 
-from cli.agent import YipsAgent, _RESIZE_SENTINEL
+from cli.agent import (
+    YipsAgent,
+    _EXTERNAL_ACTIVITY_SENTINEL,
+    _RESIZE_SENTINEL,
+)
 from cli.type_defs import YipsAgentProtocol
 from cli.ui_rendering import (
     render_tool_batch,
@@ -54,6 +58,7 @@ def run_inline_prompt(
     """Run the normal CLI prompt with a fixed status row directly underneath."""
     result: dict[str, str] = {"text": ""}
     app_ref: list[Any] = [None]
+    draft_text = getattr(agent, "interrupted_input_text", "")
 
     def _accept(buff: Any) -> bool:
         result["text"] = buff.text
@@ -66,6 +71,7 @@ def run_inline_prompt(
         input_area = TextArea(
             multiline=False,
             prompt=[(PROMPT_COLOR, ">>> ")],
+            text=draft_text,
             style=PROMPT_COLOR,
             completer=completer,
             complete_while_typing=True,
@@ -111,11 +117,21 @@ def run_inline_prompt(
             agent._prompt_app = None
 
         if returned == _RESIZE_SENTINEL:
+            draft_text = getattr(agent, "interrupted_input_text", "") or input_area.text
+            agent.interrupted_input_text = draft_text
+            agent.refresh_display()
+            continue
+
+        if returned == _EXTERNAL_ACTIVITY_SENTINEL:
+            draft_text = getattr(agent, "interrupted_input_text", "") or input_area.text
+            agent.interrupted_input_text = draft_text
+            agent.pending_external_activity_refresh = False
             agent.refresh_display()
             continue
 
         break
 
+    agent.interrupted_input_text = ""
     if had_status_row:
         sys.stdout.write("\x1b[1A\x1b[2K\r")
         sys.stdout.flush()
@@ -466,10 +482,11 @@ def main() -> None:
             # Auto-start Discord bot if a token is configured
             try:
                 from cli.gateway.discord_service import (
-                    start_discord_service, is_discord_running,
+                    set_discord_activity_callback, start_discord_service, is_discord_running,
                     is_discord_ready, get_discord_bot_name,
                 )
                 from cli.ui_rendering import BootingSpinner
+                set_discord_activity_callback(agent.request_external_activity_refresh)
                 start_discord_service()  # No-op if no token configured
                 if is_discord_running():
                     live.update(BootingSpinner("Booting Yips... connecting to Discord"))
@@ -538,6 +555,9 @@ def main() -> None:
         if not is_gui and agent.resize_pending:
             agent.resize_pending = False
             agent.last_width = agent.console.width
+            agent.refresh_display()
+        if not is_gui and agent.pending_external_activity_refresh and agent._prompt_app is None:
+            agent.pending_external_activity_refresh = False
             agent.refresh_display()
 
         try:

@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 
 # Sentinel value returned by the prompt app when a terminal resize interrupts input
 _RESIZE_SENTINEL = "__YIPS_RESIZE__"
+_EXTERNAL_ACTIVITY_SENTINEL = "__YIPS_EXTERNAL_ACTIVITY__"
 
 from cli.color_utils import console
 from cli.config import (
@@ -71,6 +72,8 @@ class YipsAgent(
         # Terminal resize handling
         self.last_width: int = 0
         self.resize_pending: bool = False
+        self.pending_external_activity_refresh: bool = False
+        self.interrupted_input_text: str = ""
         self._resize_timer: threading.Timer | None = None
         self._prompt_app: "Application[str] | None" = None
 
@@ -196,8 +199,30 @@ class YipsAgent(
         """Trigger resize: exit running prompt app (if any) or set pending flag."""
         if self._prompt_app is not None:
             try:
+                self.interrupted_input_text = self._prompt_app.layout.current_buffer.text
+            except Exception:
+                pass
+            try:
                 self._prompt_app.exit(result=_RESIZE_SENTINEL)
             except Exception:
                 self.resize_pending = True
         else:
             self.resize_pending = True
+
+    def request_external_activity_refresh(self) -> None:
+        """Request a redraw after externally persisted session activity."""
+        self.pending_external_activity_refresh = True
+
+        prompt_app = self._prompt_app
+        if prompt_app is None:
+            return
+
+        try:
+            self.interrupted_input_text = prompt_app.layout.current_buffer.text
+        except Exception:
+            pass
+
+        try:
+            prompt_app.exit(result=_EXTERNAL_ACTIVITY_SENTINEL)
+        except Exception:
+            pass

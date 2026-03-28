@@ -4,15 +4,140 @@ Information utilities for Yips CLI.
 Provides functions for retrieving user info, activity history, and display names.
 """
 
+from __future__ import annotations
+
 import re
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from cli.config import BASE_DIR, MEMORIES_DIR
-
-
 from functools import lru_cache
+
+from cli.config import BASE_DIR, MEMORIES_DIR
+from cli.gateway.discord_session import (
+    DISCORD_PREFIX_COLOR,
+    build_display_label,
+    extract_display_parts,
+    infer_session_slug_from_filename,
+)
+
+
+@dataclass(frozen=True)
+class ActivityItem:
+    display_time: str
+    prefix: str
+    title: str
+    prefix_color: str | None
+    path: Path
+
+
+def _parse_memory_timestamp(path: Path) -> datetime:
+    name = path.stem
+    parts = name.split("_", 2)
+    if len(parts) >= 3:
+        date_part = parts[0]
+        time_part = parts[1]
+        try:
+            if "-" in date_part:
+                return datetime.strptime(
+                    f"{date_part} {time_part.replace('-', ':')}",
+                    "%Y-%m-%d %H:%M:%S",
+                )
+            return datetime.strptime(f"{date_part} {time_part}", "%Y%m%d %H%M%S")
+        except ValueError:
+            pass
+    return datetime.fromtimestamp(path.stat().st_mtime)
+
+
+def _format_display_time(dt: datetime) -> str:
+    hour_int = dt.hour
+    if hour_int == 0:
+        display_hour = 12
+        am_pm = "AM"
+    elif hour_int < 12:
+        display_hour = hour_int
+        am_pm = "AM"
+    elif hour_int == 12:
+        display_hour = 12
+        am_pm = "PM"
+    else:
+        display_hour = hour_int - 12
+        am_pm = "PM"
+
+    date_str = f"{dt.year}-{dt.month}-{dt.day}"
+    time_str = f"{display_hour:>2}:{dt.strftime('%M')} {am_pm}"
+    return f"{date_str} @ {time_str}"
+
+
+def _read_session_headers(path: Path) -> dict[str, str]:
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return {}
+
+    headers: dict[str, str] = {}
+    for line in text.splitlines():
+        if line == "## Conversation":
+            break
+        match = re.match(r"\*\*(.+?)\*\*:\s*(.*)", line.strip())
+        if match:
+            headers[match.group(1).strip()] = match.group(2).strip()
+    return headers
+
+
+def _display_title_from_path(path: Path, channel_name: str | None = None) -> str:
+    return infer_session_slug_from_filename(path, channel_name=channel_name).replace("_", " ").title()
+
+
+def _build_activity_item(path: Path, dt: datetime) -> ActivityItem:
+    headers = _read_session_headers(path)
+    display_time = _format_display_time(dt)
+    platform = headers.get("Platform")
+
+    if platform == "Discord" or path.stem.split("_", 2)[-1].startswith("discord_"):
+        server_name = headers.get("Server")
+        channel_name = headers.get("Channel")
+
+        if not channel_name:
+            source = headers.get("Source", "")
+            guild_match = re.search(r"\(#(.+?)\)", source)
+            dm_match = re.search(r"\((?!#)(.+?)\)", source)
+            if guild_match:
+                channel_name = guild_match.group(1)
+            elif dm_match:
+                channel_name = dm_match.group(1)
+
+        if not server_name:
+            server_name = "Unknown Server"
+
+        session_name = _display_title_from_path(
+            path,
+            channel_name=channel_name if "Server" not in headers else None,
+        )
+        display_label = build_display_label(
+            "Discord",
+            server_name,
+            channel_name or "unknown",
+            session_name,
+        )
+        prefix, title = extract_display_parts(display_label)
+        return ActivityItem(
+            display_time=display_time,
+            prefix=prefix,
+            title=title,
+            prefix_color=DISCORD_PREFIX_COLOR,
+            path=path,
+        )
+
+    return ActivityItem(
+        display_time=display_time,
+        prefix="",
+        title=_display_title_from_path(path),
+        prefix_color=None,
+        path=path,
+    )
+
 
 @lru_cache(maxsize=1)
 def get_username() -> str:
@@ -21,17 +146,14 @@ def get_username() -> str:
         human_file = BASE_DIR / "author" / "HUMAN.md"
         if human_file.exists():
             content = human_file.read_text()
-            # Look for "Preferred name/nickname" field
-            for line in content.split('\n'):
-                if line.startswith('**Preferred name/nickname**'):
-                    # Extract content after the colon
-                    match = re.search(r'\*\*Preferred name/nickname\*\*:\s*(.+?)(?:\n|$)', content)
+            for line in content.split("\n"):
+                if line.startswith("**Preferred name/nickname**"):
+                    match = re.search(r"\*\*Preferred name/nickname\*\*:\s*(.+?)(?:\n|$)", content)
                     if match:
                         name = match.group(1).strip()
-                        if name and not name.startswith('<!--'):
+                        if name and not name.startswith("<!--"):
                             return name
-            # Fallback to Name field if preferred name is empty
-            match = re.search(r'\*\*Name\*\*:\s*(.+?)(?:\n|$)', content)
+            match = re.search(r"\*\*Name\*\*:\s*(.+?)(?:\n|$)", content)
             if match:
                 return match.group(1).strip()
     except Exception:
@@ -40,276 +162,63 @@ def get_username() -> str:
 
 
 def get_display_directory() -> str:
-    """Get the current working directory to display in title box with tilde notation.
-
-    Returns the directory where yips was launched from (from YIPS_USER_CWD env var),
-    or falls back to current working directory. Uses ~ notation if under home directory.
-    """
+    """Get the current working directory to display in title box with tilde notation."""
     import os
-    from pathlib import Path
 
-    # Check for the user's original working directory from launcher
-    user_cwd = os.environ.get('YIPS_USER_CWD')
-    if user_cwd:
-        cwd = Path(user_cwd)
-    else:
-        # Fallback to current working directory
-        cwd = Path.cwd()
-
+    user_cwd = os.environ.get("YIPS_USER_CWD")
+    cwd = Path(user_cwd) if user_cwd else Path.cwd()
     home_path = Path.home()
 
-    # Check if cwd is under home directory
     try:
-        # relative_to() will raise ValueError if not a subpath
         relative = cwd.relative_to(home_path)
-        # Return with tilde notation
         return f"~/{relative}"
     except ValueError:
-        # Not under home directory, return absolute path
         return str(cwd)
 
 
-def get_recent_activity(limit: int = 5) -> list[str]:
-    """Get recent activity from memories directory.
-
-    Supports both filename formats:
-    - New format: 2026-01-31_03-56-21_title.md (YYYY-MM-DD_HH-MM-SS_title)
-    - Old format: 20260131_023835_title.md (YYYYMMDD_HHMMSS_title)
-
-    Returns list of formatted strings: "YYYY-MM-DD @ HH:MM XM: Title"
-    """
-    try:
-        if not MEMORIES_DIR.exists():
-            return ["No recent activity"]
-
-        # Build list of (datetime, filepath) tuples by parsing filenames
-        dated_files: list[tuple[datetime, Path]] = []
-        for f in MEMORIES_DIR.glob("*.md"):
-            try:
-                name: str = f.stem  # Remove .md extension
-                parts: list[str] = name.split('_', 2)
-
-                if len(parts) >= 3:
-                    date_part: str = parts[0]
-                    time_part: str = parts[1]
-
-                    # Detect format by checking for hyphens in date part
-                    if '-' in date_part:
-                        # New format: YYYY-MM-DD_HH-MM-SS
-                        try:
-                            dt_str: str = f"{date_part} {time_part.replace('-', ':')}"
-                            dt: datetime = datetime.strptime(dt_str, '%Y-%m-%d %H:%M:%S')
-                            dated_files.append((dt, f))
-                        except ValueError:
-                            # Fallback to st_mtime if parsing fails
-                            dt: datetime = datetime.fromtimestamp(f.stat().st_mtime)
-                            dated_files.append((dt, f))
-                    else:
-                        # Old format: YYYYMMDD_HHMMSS
-                        try:
-                            dt_str: str = f"{date_part} {time_part}"
-                            dt: datetime = datetime.strptime(dt_str, '%Y%m%d %H%M%S')
-                            dated_files.append((dt, f))
-                        except ValueError:
-                            # Fallback to st_mtime if parsing fails
-                            dt: datetime = datetime.fromtimestamp(f.stat().st_mtime)
-                            dated_files.append((dt, f))
-                else:
-                    # Fallback for malformed filenames
-                    dt: datetime = datetime.fromtimestamp(f.stat().st_mtime)
-                    dated_files.append((dt, f))
-            except Exception:
-                # Skip files that cause exceptions
-                continue
-
-        if not dated_files:
-            return ["No recent activity"]
-
-        # Sort by datetime descending (most recent first)
-        dated_files.sort(key=lambda x: x[0], reverse=True)
-        memory_files: list[Path] = [f for _, f in dated_files[:limit]]
-
-        activities: list[str] = []
-        for f in memory_files:
-            try:
-                name: str = f.stem  # Remove .md extension
-                parts: list[str] = name.split('_', 2)
-
-                if len(parts) >= 3:
-                    date_part: str = parts[0]
-                    time_part: str = parts[1]
-                    title: str = '_'.join(parts[2:])
-                    title = title.replace('_', ' ').title()
-
-                    # Detect format by checking for hyphens in date part
-                    if '-' in date_part:
-                        # New format: YYYY-MM-DD_HH-MM-SS
-                        try:
-                            dt: datetime = datetime.strptime(date_part, '%Y-%m-%d')
-                            # Extract hour and minute from HH-MM-SS format
-                            time_parts: list[str] = time_part.split('-')
-                            if len(time_parts) >= 2:
-                                hour_int: int = int(time_parts[0])
-                                minute: str = time_parts[1]
-                                # Convert to 12-hour format with AM/PM
-                                if hour_int == 0:
-                                    display_hour: int = 12
-                                    am_pm: str = "AM"
-                                elif hour_int < 12:
-                                    display_hour = hour_int
-                                    am_pm = "AM"
-                                elif hour_int == 12:
-                                    display_hour = 12
-                                    am_pm = "PM"
-                                else:
-                                    display_hour = hour_int - 12
-                                    am_pm = "PM"
-                                
-                                # Fixed width formatting: month-day (no leading zeros), hour (space padded >2)
-                                date_str: str = dt.strftime('%Y-%-m-%-d')
-                                time_str: str = f"{display_hour:>2}:{minute} {am_pm}"
-                                display: str = f"{date_str} @ {time_str}: {title}"
-                            else:
-                                display = f"{dt.strftime('%Y-%-m-%-d')}: {title}"
-                        except (ValueError, IndexError):
-                            display = f"{date_part}: {title}"
-                    else:
-                        # Old format: YYYYMMDD_HHMMSS
-                        try:
-                            dt: datetime = datetime.strptime(date_part, '%Y%m%d')
-                            # Extract hour and minute from HHMMSS (first 4 chars: HHMM)
-                            if len(time_part) >= 4:
-                                hour_int: int = int(time_part[:2])
-                                minute: str = time_part[2:4]
-                                # Convert to 12-hour format with AM/PM
-                                if hour_int == 0:
-                                    display_hour = 12
-                                    am_pm = "AM"
-                                elif hour_int < 12:
-                                    display_hour = hour_int
-                                    am_pm = "AM"
-                                elif hour_int == 12:
-                                    display_hour = 12
-                                    am_pm = "PM"
-                                else:
-                                    display_hour = hour_int - 12
-                                    am_pm = "PM"
-
-                                # Fixed width formatting
-                                date_str: str = dt.strftime('%Y-%-m-%-d')
-                                time_str: str = f"{display_hour:>2}:{minute} {am_pm}"
-                                display = f"{date_str} @ {time_str}: {title}"
-                            else:
-                                display = f"{dt.strftime('%Y-%-m-%-d')}: {title}"
-                        except (ValueError, IndexError):
-                            display = f"{date_part}: {title}"
-                else:
-                    # Fallback for malformed filenames
-                    dt: datetime = datetime.fromtimestamp(f.stat().st_mtime)
-                    hour_int: int = dt.hour
-                    if hour_int == 0:
-                        display_hour = 12
-                        am_pm = "AM"
-                    elif hour_int < 12:
-                        display_hour = hour_int
-                        am_pm = "AM"
-                    elif hour_int == 12:
-                        display_hour = 12
-                        am_pm = "PM"
-                    else:
-                        display_hour = hour_int - 12
-                        am_pm = "PM"
-                    
-                    date_str: str = dt.strftime('%Y-%-m-%-d')
-                    time_str: str = f"{display_hour:>2}:{dt.strftime('%M')} {am_pm}"
-                    display = f"{date_str} @ {time_str}: {name}"
-
-                activities.append(display)
-            except Exception:
-                # If parsing fails for a specific file, skip it
-                continue
-
-        return activities if activities else ["No recent activity"]
-    except Exception:
-        return ["No recent activity"]
-
-
-def get_session_list() -> list[dict[str, Any]]:
-    """Get list of session files with formatted display names and full paths.
-    
-    Returns a list of dicts: {'path': Path, 'display': str}
-    Sorted by date descending (newest first).
-    """
+def get_recent_activity_items(limit: int = 5) -> list[ActivityItem]:
     try:
         if not MEMORIES_DIR.exists():
             return []
 
-        # Build list of (datetime, filepath) tuples
-        dated_files: list[tuple[datetime, Path]] = []
-        for f in MEMORIES_DIR.glob("*.md"):
-            try:
-                name: str = f.stem
-                parts: list[str] = name.split('_', 2)
+        dated_files = [(_parse_memory_timestamp(path), path) for path in MEMORIES_DIR.glob("*.md")]
+        dated_files.sort(key=lambda item: item[0], reverse=True)
+        return [_build_activity_item(path, dt) for dt, path in dated_files[:limit]]
+    except Exception:
+        return []
 
-                if len(parts) >= 3:
-                    date_part: str = parts[0]
-                    time_part: str = parts[1]
-                    if '-' in date_part:
-                        dt_str: str = f"{date_part} {time_part.replace('-', ':')}"
-                        dt: datetime = datetime.strptime(dt_str, '%Y-%m-%d %H:%M:%S')
-                    else:
-                        dt_str: str = f"{date_part} {time_part}"
-                        dt: datetime = datetime.strptime(dt_str, '%Y%m%d %H%M%S')
-                    dated_files.append((dt, f))
-                else:
-                    dt: datetime = datetime.fromtimestamp(f.stat().st_mtime)
-                    dated_files.append((dt, f))
-            except Exception:
-                dt: datetime = datetime.fromtimestamp(f.stat().st_mtime)
-                dated_files.append((dt, f))
 
-        # Sort by datetime descending
-        dated_files.sort(key=lambda x: x[0], reverse=True)
+def get_recent_activity(limit: int = 5) -> list[str]:
+    items = get_recent_activity_items(limit=limit)
+    if not items:
+        return ["No recent activity"]
+    return [f"{item.display_time}: {item.prefix}{item.title}" for item in items]
+
+
+def get_session_list() -> list[dict[str, Any]]:
+    """Get session files with structured display segments and plain compatibility text."""
+    try:
+        if not MEMORIES_DIR.exists():
+            return []
+
+        dated_files = [(_parse_memory_timestamp(path), path) for path in MEMORIES_DIR.glob("*.md")]
+        dated_files.sort(key=lambda item: item[0], reverse=True)
 
         sessions: list[dict[str, Any]] = []
-        for dt, f in dated_files:
-            try:
-                name: str = f.stem
-                parts: list[str] = name.split('_', 2)
-                if len(parts) >= 3:
-                    date_part: str = parts[0]
-                    time_part: str = parts[1]
-                    title: str = '_'.join(parts[2:])
-                    title = title.replace('_', ' ').title()
-                    
-                    if '-' in date_part:
-                        # Convert HH-MM-SS to 12h format
-                        time_parts: list[str] = time_part.split('-')
-                        hour: int = int(time_parts[0])
-                        minute: str = time_parts[1]
-                        period: str = "AM" if hour < 12 else "PM"
-                        hour = 12 if hour == 0 else (hour if hour <= 12 else hour - 12)
-                        
-                        date_str: str = dt.strftime('%Y-%-m-%-d')
-                        time_str: str = f"{hour:>2}:{minute} {period}"
-                        display: str = f"{date_str} @ {time_str}: {title}"
-                    else:
-                        # Old format
-                        hour: int = int(time_part[:2])
-                        minute: str = time_part[2:4]
-                        period: str = "AM" if hour < 12 else "PM"
-                        hour = 12 if hour == 0 else (hour if hour <= 12 else hour - 12)
-
-                        date_str: str = dt.strftime('%Y-%-m-%-d')
-                        time_str: str = f"{hour:>2}:{minute} {period}"
-                        display: str = f"{date_str} @ {time_str}: {title}"
-                else:
-                    display: str = f"{dt.strftime('%Y-%-m-%-d %H:%M')}: {f.stem}"
-                
-                sessions.append({'path': f, 'display': display})
-            except Exception:
-                sessions.append({'path': f, 'display': f.name})
-
+        for dt, path in dated_files:
+            item = _build_activity_item(path, dt)
+            display_plain = f"{item.display_time}: {item.prefix}{item.title}"
+            sessions.append(
+                {
+                    "path": path,
+                    "timestamp": item.display_time,
+                    "display_prefix": item.prefix,
+                    "display_title": item.title,
+                    "prefix_color": item.prefix_color,
+                    "display_plain": display_plain,
+                    "display": display_plain,
+                }
+            )
         return sessions
     except Exception:
         return []
@@ -326,32 +235,25 @@ def get_friendly_backend_name(backend_name: str) -> str:
 
 def get_friendly_model_name(model_name: str | None) -> str:
     """Convert internal model name to display-friendly name."""
-    if not model_name: return "Default"
-    
-    # Check for custom nicknames in config
+    if not model_name:
+        return "Default"
+
     from cli.config import load_config
+
     config = load_config()
     nicknames = config.get("nicknames", {})
     if model_name in nicknames:
         return nicknames[model_name]
-    
-    # Handle HuggingFace-style paths in llamacpp (author/repo/file.gguf or author\repo\file.gguf)
+
     sep = "/" if "/" in model_name else ("\\" if "\\" in model_name else None)
     if sep:
         parts = model_name.split(sep)
-        # Use the repo segment (second-to-last) when available, else fall back to filename
-        if len(parts) >= 2:
-            pure_name = parts[-2]
-        else:
-            pure_name = parts[-1]
-            if pure_name.endswith(".gguf"):
-                pure_name = pure_name[:-5]
-    else:
-        pure_name = model_name
+        pure_name = parts[-2] if len(parts) >= 2 else parts[-1]
         if pure_name.endswith(".gguf"):
             pure_name = pure_name[:-5]
+    else:
+        pure_name = model_name[:-5] if model_name.endswith(".gguf") else model_name
 
-    # Also check nickname for the resolved name
     if pure_name in nicknames:
         return nicknames[pure_name]
 
@@ -371,6 +273,7 @@ def get_friendly_model_name(model_name: str | None) -> str:
 def set_model_nickname(model_target: str, nickname: str) -> None:
     """Set a custom nickname for a model and save to config."""
     from cli.config import load_config, save_config
+
     config = load_config()
     nicknames = config.get("nicknames", {})
     nicknames[model_target] = nickname

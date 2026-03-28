@@ -1,4 +1,4 @@
-"""Tests for DiscordSessionManager — metadata storage, rich markdown, dual-format load."""
+"""Tests for DiscordSessionManager and Discord activity label helpers."""
 
 from __future__ import annotations
 
@@ -6,19 +6,16 @@ import re
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
+from cli.gateway.discord_session import (
+    DiscordSessionManager,
+    build_display_label,
+    infer_session_slug_from_filename,
+)
 
-from cli.gateway.discord_session import DiscordChannelSession, DiscordSessionManager
-
-
-# ---------------------------------------------------------------------------
-#  Helpers
-# ---------------------------------------------------------------------------
 
 def _make_manager(tmp_path: Path) -> DiscordSessionManager:
     with patch("cli.gateway.discord_session.MEMORIES_DIR", tmp_path):
-        mgr = DiscordSessionManager()
-    return mgr
+        return DiscordSessionManager()
 
 
 def _make_meta(
@@ -44,249 +41,194 @@ def _make_meta(
     }
 
 
-# ---------------------------------------------------------------------------
-#  add_user_message — metadata storage
-# ---------------------------------------------------------------------------
+class TestDisplayLabelHelpers:
+    def test_builds_guild_label(self):
+        assert build_display_label("Discord", "yips.dev", "general", "hello_yips") == (
+            "Discord\\yips.dev\\#general | Hello Yips"
+        )
+
+    def test_builds_dm_label(self):
+        assert build_display_label("Discord", "DM", "alice", "hello_yips") == (
+            "Discord\\DM\\alice | Hello Yips"
+        )
+
+    def test_infers_slug_from_new_filename(self):
+        path = Path("2026-03-27_12-00-00_discord_yipsdev_general_hello_yips.md")
+        assert infer_session_slug_from_filename(path) == "hello_yips"
+
 
 class TestAddUserMessageMetadata:
     def test_message_stored_without_metadata(self, tmp_path: Path):
         mgr = _make_manager(tmp_path)
-        mgr.get_or_create_session("ch1", "general")
+        mgr.get_or_create_session("ch1", "TestServer", "general")
         mgr.add_user_message("ch1", "Alice", "hello")
         history = mgr.get_history_for_runner("ch1")
         assert len(history) == 1
         assert history[0]["role"] == "user"
-        assert "Alice: hello" in history[0]["content"]
+        assert history[0]["content"] == "Alice: hello"
         assert "metadata" not in history[0]
 
     def test_message_stored_with_metadata(self, tmp_path: Path):
         mgr = _make_manager(tmp_path)
-        mgr.get_or_create_session("ch1", "general")
-        meta = _make_meta()
-        mgr.add_user_message("ch1", "Alice", "hello", metadata=meta)
+        mgr.get_or_create_session("ch1", "TestServer", "general")
+        mgr.add_user_message("ch1", "Alice", "hello", metadata=_make_meta())
         history = mgr.get_history_for_runner("ch1")
         assert history[0]["metadata"]["author_id"] == "100"
 
-    def test_guild_id_cached_from_metadata(self, tmp_path: Path):
-        mgr = _make_manager(tmp_path)
-        mgr.get_or_create_session("ch1", "general")
-        meta = _make_meta(guild_id="999", guild_name="MyGuild")
-        mgr.add_user_message("ch1", "Alice", "hi", metadata=meta)
-        with mgr._lock:
-            session = mgr._sessions["ch1"]
-        assert session.guild_id == "999"
-        assert session.guild_name == "MyGuild"
-
-    def test_guild_cached_only_once(self, tmp_path: Path):
-        """Second message with different guild_id should NOT overwrite the first."""
-        mgr = _make_manager(tmp_path)
-        mgr.get_or_create_session("ch1", "general")
-        mgr.add_user_message("ch1", "A", "first", metadata=_make_meta(guild_id="1"))
-        mgr.add_user_message("ch1", "B", "second", metadata=_make_meta(guild_id="2"))
-        with mgr._lock:
-            session = mgr._sessions["ch1"]
-        assert session.guild_id == "1"  # unchanged
-
-
-# ---------------------------------------------------------------------------
-#  save_session — rich markdown header
-# ---------------------------------------------------------------------------
 
 class TestSaveSessionRichHeader:
-    def test_channel_id_header_present(self, tmp_path: Path):
+    def test_first_save_uses_safe_discord_filename(self, tmp_path: Path):
         with patch("cli.gateway.discord_session.MEMORIES_DIR", tmp_path):
             mgr = DiscordSessionManager()
-            mgr.get_or_create_session("123456", "general")
+            mgr.get_or_create_session("123456", "yips.dev", "general")
             mgr.add_user_message(
-                "123456", "Alice", "hi", metadata=_make_meta(channel_id="123456")
+                "123456",
+                "Alice",
+                "hello yips",
+                metadata=_make_meta(channel_id="123456", guild_name="yips.dev"),
             )
             mgr.save_session("123456")
 
         files = list(tmp_path.glob("*_discord_*.md"))
         assert len(files) == 1
-        content = files[0].read_text()
+        assert re.search(r"_discord_yipsdev_general_hello_yips\.md$", files[0].name)
+
+    def test_new_metadata_headers_present(self, tmp_path: Path):
+        with patch("cli.gateway.discord_session.MEMORIES_DIR", tmp_path):
+            mgr = DiscordSessionManager()
+            mgr.get_or_create_session("123456", "yips.dev", "general")
+            mgr.add_user_message(
+                "123456",
+                "Alice",
+                "hi",
+                metadata=_make_meta(channel_id="123456", guild_name="yips.dev"),
+            )
+            mgr.save_session("123456")
+
+        content = list(tmp_path.glob("*.md"))[0].read_text(encoding="utf-8")
+        assert "**Platform**: Discord" in content
+        assert "**Server**: yips.dev" in content
+        assert "**Channel**: general" in content
+        assert "**Source**: Discord (#general)" in content
         assert "**ChannelId**: 123456" in content
 
-    def test_guild_header_present(self, tmp_path: Path):
+    def test_dm_source_header_uses_non_hash_label(self, tmp_path: Path):
         with patch("cli.gateway.discord_session.MEMORIES_DIR", tmp_path):
             mgr = DiscordSessionManager()
-            mgr.get_or_create_session("200", "general")
+            mgr.get_or_create_session("300", "DM", "Alice")
             mgr.add_user_message(
-                "200", "Alice", "hi",
-                metadata=_make_meta(channel_id="200", guild_id="500", guild_name="TestServer"),
-            )
-            mgr.save_session("200")
-
-        content = list(tmp_path.glob("*.md"))[0].read_text()
-        assert "**Guild**: TestServer (id=500)" in content
-
-    def test_mode_header_present(self, tmp_path: Path):
-        with patch("cli.gateway.discord_session.MEMORIES_DIR", tmp_path):
-            mgr = DiscordSessionManager()
-            mgr.get_or_create_session("300", "chat")
-            mgr.add_user_message(
-                "300", "Bob", "hey",
-                metadata=_make_meta(channel_id="300", channel_type="guild_text"),
+                "300",
+                "Alice",
+                "hello",
+                metadata=_make_meta(
+                    channel_id="300",
+                    guild_id=None,
+                    guild_name=None,
+                    channel_name="Alice",
+                    channel_type="dm",
+                ),
             )
             mgr.save_session("300")
 
-        content = list(tmp_path.glob("*.md"))[0].read_text()
-        assert "**Mode**: guild_text" in content
+        content = list(tmp_path.glob("*.md"))[0].read_text(encoding="utf-8")
+        assert "**Server**: DM" in content
+        assert "**Channel**: Alice" in content
+        assert "**Source**: Discord (Alice)" in content
 
     def test_rich_user_line_format(self, tmp_path: Path):
         with patch("cli.gateway.discord_session.MEMORIES_DIR", tmp_path):
             mgr = DiscordSessionManager()
-            mgr.get_or_create_session("400", "chat")
+            mgr.get_or_create_session("400", "TestServer", "chat")
             mgr.add_user_message(
-                "400", "Carol", "greetings",
+                "400",
+                "Carol",
+                "greetings",
                 metadata=_make_meta(author_id="777", author_display="Carol", channel_id="400"),
             )
             mgr.add_assistant_message("400", "Hello Carol!")
             mgr.save_session("400")
 
-        content = list(tmp_path.glob("*.md"))[0].read_text()
-        # Rich format: **Carol** [discord_user_id=777]: greetings
+        content = list(tmp_path.glob("*.md"))[0].read_text(encoding="utf-8")
         assert re.search(r"\*\*Carol\*\* \[discord_user_id=777\]: greetings", content)
         assert "**Yips**: Hello Carol!" in content
 
-    def test_legacy_user_line_without_metadata(self, tmp_path: Path):
-        """Messages without metadata fall back to **Username**: text format."""
-        with patch("cli.gateway.discord_session.MEMORIES_DIR", tmp_path):
-            mgr = DiscordSessionManager()
-            mgr.get_or_create_session("500", "test")
-            mgr.add_user_message("500", "Dave", "plain message")
-            mgr.save_session("500")
 
-        content = list(tmp_path.glob("*.md"))[0].read_text()
-        assert "**Dave**: plain message" in content
-
-
-# ---------------------------------------------------------------------------
-#  _load_single_session — new format (with ChannelId header)
-# ---------------------------------------------------------------------------
-
-class TestLoadSingleSessionNewFormat:
-    def _write_session_file(self, tmp_path: Path, channel_id: str, channel_name: str,
-                             guild_id: str, guild_name: str) -> Path:
-        fname = f"2026-01-01_00-00-00_discord_{channel_name}_hello.md"
-        content = (
-            f"# Session Memory\n\n"
-            f"**Created**: 2026-01-01 00:00:00\n"
-            f"**Type**: Ongoing Session\n"
-            f"**Source**: Discord\n"
-            f"**Mode**: guild_text\n"
-            f"**Guild**: {guild_name} (id={guild_id})\n"
-            f"**Channel**: #{channel_name} (id={channel_id})\n"
-            f"**ChannelId**: {channel_id}\n\n"
-            f"## Conversation\n\n"
-            f"**Alice** [discord_user_id=100]: hello\n"
-            f"**Yips**: Hi Alice!\n\n"
-            f"---\n*Last updated: 2026-01-01 00:00:00*\n"
+class TestLoadSingleSession:
+    def test_loads_new_metadata_format(self, tmp_path: Path):
+        path = tmp_path / "2026-01-01_00-00-00_discord_yipsdev_general_hello.md"
+        path.write_text(
+            "# Session Memory\n\n"
+            "**Created**: 2026-01-01 00:00:00\n"
+            "**Type**: Ongoing Session\n"
+            "**Source**: Discord (#general)\n"
+            "**Platform**: Discord\n"
+            "**Server**: yips.dev\n"
+            "**Channel**: general\n"
+            "**ChannelId**: 12345\n\n"
+            "## Conversation\n\n"
+            "**Alice** [discord_user_id=100]: hello\n"
+            "**Yips**: Hi Alice!\n\n"
+            "---\n*Last updated: 2026-01-01 00:00:00*\n",
+            encoding="utf-8",
         )
-        path = tmp_path / fname
-        path.write_text(content, encoding="utf-8")
-        return path
 
-    def test_loads_channel_id_directly(self, tmp_path: Path):
-        path = self._write_session_file(tmp_path, "12345", "general", "99999", "MyGuild")
-        with patch("cli.gateway.discord_session.MEMORIES_DIR", tmp_path):
-            mgr = DiscordSessionManager()
-            mgr._load_single_session(path)
-
-        # Session should be keyed by real channel_id, not synthetic
-        assert "12345" in mgr._sessions
-        assert "_restored_general" not in mgr._sessions
-
-    def test_loads_guild_metadata(self, tmp_path: Path):
-        path = self._write_session_file(tmp_path, "12345", "general", "99999", "MyGuild")
         with patch("cli.gateway.discord_session.MEMORIES_DIR", tmp_path):
             mgr = DiscordSessionManager()
             mgr._load_single_session(path)
 
         session = mgr._sessions["12345"]
-        assert session.guild_id == "99999"
-        assert session.guild_name == "MyGuild"
-
-    def test_loads_rich_user_lines(self, tmp_path: Path):
-        path = self._write_session_file(tmp_path, "12345", "general", "99999", "MyGuild")
-        with patch("cli.gateway.discord_session.MEMORIES_DIR", tmp_path):
-            mgr = DiscordSessionManager()
-            mgr._load_single_session(path)
-
-        session = mgr._sessions["12345"]
+        assert session.server_name == "yips.dev"
+        assert session.channel_name == "general"
+        assert session.session_slug == "hello"
+        assert session.current_session_name == "hello"
         user_entries = [e for e in session.conversation_history if e["role"] == "user"]
-        assert len(user_entries) == 1
         assert user_entries[0]["metadata"]["author_id"] == "100"
-        assert user_entries[0]["metadata"]["author_display_name"] == "Alice"
 
-    def test_loads_assistant_lines(self, tmp_path: Path):
-        path = self._write_session_file(tmp_path, "12345", "general", "99999", "MyGuild")
-        with patch("cli.gateway.discord_session.MEMORIES_DIR", tmp_path):
-            mgr = DiscordSessionManager()
-            mgr._load_single_session(path)
-
-        session = mgr._sessions["12345"]
-        asst = [e for e in session.conversation_history if e["role"] == "assistant"]
-        assert len(asst) == 1
-        assert asst[0]["content"] == "Hi Alice!"
-
-
-# ---------------------------------------------------------------------------
-#  _load_single_session — old/legacy format (no ChannelId header)
-# ---------------------------------------------------------------------------
-
-class TestLoadSingleSessionLegacyFormat:
-    def _write_legacy_file(self, tmp_path: Path, channel_name: str) -> Path:
-        fname = f"2026-01-01_00-00-00_discord_{channel_name}_greet.md"
-        content = (
-            f"# Session Memory\n\n"
-            f"**Created**: 2026-01-01 00:00:00\n"
-            f"**Type**: Ongoing Session\n"
-            f"**Source**: Discord (#{channel_name})\n\n"
-            f"## Conversation\n\n"
-            f"**Bob**: hey there\n"
-            f"**Yips**: Hello Bob!\n\n"
-            f"---\n*Last updated: 2026-01-01 00:00:00*\n"
+    def test_loads_legacy_source_with_unknown_server_fallback(self, tmp_path: Path):
+        path = tmp_path / "2026-01-01_00-00-00_discord_general_greet.md"
+        path.write_text(
+            "# Session Memory\n\n"
+            "**Created**: 2026-01-01 00:00:00\n"
+            "**Type**: Ongoing Session\n"
+            "**Source**: Discord (#general)\n\n"
+            "## Conversation\n\n"
+            "**Bob**: hey there\n"
+            "**Yips**: Hello Bob!\n\n"
+            "---\n*Last updated: 2026-01-01 00:00:00*\n",
+            encoding="utf-8",
         )
-        path = tmp_path / fname
-        path.write_text(content, encoding="utf-8")
-        return path
 
-    def test_uses_synthetic_key(self, tmp_path: Path):
-        path = self._write_legacy_file(tmp_path, "random")
         with patch("cli.gateway.discord_session.MEMORIES_DIR", tmp_path):
             mgr = DiscordSessionManager()
             mgr._load_single_session(path)
 
-        assert "_restored_random" in mgr._sessions
-        assert f"_name_random" in mgr._sessions
+        session = mgr._sessions["_restored_general"]
+        assert session.server_name == "Unknown Server"
+        assert session.channel_name == "general"
 
-    def test_history_restored(self, tmp_path: Path):
-        path = self._write_legacy_file(tmp_path, "random")
+    def test_reconnect_updates_server_and_channel(self, tmp_path: Path):
+        path = tmp_path / "2026-01-01_00-00-00_discord_general_greet.md"
+        path.write_text(
+            "# Session Memory\n\n"
+            "**Created**: 2026-01-01 00:00:00\n"
+            "**Type**: Ongoing Session\n"
+            "**Source**: Discord (#general)\n\n"
+            "## Conversation\n\n"
+            "**Bob**: hey there\n"
+            "---\n*Last updated: 2026-01-01 00:00:00*\n",
+            encoding="utf-8",
+        )
+
         with patch("cli.gateway.discord_session.MEMORIES_DIR", tmp_path):
             mgr = DiscordSessionManager()
             mgr._load_single_session(path)
+            restored = mgr.reconnect_restored_session("777888", "yips.dev", "general")
 
-        session = mgr._sessions["_restored_random"]
-        assert len(session.conversation_history) == 2
-        assert session.conversation_history[0]["role"] == "user"
-        assert "Bob" in session.conversation_history[0]["content"]
-
-    def test_reconnect_adopts_real_channel_id(self, tmp_path: Path):
-        path = self._write_legacy_file(tmp_path, "lobby")
-        with patch("cli.gateway.discord_session.MEMORIES_DIR", tmp_path):
-            mgr = DiscordSessionManager()
-            mgr._load_single_session(path)
-            adopted = mgr.reconnect_restored_session("777888", "lobby")
-
-        assert adopted is not None
+        assert restored is not None
+        assert restored.channel_id == "777888"
+        assert restored.server_name == "yips.dev"
         assert "777888" in mgr._sessions
-        assert "_restored_lobby" not in mgr._sessions
 
-
-# ---------------------------------------------------------------------------
-#  get_history_for_runner — max_turns slicing
-# ---------------------------------------------------------------------------
 
 class TestGetHistoryForRunner:
     def test_returns_empty_for_unknown_channel(self, tmp_path: Path):
@@ -295,18 +237,17 @@ class TestGetHistoryForRunner:
 
     def test_returns_up_to_max_turns(self, tmp_path: Path):
         mgr = _make_manager(tmp_path)
-        mgr.get_or_create_session("ch", "test")
+        mgr.get_or_create_session("ch", "TestServer", "test")
         for i in range(25):
             mgr.add_user_message("ch", "U", f"msg{i}")
         history = mgr.get_history_for_runner("ch", max_turns=10)
         assert len(history) == 10
-        assert "msg15" in history[0]["content"]  # last 10 of 25
+        assert "msg15" in history[0]["content"]
 
     def test_returns_copy_not_reference(self, tmp_path: Path):
         mgr = _make_manager(tmp_path)
-        mgr.get_or_create_session("ch", "test")
+        mgr.get_or_create_session("ch", "TestServer", "test")
         mgr.add_user_message("ch", "U", "hello")
-        h1 = mgr.get_history_for_runner("ch")
-        h1.append({"role": "user", "content": "injected"})
-        h2 = mgr.get_history_for_runner("ch")
-        assert len(h2) == 1  # injection did not affect internal state
+        history = mgr.get_history_for_runner("ch")
+        history.append({"role": "user", "content": "injected"})
+        assert len(mgr.get_history_for_runner("ch")) == 1

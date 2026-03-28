@@ -29,7 +29,7 @@ from cli.config import (
 )
 from cli.info_utils import (
     get_username,
-    get_recent_activity,
+    get_recent_activity_items,
     get_friendly_backend_name,
     get_friendly_model_name,
     get_display_directory,
@@ -64,6 +64,85 @@ def _wrap_model_info_lines(model_info: str, content_width: int) -> list[str]:
     line1 = ' · '.join(parts[:-1])
     line2 = parts[-1]
     return [line1, line2]
+
+
+def _truncate_text(value: str, width: int) -> str:
+    if width <= 0:
+        return ""
+    if len(value) > width:
+        return value[:width]
+    return value.ljust(width)
+
+
+def _scroll_title(title: str, visible_width: int, scroll_step: int) -> str:
+    if visible_width <= 0:
+        return ""
+    if len(title) <= visible_width or visible_width <= 5:
+        return title[:visible_width].ljust(visible_width)
+
+    limit = len(title) - visible_width
+    pause = 8
+    cycle = limit * 2 + pause * 2
+    pos = scroll_step % cycle
+
+    if pos < pause:
+        offset = 0
+    elif pos < pause + limit:
+        offset = pos - pause
+    elif pos < pause + limit + pause:
+        offset = limit
+    else:
+        offset = limit - (pos - (pause + limit + pause))
+
+    return title[offset : offset + visible_width]
+
+
+def _build_activity_text(
+    timestamp: str,
+    prefix: str,
+    title: str,
+    width: int,
+    *,
+    prefix_color: str | None = None,
+    highlighted: bool = False,
+    selected: bool = False,
+    scroll_step: int = 0,
+) -> Text:
+    row = Text()
+
+    if selected:
+        row.append("> ", style="bold #ffccff")
+        base_style = "bold #ffccff"
+    else:
+        base_style = "dim" if not highlighted else "bold #ffccff"
+
+    static_parts: list[tuple[str, str]] = []
+    if timestamp:
+        static_parts.append((f"{timestamp}: ", base_style))
+    if prefix:
+        static_parts.append((prefix, base_style if highlighted else (prefix_color or base_style)))
+
+    remaining_width = max(width - len(row.plain), 0)
+    static_width = sum(len(text) for text, _ in static_parts)
+    if static_width >= remaining_width:
+        consumed = 0
+        for text, style in static_parts:
+            visible = _truncate_text(text, max(remaining_width - consumed, 0))
+            if visible:
+                row.append(visible, style=style)
+                consumed += len(visible)
+            if consumed >= remaining_width:
+                return row
+
+    for text, style in static_parts:
+        row.append(text, style=style)
+
+    title_width = max(width - len(row.plain), 0)
+    visible_title = _scroll_title(title, title_width, scroll_step) if highlighted else _truncate_text(title, title_width)
+
+    row.append(visible_title, style=base_style)
+
+    return row
 
 
 class AgentUIMixin:
@@ -375,14 +454,40 @@ class AgentUIMixin:
             max_slots = 5
             start_idx = max(0, min(self.session_selection_idx - max_slots // 2, len(self.session_list) - max_slots))
             visible_sessions = self.session_list[start_idx : start_idx + max_slots]
-            activity: list[tuple[str, bool]] = []
+            activity: list[dict[str, Any]] = []
             for i, s in enumerate(visible_sessions):
                 actual_idx = start_idx + i
                 is_selected = (actual_idx == self.session_selection_idx)
-                prefix = "> " if is_selected else ""
-                activity.append((prefix + str(s['display']), is_selected))
+                activity.append(
+                    {
+                        "timestamp": str(s.get("timestamp", "")),
+                        "prefix": str(s.get("display_prefix", "")),
+                        "title": str(s.get("display_title", "")),
+                        "prefix_color": s.get("prefix_color"),
+                        "selected": is_selected,
+                    }
+                )
         else:
-            activity = [(a, False) for a in get_recent_activity()]
+            activity = [
+                {
+                    "timestamp": item.display_time,
+                    "prefix": item.prefix,
+                    "title": item.title,
+                    "prefix_color": item.prefix_color,
+                    "selected": False,
+                }
+                for item in get_recent_activity_items()
+            ]
+            if not activity:
+                activity = [
+                    {
+                        "timestamp": "",
+                        "prefix": "",
+                        "title": "No recent activity",
+                        "prefix_color": None,
+                        "selected": False,
+                    }
+                ]
 
         # Build left column (12 lines)
         left_col = [
@@ -437,7 +542,6 @@ class AgentUIMixin:
         for line_num in range(max_lines):
             left_text = left_col[line_num] if line_num < len(left_col) else ""
             right_item = right_col_data[line_num] if line_num < len(right_col_data) else ("", False)
-            right_text, is_highlighted = right_item
 
             styled_line = Text()
             styled_line.append("│", style=left_bar_style)
@@ -492,63 +596,21 @@ class AgentUIMixin:
 
             right_col_start_position = left_width + 2
 
-            if is_highlighted:
-                # Highlighted session: pink bold
-                # We need to handle the cursor "> " and separate Timestamp from Title
-                prefix_marker = "> "
-                full_text = right_text
-                
-                # Check if we have the expected prefix
-                if full_text.startswith(prefix_marker):
-                    # Remove prefix for parsing
-                    content_text = full_text[len(prefix_marker):]
-                    
-                    # Split Timestamp and Title
-                    # Format: "YYYY-MM-DD @ HH:MM XX: Title"
-                    if ": " in content_text:
-                        timestamp_part, title_part = content_text.split(": ", 1)
-                        timestamp_part += ": "
-                    else:
-                        timestamp_part = ""
-                        title_part = content_text
-
-                    # Construct fixed prefix: "> " + "Timestamp: "
-                    full_fixed_prefix = prefix_marker + timestamp_part
-                    avail_title_width = right_width - len(full_fixed_prefix)
-                    
-                    if avail_title_width > 5 and len(title_part) > avail_title_width:
-                        # Ping-pong scroll logic for TITLE ONLY
-                        limit = len(title_part) - avail_title_width
-                        pause = 8 
-                        cycle = limit * 2 + pause * 2
-                        
-                        pos = scroll_step % cycle
-                        offset = 0
-                        
-                        if pos < pause:
-                            offset = 0
-                        elif pos < pause + limit:
-                            offset = pos - pause
-                        elif pos < pause + limit + pause:
-                            offset = limit
-                        else:
-                            offset = limit - (pos - (pause + limit + pause))
-                            
-                        visible_title = title_part[offset : offset + avail_title_width]
-                        display_text = full_fixed_prefix + visible_title
-                    else:
-                        # No scroll needed or too narrow
-                        display_text = truncate_right(full_text)
-                else:
-                    display_text = truncate_right(full_text)
-
-                padded_text = truncate_right(display_text)
-                cursor_part = padded_text[:2]
-                text_part = padded_text[2:]
-                styled_line.append(cursor_part, style="bold #ffccff")
-                styled_line.append(text_part, style="bold #ffccff")
-
+            if isinstance(right_item, dict):
+                styled_line.append(
+                    _build_activity_text(
+                        str(right_item.get("timestamp", "")),
+                        str(right_item.get("prefix", "")),
+                        str(right_item.get("title", "")),
+                        right_width,
+                        prefix_color=right_item.get("prefix_color"),
+                        highlighted=bool(right_item.get("selected")),
+                        selected=bool(right_item.get("selected")),
+                        scroll_step=scroll_step,
+                    )
+                )
             elif line_num == 0:  # Tips header - gradient, bold
+                right_text = right_item[0]
                 padded_text = truncate_right(right_text)
                 for i, char in enumerate(padded_text):
                     char_position = right_col_start_position + i
@@ -556,6 +618,7 @@ class AgentUIMixin:
                     r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, progress)
                     styled_line.append(char, style=f"rgb({r},{g},{b}) bold")
             elif 1 <= line_num <= 4:  # Commands - gradient
+                right_text = right_item[0]
                 padded_text = truncate_right(right_text)
                 # Match /command (starts with / followed by letters)
                 command_match = re.search(r'(/[a-z]+)', padded_text)
@@ -572,6 +635,7 @@ class AgentUIMixin:
                         r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, progress)
                         styled_line.append(char, style=f"rgb({r},{g},{b})")
             elif line_num == 5:  # Divider line - gradient
+                right_text = right_item[0]
                 padded_text = truncate_right(right_text)
                 for i, char in enumerate(padded_text):
                     char_position = right_col_start_position + i
@@ -579,10 +643,13 @@ class AgentUIMixin:
                     r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, progress)
                     styled_line.append(char, style=f"rgb({r},{g},{b})")
             elif line_num == 6:  # Recent activity header - white bold
+                right_text = right_item[0]
                 styled_line.append(truncate_right(right_text), style="bright_white bold")
             elif line_num >= 7:  # Activity items - dim
+                right_text = right_item[0]
                 styled_line.append(truncate_right(right_text), style="dim")
             else:
+                right_text = right_item[0]
                 styled_line.append(truncate_right(right_text))
 
             # Right bar

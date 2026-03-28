@@ -173,17 +173,18 @@ class YipsDiscordBot(discord.Client):
         can_edit = is_edit_allowed(user_id)
 
         channel_id = str(message.channel.id)
-        channel_name = getattr(message.channel, "name", "dm")
+        server_name = message.guild.name if message.guild else "DM"
+        channel_name = getattr(message.channel, "name", None) or message.author.display_name or message.author.name
         username = message.author.display_name
 
         # Build structured context for this message
         msg_context = self._build_message_context(message, self.user)  # type: ignore[arg-type]
 
         # Try to reconnect a restored-from-disk session first
-        self._session_mgr.reconnect_restored_session(channel_id, channel_name)
+        self._session_mgr.reconnect_restored_session(channel_id, server_name, channel_name)
 
         # Ensure session exists
-        self._session_mgr.get_or_create_session(channel_id, channel_name)
+        self._session_mgr.get_or_create_session(channel_id, server_name, channel_name)
 
         # Grab history *before* adding the new message (so it's prior context)
         history = self._session_mgr.get_history_for_runner(channel_id)

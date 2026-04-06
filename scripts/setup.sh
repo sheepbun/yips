@@ -64,6 +64,10 @@ command_exists() {
 }
 
 llama_server_path() {
+    if command -v llama-server &> /dev/null; then
+        command -v llama-server
+        return 0
+    fi
     local candidates=(
         "$LLAMA_DIR/build/bin/llama-server"
         "$LLAMA_DIR/bin/llama-server"

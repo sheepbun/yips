@@ -198,6 +198,36 @@ class YipsDiscordBot(discord.Client):
         # Format prompt with username so the AI knows who's speaking
         formatted_content = f"{username}: {message.content}"
 
+        # ── Slash command interception (before AI runner) ──────────────────────
+        if message.content.strip().startswith("/"):
+            from cli.gateway.gateway_commands import handle_gateway_slash_command
+            cmd_result = handle_gateway_slash_command(
+                message.content.strip(), channel_id, self._session_mgr
+            )
+            if cmd_result is not None:
+                if cmd_result == "::GATEWAY_RESET::":
+                    self._session_mgr.reset_session(channel_id)
+                    try:
+                        await message.remove_reaction("👀", self.user)  # type: ignore[arg-type]
+                    except discord.DiscordException:
+                        pass
+                    await message.reply("Session cleared. Starting fresh!")
+                    return
+                if cmd_result.startswith("::GATEWAY_REPROMPT::"):
+                    # Extract the reprompt message and fall through to the AI runner
+                    formatted_content = cmd_result[len("::GATEWAY_REPROMPT::"):]
+                else:
+                    # Direct reply — send and return
+                    try:
+                        await message.remove_reaction("👀", self.user)  # type: ignore[arg-type]
+                    except discord.DiscordException:
+                        pass
+                    chunks = [cmd_result[i : i + 1990] for i in range(0, len(cmd_result), 1990)]
+                    for chunk in chunks:
+                        await message.reply(chunk)
+                    return
+        # ── End slash command interception ─────────────────────────────────────
+
         response: str | None = None
         error: Exception | None = None
 

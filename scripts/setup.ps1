@@ -91,19 +91,24 @@ $BinPaths   = @(
     (Join-Path $LlamaDir "llama-server.exe")
 )
 $ExistingBin = $BinPaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+if (-not $ExistingBin) {
+    $InPath = Get-Command "llama-server" -ErrorAction SilentlyContinue
+    if ($InPath) { $ExistingBin = $InPath.Source }
+}
 
 $NeedBuild = $false
 if (-not $ExistingBin) {
     Write-Status "llama-server not found. Will attempt to build llama.cpp..."
     $NeedBuild = $true
 } else {
-    # Rebuild if CUDA is now available but the existing build is CPU-only
-    $CachePath = Join-Path $LlamaDir "build\CMakeCache.txt"
+    # Rebuild if CUDA is now available but the existing build is CPU-only.
+    # We only attempt this if BOTH the driver (nvidia-smi) and the toolkit (nvcc) are present.
     $NvidiaSmi = Get-Command "nvidia-smi" -ErrorAction SilentlyContinue
-    if ($NvidiaSmi -and (Test-Path $CachePath)) {
-        $CacheText = Get-Content $CachePath -Raw
-        if ($CacheText -notmatch "GGML_CUDA:BOOL=ON") {
-            Write-Warn "CUDA-capable GPU detected but llama.cpp built without CUDA. Rebuilding..."
+    $Nvcc      = Get-Command "nvcc" -ErrorAction SilentlyContinue
+    if ($NvidiaSmi -and $Nvcc) {
+        $BuildMode = (& $PythonExe -c "import sys, os; sys.path.insert(0, r'$ProjectRoot'); from cli.setup import detect_llama_build_mode; print(detect_llama_build_mode())" 2>$null).Trim()
+        if ($BuildMode -ne "cuda") {
+            Write-Warn "CUDA-capable GPU and toolkit detected but llama.cpp built without CUDA ($BuildMode). Rebuilding..."
             $NeedBuild = $true
         } else {
             Write-Status "llama-server already installed with CUDA: $ExistingBin"
@@ -151,6 +156,29 @@ except Exception:
             Write-Warn "llama.cpp build failed (exit $ExitCode). Yips will use Claude CLI backend."
         }
     }
+}
+
+# --- 8. Ensure a default llama.cpp model exists -------------------------------
+$ModelsDir = Join-Path $env:USERPROFILE ".yips\models"
+if (-not (Test-Path $ModelsDir)) { New-Item -ItemType Directory $ModelsDir | Out-Null }
+
+$Models = Get-ChildItem -Path $ModelsDir -Filter "*.gguf" -Recurse -ErrorAction SilentlyContinue
+if (-not $Models) {
+    Write-Status "No local GGUF models found. Downloading the default llama.cpp model..."
+    & $PythonExe -c @"
+import sys, os
+sys.path.insert(0, r'$ProjectRoot')
+from cli.setup import download_default_model
+r = download_default_model()
+sys.exit(0 if r else 1)
+"@
+    if ($LASTEXITCODE -eq 0) {
+        Write-Status "Default llama.cpp model ready."
+    } else {
+        Write-Warn "Failed to download the default llama.cpp model automatically."
+    }
+} else {
+    Write-Status "llama.cpp model files detected."
 }
 
 Write-Host ""

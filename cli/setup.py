@@ -20,17 +20,7 @@ def detect_llama_build_mode(install_dir: Path | None = None) -> str:
     if install_dir is None:
         install_dir = Path.home() / "llama.cpp"
 
-    cache_path = install_dir / "build" / "CMakeCache.txt"
-    if cache_path.exists():
-        try:
-            cache = cache_path.read_text()
-        except OSError:
-            cache = ""
-        if "GGML_CUDA:BOOL=ON" in cache:
-            return "cuda"
-        if "GGML_CUDA:BOOL=OFF" in cache:
-            return "cpu"
-
+    # 1. Check the actual binary first (most reliable)
     binary_candidates = [
         Path(candidate) for candidate in get_llama_server_candidates()
         if Path(candidate).exists()
@@ -42,11 +32,25 @@ def detect_llama_build_mode(install_dir: Path | None = None) -> str:
                 text=True,
                 stderr=subprocess.STDOUT,
             )
+            lowered = output.lower()
+            if "cuda" in lowered or "cublas" in lowered:
+                return "cuda"
+            # If we found a binary and it says it's NOT cuda, we can't be sure 
+            # if others exist, so we keep checking candidates.
         except (subprocess.SubprocessError, FileNotFoundError, OSError):
             continue
-        lowered = output.lower()
-        if "cuda" in lowered or "cublas" in lowered:
+
+    # 2. Fallback to CMake cache if no binary version could be checked
+    cache_path = install_dir / "build" / "CMakeCache.txt"
+    if cache_path.exists():
+        try:
+            cache = cache_path.read_text()
+        except OSError:
+            cache = ""
+        if "GGML_CUDA:BOOL=ON" in cache:
             return "cuda"
+        if "GGML_CUDA:BOOL=OFF" in cache:
+            return "cpu"
 
     return "unknown"
 
@@ -206,12 +210,14 @@ def install_llama_server() -> str | None:
     existing_mode = detect_llama_build_mode(install_dir) if install_dir.exists() else "unknown"
 
     # Clone/update the source repo so we know the tag and can build if needed
-    if install_dir.exists():
-        console.print(f"[yellow]Directory {install_dir} already exists. Updating...[/yellow]")
+    if (install_dir / ".git").exists():
+        console.print(f"[yellow]Directory {install_dir} is a git repo. Updating...[/yellow]")
         try:
             subprocess.run(["git", "pull"], cwd=install_dir, check=True, capture_output=True)
         except subprocess.CalledProcessError:
             console.print("[red]Failed to update llama.cpp repo. Continuing with existing version...[/red]")
+    elif install_dir.exists():
+        console.print(f"[yellow]Directory {install_dir} exists (not a git repo). Skipping update.[/yellow]")
     else:
         console.print(f"[cyan]Cloning llama.cpp to {install_dir}...[/cyan]")
         try:
@@ -230,6 +236,12 @@ def install_llama_server() -> str | None:
     # (typically the newest), which may be incompatible with the GPU driver.
     # Downloading the matching pre-built binary sidesteps this entirely.
     if sys.platform == "win32" and prefer_cuda and cuda_support.get("nvcc_path"):
+        if existing_mode == "cuda":
+            for candidate in get_llama_server_candidates():
+                if Path(candidate).exists():
+                    console.print(f"[green]llama-server already has CUDA support at {candidate}[/green]")
+                    return candidate
+
         from cli.hw_utils import _get_nvcc_version
         nvcc_ver = _get_nvcc_version(cuda_support["nvcc_path"])
         if nvcc_ver:

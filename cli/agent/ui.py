@@ -24,8 +24,7 @@ from cli.color_utils import (
 )
 from cli.config import (
     LAYOUT_FULL_MIN_WIDTH,
-    LAYOUT_SINGLE_MIN_WIDTH,
-    LAYOUT_COMPACT_MIN_WIDTH,
+    APP_VERSION,
 )
 from cli.info_utils import (
     get_username,
@@ -37,8 +36,6 @@ from cli.info_utils import (
 from cli.ui_rendering import (
     generate_yips_logo,
     safe_center,
-    render_top_border,
-    render_bottom_border,
     get_top_border_text,
     get_bottom_border_text,
     render_thinking_block,
@@ -183,14 +180,11 @@ class AgentUIMixin:
         """Render the title box with responsive layout."""
         terminal_width = self.console.width
         self.last_width = terminal_width
-        layout_mode = self.get_layout_mode(terminal_width)
 
-        if layout_mode == "minimal":
-            self.render_minimal_title()
-        elif layout_mode in ("compact", "single"):
-            self.render_single_column_title(layout_mode)
-        else:
+        if terminal_width >= LAYOUT_FULL_MIN_WIDTH:
             self.console.print(self.get_two_column_title_group())
+        else:
+            self.render_compact_title_bar()
 
     def get_title_box_group(self: YipsAgentProtocol, scroll_offset: int = 0) -> Group:
         """Get the title box renderable group (mostly for animation)."""
@@ -229,198 +223,71 @@ class AgentUIMixin:
             
         return info
 
-    def render_minimal_title(self: YipsAgentProtocol) -> None:
-        """Render minimal title box for very narrow terminals (< 45 chars)."""
+    def render_compact_title_bar(self: YipsAgentProtocol) -> None:
+        """Render a borderless 4-line compact title bar for terminals narrower than the full layout."""
         terminal_width = self.console.width
-        content_width = terminal_width - 2  # Account for │ borders
 
-        # Blank line before title box
-        self.console.print()
+        mini_logo = [
+            " \u259b\u2596\u2571\u2572\u2597\u259c",
+            " \u2599\u259f\u259c\u259b\u2599\u259f",
+            " \u259c\u259e\u259a\u259e\u259a\u259b",
+            "  \u2580\u2580\u2580\u2580 ",
+        ]
+        logo_col_width = 7
+        logo_rows = len(mini_logo)
+        gap = "   "
+        text_width = max(terminal_width - logo_col_width - len(gap), 0)
 
-        # Render top border
-        render_top_border(terminal_width)
-
-        # Border styles
-        r_left, g_left, b_left = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, 0.0)
-        left_bar_style = f"rgb({r_left},{g_left},{b_left})"
-        r_right, g_right, b_right = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, 1.0)
-        right_bar_style = f"rgb({r_right},{g_right},{b_right})"
-
-        # Get info
-        logo = generate_yips_logo()
-        logo_width = len(logo[0]) if logo else 1
-
-        # Determine if we can show the logo (need at least logo width + 2 for borders)
-        show_logo = content_width >= LOGO_WIDTH
-
-        # Build minimal content based on available width
-        lines = [""]  # blank line
-
-        if show_logo:
-            lines.extend(logo)
-        else:
-            # Show abbreviated "YIPS" text instead
-            lines.append("YIPS")
-
-        model_info_lines_list = _wrap_model_info_lines(self.get_model_info_string(), content_width)
-        model_info_start_idx = len(lines)
-        lines.extend(model_info_lines_list)
-        model_info_end_idx = len(lines)
-        lines.append("")  # blank line
-
-        logo_height = len(logo) if show_logo else 0
-
-        for line_num, line_text in enumerate(lines):
-            styled_line = Text()
-            styled_line.append("│", style=left_bar_style)
-
-            # Logo lines (indices 1-6) - only if showing logo
-            if show_logo and 1 <= line_num <= 6:
-                logo_line_index = line_num - 1
-                centered_text = safe_center(line_text, content_width)
-                padding_left = (content_width - len(line_text)) // 2 if len(line_text) <= content_width else 0
-
-                for i, char in enumerate(centered_text):
-                    col_index = i - padding_left
-                    overall_progress = i / max(content_width - 1, 1)
-                    
-                    if 0 <= col_index <= logo_width:
-                        # Diagonal gradient: Top-Left (Pink) to Bottom-Right (Yellow)
-                        vertical_p = logo_line_index / max(logo_height - 1, 1)
-                        horizontal_p = col_index / max(logo_width - 1, 1)
-                        logo_progress = (vertical_p + horizontal_p) / 2
-                        
-                        r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, logo_progress)
-                        styled_line.append(char, style=f"rgb({r},{g},{b})")
-                    else:
-                        # Padding: extend gradient based on overall position in content_width
-                        r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, overall_progress)
-                        styled_line.append(char, style=f"rgb({r},{g},{b})")
-            elif not show_logo and line_num == 1:
-                # Abbreviated "YIPS" text - gradient bold
-                centered_text = safe_center(line_text, content_width)
-                yips_text = gradient_text(centered_text)
-                yips_text.stylize("bold")
-                styled_line.append(yips_text)
-            elif model_info_start_idx <= line_num < model_info_end_idx:
-                # Model info - solid blue
-                centered_text = safe_center(line_text, content_width)
-                r, g, b = GRADIENT_BLUE
-                styled_line.append(centered_text, style=f"rgb({r},{g},{b})")
-            else:
-                styled_line.append(safe_center(line_text, content_width))
-
-            styled_line.append("│", style=right_bar_style)
-            self.console.print(styled_line)
-
-        # Render bottom border
-        render_bottom_border(terminal_width, self.current_session_name)
-        self.console.print()
-
-    def render_single_column_title(self: YipsAgentProtocol, layout_mode: str) -> None:
-        """Render single-column title box for narrow terminals (45-79 chars)."""
-        terminal_width = self.console.width
-        content_width = terminal_width - 2  # Account for │ borders
-
-        # Blank line before title box
-        self.console.print()
-
-        # Render top border
-        render_top_border(terminal_width)
-
-        # Border styles
-        r_left, g_left, b_left = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, 0.0)
-        left_bar_style = f"rgb({r_left},{g_left},{b_left})"
-        r_right, g_right, b_right = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, 1.0)
-        right_bar_style = f"rgb({r_right},{g_right},{b_right})"
-
-        # Gather content
-        username = get_username()
-        cwd = get_display_directory()
-        logo = generate_yips_logo()
-        logo_width = len(logo[0]) if logo else 1
-
-        # Check if we can show the logo
-        show_logo = content_width >= LOGO_WIDTH
-
-        # Build single column content
-        welcome_msg = f"Welcome back {username}!" if layout_mode == "single" else f"Hi {username}!"
-        lines = [
-            "",  # [0] blank
-            welcome_msg,  # [1]
-            "",  # [2] blank
+        title_text = "Yips CLI"
+        version_text = APP_VERSION
+        row_texts: list[str | None] = [
+            f"{title_text} {version_text}"[:text_width] if text_width else "",
+            self.get_model_info_string()[:text_width] if text_width else "",
+            get_display_directory()[:text_width] if text_width else "",
+            None,
         ]
 
-        if show_logo:
-            lines.extend(logo)  # [3-8] logo lines
-            model_info_index = 9
-        else:
-            lines.append("YIPS")  # [3] abbreviated text
-            model_info_index = 4
+        self.console.print()
 
-        model_info_lines_list = _wrap_model_info_lines(self.get_model_info_string(), content_width)
-        model_info_end_index = model_info_index + len(model_info_lines_list)
-        lines.extend(model_info_lines_list)  # model info (one or two lines)
-        cwd_index = len(lines) if layout_mode == "single" else -1
-        if layout_mode == "single":
-            lines.append(cwd)
-        lines.append("")  # blank padding
-
-        logo_height = len(logo) if show_logo else 0
-
-        for line_num, line_text in enumerate(lines):
+        for row_idx, logo_row in enumerate(mini_logo):
             styled_line = Text()
-            styled_line.append("│", style=left_bar_style)
 
-            # Logo lines (indices 3-8) - only if showing logo
-            if show_logo and 3 <= line_num <= 8:
-                logo_line_index = line_num - 3
-                centered_text = safe_center(line_text, content_width)
-                padding_left = (content_width - len(line_text)) // 2 if len(line_text) <= content_width else 0
+            for col_idx, char in enumerate(logo_row):
+                if char == " ":
+                    styled_line.append(char)
+                    continue
+                vertical_p = row_idx / max(logo_rows - 1, 1)
+                horizontal_p = col_idx / max(logo_col_width - 1, 1)
+                t = (vertical_p + horizontal_p) / 2
+                r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, t)
+                styled_line.append(char, style=f"rgb({r},{g},{b})")
 
-                for i, char in enumerate(centered_text):
-                    col_index = i - padding_left
-                    overall_progress = i / max(content_width - 1, 1)
-                    
-                    if 0 <= col_index <= logo_width:
-                        # Diagonal gradient: Top-Left (Pink) to Bottom-Right (Yellow)
-                        vertical_p = logo_line_index / max(logo_height - 1, 1)
-                        horizontal_p = col_index / max(logo_width - 1, 1)
-                        logo_progress = (vertical_p + horizontal_p) / 2
-                        
-                        r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, logo_progress)
-                        styled_line.append(char, style=f"rgb({r},{g},{b})")
-                    else:
-                        # Padding: extend gradient based on overall position in content_width
-                        r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, overall_progress)
-                        styled_line.append(char, style=f"rgb({r},{g},{b})")
-            elif not show_logo and line_num == 3:
-                # Abbreviated "YIPS" text - gradient bold
-                centered_text = safe_center(line_text, content_width)
-                yips_text = gradient_text(centered_text)
-                yips_text.stylize("bold")
-                styled_line.append(yips_text)
-            elif line_num == 1:  # Welcome message - gradient, bold
-                centered_text = safe_center(line_text, content_width)
-                welcome_text = gradient_text(centered_text)
-                welcome_text.stylize("bold")
-                styled_line.append(welcome_text)
-            elif model_info_index <= line_num < model_info_end_index:  # Model info - solid blue
-                centered_text = safe_center(line_text, content_width)
+            styled_line.append(gap)
+
+            row_text = row_texts[row_idx]
+            if not row_text:
+                self.console.print(styled_line)
+                continue
+
+            if row_idx == 0:
+                if len(row_text) >= len(title_text) + 1:
+                    styled_line.append_text(gradient_text(title_text))
+                    remainder = row_text[len(title_text):]
+                    styled_line.append(remainder[0])
+                    version_part = remainder[1:]
+                    if version_part:
+                        r, g, b = GRADIENT_BLUE
+                        styled_line.append(version_part, style=f"rgb({r},{g},{b})")
+                else:
+                    styled_line.append_text(gradient_text(row_text))
+            elif row_idx == 1:
                 r, g, b = GRADIENT_BLUE
-                styled_line.append(centered_text, style=f"rgb({r},{g},{b})")
-            elif line_num == cwd_index and layout_mode == "single":  # CWD - gradient
-                centered_text = safe_center(line_text, content_width)
-                cwd_text = gradient_text(centered_text)
-                styled_line.append(cwd_text)
-            else:
-                styled_line.append(safe_center(line_text, content_width))
+                styled_line.append(row_text, style=f"rgb({r},{g},{b})")
+            elif row_idx == 2:
+                styled_line.append_text(gradient_text(row_text))
 
-            styled_line.append("│", style=right_bar_style)
             self.console.print(styled_line)
 
-        # Render bottom border
-        render_bottom_border(terminal_width, self.current_session_name)
         self.console.print()
 
     def get_two_column_title_group(self: YipsAgentProtocol, scroll_step: int = 0) -> Group:
@@ -769,12 +636,7 @@ class AgentUIMixin:
         """Determine layout mode based on terminal width."""
         if width >= LAYOUT_FULL_MIN_WIDTH:
             return "full"
-        elif width >= LAYOUT_SINGLE_MIN_WIDTH:
-            return "single"
-        elif width >= LAYOUT_COMPACT_MIN_WIDTH:
-            return "compact"
-        else:
-            return "minimal"
+        return "bar"
 
     def stream_text(self: YipsAgentProtocol, text: str) -> None:
         """Simulate streaming for a static piece of text."""

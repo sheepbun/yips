@@ -365,8 +365,86 @@ def process_response_and_tools(agent: YipsAgentProtocol, response: str, depth: i
     process_response_and_tools(agent, next_response, depth + 1)
 
 
+def install_self():
+    """If running as a frozen binary, ensure it's installed in the .yips/bin directory."""
+    if not getattr(sys, "frozen", False):
+        return
+
+    import shutil
+    from pathlib import Path
+
+    current_exe = Path(sys.executable).resolve()
+
+    if os.name == "nt":
+        appdata_yips = Path(os.environ.get("APPDATA", "")) / ".yips"
+    else:
+        appdata_yips = Path.home() / ".yips"
+
+    bin_dir = appdata_yips / "bin"
+    target_exe = bin_dir / ("yips.exe" if os.name == "nt" else "yips")
+
+    # If already in the target directory, we're good
+    try:
+        if current_exe == target_exe.resolve():
+            return
+    except Exception:
+        pass
+
+    print("--- Yips Self-Installer ---")
+    print(f"Installing Yips to: {bin_dir}")
+
+    try:
+        bin_dir.mkdir(parents=True, exist_ok=True)
+        if target_exe.exists():
+            try:
+                target_exe.unlink()
+            except Exception:
+                pass
+        
+        shutil.copy2(current_exe, target_exe)
+        if os.name != "nt":
+            target_exe.chmod(0o755)
+
+        print(f"Successfully copied Yips to {target_exe}")
+
+        # Update PATH
+        if os.name == "nt":
+            # Simple PATH update via setx
+            try:
+                user_path = os.environ.get("PATH", "")
+                if str(bin_dir).lower() not in user_path.lower():
+                    subprocess.run(["setx", "PATH", f"{user_path};{bin_dir}"], capture_output=True)
+                    print("Added Yips to your User PATH.")
+            except Exception:
+                print("Note: Could not automatically update PATH. Please add the bin directory manually.")
+        else:
+            # Unix PATH update
+            shell_rc = None
+            shell = os.environ.get("SHELL", "")
+            if "zsh" in shell:
+                shell_rc = Path.home() / ".zshrc"
+            elif "bash" in shell:
+                shell_rc = Path.home() / ".bashrc"
+
+            if shell_rc and shell_rc.exists():
+                content = shell_rc.read_text()
+                if str(bin_dir) not in content:
+                    with shell_rc.open("a") as f:
+                        f.write(f'\n# Yips CLI\nexport PATH="$PATH:{bin_dir}"\n')
+                    print(f"Added Yips to PATH in {shell_rc}")
+
+        print("---------------------------")
+        print("Installation complete! You can now run 'yips' from any terminal.")
+        print("(Note: You may need to restart your terminal for changes to take effect.)")
+        print("Continuing with first-time setup...")
+        time.sleep(2)
+    except Exception as e:
+        print(f"Warning: Self-installation failed: {e}")
+
+
 def main() -> None:
     """Main entry point for Yips CLI."""
+    install_self()
     import argparse
     import atexit
     import signal

@@ -1,6 +1,6 @@
 {
   "name": "@sheepbun/yips",
-  "version": "0.1.46",
+  "version": "0.1.47",
   "description": "Yips Personal Desktop Agent",
   "scripts": {
     "postinstall": "node postinstall.js"
@@ -10,7 +10,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/sheepbun/yips.git"
+    "url": "git+https://github.com/sheepbun/yips.git"
   },
   "author": "Sheepbun",
   "license": "MIT",

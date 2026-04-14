@@ -2,7 +2,7 @@
 set -e
 
 REPO="sheepbun/yips"
-TAG="v0.1.44"
+TAG="v0.1.46"
 BINARY="yips-core-linux"
 DOWNLOAD_URL="https://github.com/$REPO/releases/download/$TAG/$BINARY"
 

@@ -12,7 +12,7 @@ from rich.prompt import Confirm
 console = Console()
 
 REPO = "sheepbun/yips"
-TAG = "v0.1.44"
+TAG = "v0.1.46"
 
 def get_appdata_path():
     if os.name == "nt":

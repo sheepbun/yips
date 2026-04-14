@@ -1,7 +1,7 @@
 Write-Host "--- Yips Build Script ---"
 
-# Ensure PyInstaller and requests are available
-& .venv\Scripts\python.exe -m pip install pyinstaller requests rich
+# Ensure PyInstaller and requirements are available
+& .venv\Scripts\python.exe -m pip install -r requirements.txt pyinstaller
 
 # 1. Build the CORE BINARY (The actual app)
 Write-Host "Building Core App..."

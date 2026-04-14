@@ -1,8 +1,8 @@
 #!/bin/bash
 echo "--- Yips Build Script (Linux) ---"
 
-# Ensure PyInstaller and requests are available
-pip install pyinstaller requests rich
+# Ensure PyInstaller and requirements are available
+pip install -r requirements.txt pyinstaller
 
 # 1. Build the CORE BINARY
 echo "Building Core App..."

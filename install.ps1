@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 
 $Repo = "sheepbun/yips"
 $BinaryName = "yips-core-windows.exe"
-$Tag = "v0.1.44"
+$Tag = "v0.1.46"
 $DownloadUrl = "https://github.com/$Repo/releases/download/$Tag/$BinaryName"
 
 $AppDataYips = Join-Path $env:APPDATA ".yips"

@@ -275,6 +275,12 @@ class AgentBackendMixin:
 
     def get_response(self: YipsAgentProtocol, message: str) -> str:
         """Get response using available backend (llamacpp or Claude CLI)."""
+        # Wait for backend to finish initializing in the background
+        if hasattr(self, 'backend_ready_event') and not self.backend_ready_event.is_set():
+            from cli.ui_rendering import show_loading
+            with show_loading("Waiting for backend initialization..."):
+                self.backend_ready_event.wait()
+
         if not getattr(self, 'backend_initialized', False):
             return "[Error: Backend not initialized]"
 

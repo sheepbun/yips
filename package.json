@@ -1,6 +1,21 @@
 {
-  "name": "yips-root",
-  "version": "1.0.0",
-  "description": "Placeholder package.json. Yips is a Python CLI; run startup.sh, startup.bat, or python -m cli.main from the repo root.",
-  "private": true
+  "name": "@sheepbun/yips",
+  "version": "0.1.44",
+  "description": "Yips Personal Desktop Agent",
+  "scripts": {
+    "postinstall": "node postinstall.js"
+  },
+  "bin": {
+    "yips": "bin/yips.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sheepbun/yips.git"
+  },
+  "author": "Sheepbun",
+  "license": "MIT",
+  "files": [
+    "postinstall.js",
+    "bin/yips.js"
+  ]
 }

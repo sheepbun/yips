@@ -129,6 +129,7 @@ class YipsAgentProtocol(Protocol):
     verbose_mode: bool
     streaming_enabled: bool
     backend_initialized: bool
+    backend_ready_event: Any
     use_claude_cli: bool
     token_limits: dict[str, int]
     running_summary: str

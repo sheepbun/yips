@@ -376,6 +376,7 @@ def main() -> None:
     signal.signal(signal.SIGINT, lambda *_: os._exit(0))
 
     parser = argparse.ArgumentParser(description="Yips - Personal Desktop Agent")
+    parser.add_argument("mode", nargs="?", default="", help="Run mode (e.g., onboard)")
     parser.add_argument("-c", "--command", type=str, help="Run a single command and exit")
     args = parser.parse_args()
 
@@ -459,6 +460,33 @@ def main() -> None:
     # Save original terminal settings
     fd = sys.stdin.fileno()
     is_tty = os.isatty(fd)
+
+    # --- Onboarding Process ---
+    from cli.config import load_config, save_config
+    config = load_config()
+    is_first_run = not config.get("onboarded", False)
+
+    if (is_first_run or args.mode == "onboard") and not args.command:
+        from cli.gateway.gateway_ui import run_gateway_ui
+        from cli.download_ui import run_download_ui
+        from cli.llamacpp import get_available_models
+
+        # 1. Run Gateway UI
+        run_gateway_ui(agent)
+
+        # 2. Run Download UI if no models exist
+        if not get_available_models():
+            run_download_ui(agent)
+
+        # 3. Save onboarded state
+        config["onboarded"] = True
+        save_config(config)
+
+        # 4. Re-render title box if we used the UI
+        if not is_gui and is_tty:
+            subprocess.run('cls' if os.name == 'nt' else 'clear', shell=True)
+            agent.render_title_box()
+
     old_settings = termios.tcgetattr(fd) if (is_tty and os.name != 'nt') else None
     settings_changed = False
 
@@ -475,41 +503,36 @@ def main() -> None:
             subprocess.run('cls' if os.name == 'nt' else 'clear', shell=True)
             agent.render_title_box()
 
-        # Initialize backend after displaying UI
-        with show_booting("Booting Yips...") as live:
-            agent.initialize_backend(silent=True)
-
-            # Precache HF model data in background for snappy /download command
+        # Initialize backend and services in background
+        import threading
+        def background_init():
             try:
-                from cli.download_ui import HFModelManager
-                HFModelManager.precache_background()
-            except Exception:
-                pass # Silently fail if HF is unavailable during boot
+                # Initialize backend after displaying UI
+                agent.initialize_backend(silent=True)
 
-            # Auto-start Discord bot if a token is configured
-            try:
-                from cli.gateway.discord_service import (
-                    set_discord_activity_callback, start_discord_service, is_discord_running,
-                    is_discord_ready, get_discord_bot_name,
-                )
-                from cli.ui_rendering import BootingSpinner
-                set_discord_activity_callback(agent.request_external_activity_refresh)
-                start_discord_service()  # No-op if no token configured
-                if is_discord_running():
-                    live.update(BootingSpinner("Booting Yips... connecting to Discord"))
-                    # Give the bot a moment to authenticate so we can confirm it's live
-                    import time as _t
-                    _deadline = _t.monotonic() + 5
-                    while _t.monotonic() < _deadline:
-                        if is_discord_ready():
-                            break
-                        _t.sleep(0.2)
-                    if is_discord_ready():
-                        name = get_discord_bot_name() or "unknown"
-                        live.update(BootingSpinner(f"Discord bot connected as {name}"))
-                        _t.sleep(0.6)  # brief flash so user sees confirmation
-            except Exception:
-                pass  # Don't block boot if Discord fails
+                # Precache HF model data in background for snappy /download command
+                try:
+                    from cli.download_ui import HFModelManager
+                    HFModelManager.precache_background()
+                except Exception:
+                    pass # Silently fail if HF is unavailable during boot
+
+                # Auto-start Discord bot if a token is configured
+                try:
+                    from cli.gateway.discord_service import (
+                        set_discord_activity_callback, start_discord_service, is_discord_running,
+                        is_discord_ready, get_discord_bot_name,
+                    )
+                    from cli.ui_rendering import BootingSpinner
+                    set_discord_activity_callback(agent.request_external_activity_refresh)
+                    start_discord_service()  # No-op if no token configured
+                except Exception:
+                    pass  # Don't block boot if Discord fails
+            finally:
+                agent.backend_ready_event.set()
+
+        init_thread = threading.Thread(target=background_init, daemon=True)
+        init_thread.start()
 
         # Flush any keystrokes buffered during startup BEFORE restoring echo
         # This prevents them from being echoed to the screen

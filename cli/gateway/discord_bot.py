@@ -107,12 +107,31 @@ class YipsDiscordBot(discord.Client):
             except discord.DiscordException as exc:
                 log.warning("Global slash sync failed: %s", exc)
 
+    def _dm_sender_allowed(self, user_id: str) -> bool:
+        """True if a DM sender is explicitly allowlisted or a member of any allowed guild."""
+        if user_id in get_discord_allowed_users():
+            return True
+        allowed_servers = set(get_discord_allowed_servers())
+        if not allowed_servers:
+            return False
+        try:
+            uid_int = int(user_id)
+        except ValueError:
+            return False
+        for guild in self.guilds:
+            if str(guild.id) not in allowed_servers:
+                continue
+            if guild.get_member(uid_int) is not None:
+                return True
+        return False
+
     def _interaction_allowed(self, interaction: discord.Interaction) -> bool:
         """Mirror on_message allowlist filters for slash interactions."""
+        if interaction.guild_id is None:
+            return self._dm_sender_allowed(str(interaction.user.id))
         allowed_servers = get_discord_allowed_servers()
-        if allowed_servers and interaction.guild_id is not None:
-            if str(interaction.guild_id) not in allowed_servers:
-                return False
+        if allowed_servers and str(interaction.guild_id) not in allowed_servers:
+            return False
         allowed_channels = get_discord_allowed_channels()
         if allowed_channels and interaction.channel_id is not None:
             if str(interaction.channel_id) not in allowed_channels:
@@ -130,7 +149,11 @@ class YipsDiscordBot(discord.Client):
             )
             return
 
-        channel_id = str(interaction.channel_id) if interaction.channel_id else "dm"
+        channel_id = (
+            str(interaction.channel_id)
+            if interaction.channel_id
+            else f"dm_{interaction.user.id}"
+        )
 
         await interaction.response.defer(thinking=True)
 
@@ -288,22 +311,18 @@ class YipsDiscordBot(discord.Client):
         if message.author == self.user:
             return
 
-        # Filter by allowed servers (guild IDs)
-        allowed_servers = get_discord_allowed_servers()
-        if allowed_servers and message.guild:
-            if str(message.guild.id) not in allowed_servers:
+        if message.guild is None:
+            if not self._dm_sender_allowed(str(message.author.id)):
                 return
-
-        # Filter by allowed channels
-        allowed_channels = get_discord_allowed_channels()
-        if allowed_channels:
-            if str(message.channel.id) not in allowed_channels:
+        else:
+            allowed_servers = get_discord_allowed_servers()
+            if allowed_servers and str(message.guild.id) not in allowed_servers:
                 return
-
-        # Filter by allowed users
-        allowed_users = get_discord_allowed_users()
-        if allowed_users:
-            if str(message.author.id) not in allowed_users:
+            allowed_channels = get_discord_allowed_channels()
+            if allowed_channels and str(message.channel.id) not in allowed_channels:
+                return
+            allowed_users = get_discord_allowed_users()
+            if allowed_users and str(message.author.id) not in allowed_users:
                 return
 
         await self._handle_message(message)

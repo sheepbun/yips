@@ -55,7 +55,9 @@ class YipsAgent(
         self.running_summary = ""
         self.console = console
         self.backend_initialized = False
-        
+        import threading
+        self.backend_ready_event = threading.Event()
+
         # Initialize loop state
         self.session_state: SessionState = {
             "thought_signature": "",

@@ -4,12 +4,15 @@ REM Yips Portable Startup Script for Windows
 SET "SCRIPT_DIR=%~dp0"
 CD /D "%SCRIPT_DIR%"
 
-REM Run the auto-installer/updater via PowerShell
-IF EXIST "scripts\setup.ps1" (
+REM Run the silent auto-installer/updater via PowerShell
+IF EXIST "scripts\setup_silent.ps1" (
+    powershell.exe -NoProfile -ExecutionPolicy Bypass -File "scripts\setup_silent.ps1"
+    IF ERRORLEVEL 1 EXIT /B 1
+) ELSE IF EXIST "scripts\setup.ps1" (
     powershell.exe -NoProfile -ExecutionPolicy Bypass -File "scripts\setup.ps1"
     IF ERRORLEVEL 1 EXIT /B 1
 ) ELSE (
-    ECHO Error: scripts\setup.ps1 not found.
+    ECHO Error: setup script not found.
     EXIT /B 1
 )
 

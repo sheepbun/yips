@@ -26,16 +26,14 @@ from prompt_toolkit.layout.containers import (
     VSplit,
     Window,
     FloatContainer,
-    Float,
     DynamicContainer,
     AnyContainer,
     WindowAlign,
 )
 from prompt_toolkit.layout.controls import FormattedTextControl
-from prompt_toolkit.layout.dimension import AnyDimension
+from prompt_toolkit.layout.dimension import AnyDimension, Dimension
 from prompt_toolkit.data_structures import Point
 from prompt_toolkit.layout.layout import Layout
-from prompt_toolkit.layout.menus import MultiColumnCompletionsMenu
 from prompt_toolkit.widgets import (
     Frame,
     TextArea,
@@ -55,6 +53,7 @@ from cli.color_utils import (
 
 from cli.llamacpp import LLAMA_MODELS_DIR
 from cli.completer import SlashCommandCompleter
+from cli.ui_frames import _terminal_columns_for_layout
 
 class CustomFrame(Frame):
     def __init__(
@@ -87,23 +86,19 @@ class CustomFrame(Frame):
         return f"#{r:02x}{g:02x}{b:02x}"
 
     def _get_container(self) -> AnyContainer:
-        # Determine total rows for gradient calculation
-        total_rows = 15 
-        total_cols = console.width or 80
+        # Frame height will be 16 (1 top + 14 body + 1 bottom)
+        total_rows = 16
+        total_cols = _terminal_columns_for_layout()
 
-        # Title formatting: "Yips" (gradient) + " Model Downloader" (blue)
-        title_text: StyleAndTextTuples = []
+        top_fragments: StyleAndTextTuples = []
         prefix = "╭─── "
         for i, char in enumerate(prefix):
-            style = self._get_diag_style(0, i, total_rows, total_cols)
-            title_text.append((style, char))
-        
-        # Split title for specific styling
+            top_fragments.append((self._get_diag_style(0, i, total_rows, total_cols), char))
+
         full_title = fragment_list_to_text(to_formatted_text(self.title))
-        
+
         if "Yips" in full_title:
             parts = full_title.split("Yips", 1)
-            # "Yips" with its own gradient from the start of its position
             yips_str = "Yips"
             for i, char in enumerate(yips_str):
                 if self.is_dimmed:
@@ -112,64 +107,44 @@ class CustomFrame(Frame):
                     progress = i / max(len(yips_str) - 1, 1)
                     r, g, b = interpolate_color(GRADIENT_PINK, GRADIENT_YELLOW, progress)
                     style = f"#{r:02x}{g:02x}{b:02x}"
-                title_text.append((style, char))
-            
-            # Rest of the title
+                top_fragments.append((style, char))
+
             rest = parts[1]
             if rest:
-                # Add the space after Yips
-                title_text.append((self._get_diag_style(0, len(title_text), total_rows, total_cols), " "))
-                
-                # "Model Downloader" in Blue
+                top_fragments.append((self._get_diag_style(0, len(top_fragments), total_rows, total_cols), " "))
                 blue_hex = f"#{GRADIENT_BLUE[0]:02x}{GRADIENT_BLUE[1]:02x}{GRADIENT_BLUE[2]:02x}"
-                if self.is_dimmed: blue_hex = "#555555"
-                
-                # Strip the leading space from 'rest' if it was " Model Downloader"
-                rest_display = rest.strip()
-                for char in rest_display:
-                    title_text.append((blue_hex, char))
+                if self.is_dimmed:
+                    blue_hex = "#555555"
+                for char in rest.strip():
+                    top_fragments.append((blue_hex, char))
         else:
-            # Fallback
             for i, char in enumerate(full_title):
-                style = self._get_diag_style(0, len(prefix) + i, total_rows, total_cols)
-                title_text.append((style, char))
+                col_idx = len(prefix) + i
+                top_fragments.append((self._get_diag_style(0, col_idx, total_rows, total_cols), char))
 
-        # Add space after title
-        title_len = len(title_text)
-        title_text.append((self._get_diag_style(0, title_len, total_rows, total_cols), " "))
-        title_len += 1
+        top_fragments.append((self._get_diag_style(0, len(top_fragments), total_rows, total_cols), " "))
 
-        # Fill the rest of the top line with gradient characters
-        top_elements: list[AnyContainer] = []
-        top_elements.append(Window(content=FormattedTextControl(typing.cast(Any, title_text)), height=1, dont_extend_width=True))
-        
-        remaining = total_cols - title_len - 1 # -1 for the corner
-        for i in range(remaining):
-            top_elements.append(Window(width=1, height=1, char=Border.HORIZONTAL, 
-                                     style=partial(self._get_diag_style, 0, title_len + i, total_rows, total_cols)))
-        
-        top_elements.append(Window(width=1, height=1, char="╮", 
-                                 style=partial(self._get_diag_style, 0, total_cols - 1, total_rows, total_cols)))
+        fill_width = max(total_cols - len(top_fragments) - 1, 0)
+        for _ in range(fill_width):
+            col_idx = len(top_fragments)
+            top_fragments.append((self._get_diag_style(0, col_idx, total_rows, total_cols), Border.HORIZONTAL))
+        top_fragments.append((self._get_diag_style(0, total_cols - 1, total_rows, total_cols), "╮"))
 
-        # Bottom row
-        bottom_elements: list[AnyContainer] = []
-        bottom_elements.append(Window(width=1, height=1, char="╰", 
-                                    style=partial(self._get_diag_style, total_rows-1, 0, total_rows, total_cols)))
-        for i in range(1, total_cols - 1):
-            bottom_elements.append(Window(width=1, height=1, char=Border.HORIZONTAL, 
-                                        style=partial(self._get_diag_style, total_rows-1, i, total_rows, total_cols)))
-        bottom_elements.append(Window(width=1, height=1, char="╯", 
-                                    style=partial(self._get_diag_style, total_rows-1, total_cols-1, total_rows, total_cols)))
+        bottom_fragments: StyleAndTextTuples = []
+        bottom_fragments.append((self._get_diag_style(total_rows - 1, 0, total_rows, total_cols), "╰"))
+        for col_idx in range(1, total_cols - 1):
+            bottom_fragments.append((self._get_diag_style(total_rows - 1, col_idx, total_rows, total_cols), Border.HORIZONTAL))
+        bottom_fragments.append((self._get_diag_style(total_rows - 1, total_cols - 1, total_rows, total_cols), "╯"))
 
         return HSplit([
-            VSplit(top_elements, height=1),
+            Window(content=FormattedTextControl(typing.cast(Any, top_fragments)), height=1),
             VSplit([
-                Window(width=1, char=Border.VERTICAL, style=partial(self._get_diag_style, 5, 0, total_rows, total_cols)),
+                Window(width=1, char=Border.VERTICAL, style=partial(self._get_diag_style, total_rows//2, 0, total_rows, total_cols)),
                 self.body,
-                Window(width=1, char=Border.VERTICAL, style=partial(self._get_diag_style, 5, total_cols-1, total_rows, total_cols)),
+                Window(width=1, char=Border.VERTICAL, style=partial(self._get_diag_style, total_rows//2, total_cols-1, total_rows, total_cols)),
             ]),
-            VSplit(bottom_elements, height=1),
-        ])
+            Window(content=FormattedTextControl(typing.cast(Any, bottom_fragments)), height=1),
+        ], window_too_small=Window(height=0))
 
 # --- System Info & Hardware Filtering ---
 
@@ -299,21 +274,6 @@ class HFModelManager:
             models = self.api.list_models(**params)
             results: list[dict[str, Any]] = []
             for m in models:
-                # Filter for text-generation related models if it's a general list
-                # but be lenient to include models with no pipeline_tag (like many GGUF quants)
-                p_tag = getattr(m, 'pipeline_tag', None)
-                if not search and not author:
-                    if p_tag and p_tag not in ["text-generation", "conversational", "text2text-generation"]:
-                        continue
-
-                # Filter by size if gguf info is available
-                gguf_info = getattr(m, 'gguf', None)
-                if gguf_info and 'total' in gguf_info:
-                    size_gb = gguf_info['total'] / (1024 * 1024 * 1024)
-                    # Use the same 1.2x heuristic as can_run_model
-                    if size_gb > TOTAL_MEM_GB * 1.2:
-                        continue
-
                 results.append({
                     "id": getattr(m, 'id', "Unknown"),
                     "downloads": getattr(m, 'downloads', 0) or 0,
@@ -435,6 +395,7 @@ class DownloadUI:
             'completion-menu.meta.completion.current': 'noinherit reverse',
             'scrollbar.background': 'noinherit',
             'scrollbar.button': 'noinherit',
+            'window-too-small': '#888888', # Match status bar color
         })
 
         # --- Widgets ---
@@ -444,7 +405,8 @@ class DownloadUI:
             prompt=[("class:search_prompt", ">>> 🔍 ")],
             style="class:input",
             completer=SlashCommandCompleter(),
-            accept_handler=self._on_search
+            complete_while_typing=False,
+            accept_handler=self._on_search,
         )
         self.search_area.buffer.on_text_changed += self._on_text_changed
         self._search_task: Optional[asyncio.Task[None]] = None
@@ -465,7 +427,8 @@ class DownloadUI:
         )
         self.model_list_window = Window(
             content=self.model_list_control,
-            height=12
+            height=12, 
+            dont_extend_height=True,
         )
         self.selected_model_index = 0
         self.list_scroll_offset = 0
@@ -480,7 +443,8 @@ class DownloadUI:
         )
         self.file_list_window = Window(
             content=self.file_list_control,
-            height=12
+            height=12, 
+            dont_extend_height=True,
         )
         self.selected_file_index = 0
         self.file_list_scroll_offset = 0
@@ -493,7 +457,8 @@ class DownloadUI:
         )
         self.download_status_window = Window(
             content=self.download_status_control,
-            height=12
+            height=12, 
+            dont_extend_height=True,
         )
         self._refresh_task: Optional[asyncio.Task[None]] = None
         self._style_cache: dict[tuple[int, bool], list[str]] = {} # Cache for gradient styles
@@ -503,50 +468,49 @@ class DownloadUI:
         # Main content inside the frame
         self.body_container = DynamicContainer(self._get_active_body)
 
-        main_content = HSplit([
-            # Top Row: Tabs | Spacer | Info
-            VSplit([
-                # Use a narrower container for tabs to allow the spacer to work
-                Window(content=FormattedTextControl(self._get_tabs_text), height=1, dont_extend_width=True),
-                Window(), # Flexible spacer
-                Window(
-                    FormattedTextControl(f"RAM+VRAM: {TOTAL_MEM_GB:.1f}GB | Disk: {DISK_FREE_GB:.1f}GB "), 
-                    style="class:status", 
-                    align=WindowAlign.RIGHT, 
-                    dont_extend_width=True
-                ),
-            ], height=1),
-            
-            # Separator
-            Window(height=1, char=" "),
-            
-            # The List
-            self.body_container,
-            
-            # Status footer inside box
-            Window(FormattedTextControl(self._get_status_text), height=1, style="class:status"),
-        ])
+        _ws_fallback = Window(height=0, dont_extend_height=True) # Invisible fallback
+        main_content = HSplit(
+            [
+                # Top Row: Tabs | Spacer | Info
+                VSplit([
+                    Window(content=FormattedTextControl(self._get_tabs_text), height=1, dont_extend_width=True),
+                    Window(),
+                    Window(
+                        FormattedTextControl(f"RAM+VRAM: {TOTAL_MEM_GB:.1f}GB | Disk: {DISK_FREE_GB:.1f}GB "),
+                        style="class:status",
+                        align=WindowAlign.RIGHT,
+                        dont_extend_width=True
+                    ),
+                ], height=1, window_too_small=_ws_fallback),
+                # Body container locked to 12 rows
+                HSplit([self.body_container], height=12, window_too_small=_ws_fallback),
+                Window(FormattedTextControl(self._get_status_text), height=1, style="class:status"),
+            ],
+            height=14, # 1 (tabs) + 12 (body) + 1 (status) = 14
+            window_too_small=_ws_fallback
+        )
         
-        # Framed content
-        framed_content = CustomFrame(
+        # Framed content (keep reference for escape/dim; not a direct HSplit child)
+        self.frame = CustomFrame(
             main_content,
             title="Yips Model Downloader"
         )
-        
-        self.root_container = HSplit([
-            framed_content,
-            Box(self.search_area, padding=0),
-        ])
-        
-        # We need a FloatContainer to show the completion menu (and other popups)
-        self.floats: list[Float] = [
-            Float(xcursor=True,
-                  ycursor=True,
-                  content=MultiColumnCompletionsMenu(suggested_max_column_width=20))
-        ]
+
+        # root_container: Frame (16 rows) + Search (1 row) = 17 rows
+        self.root_container = HSplit(
+            [
+                self.frame.container,
+                self.search_area,
+            ],
+            height=17, 
+            window_too_small=_ws_fallback
+        )
+
+        # No completion-menu float: keeps nested layouts out of impossibly small
+        # cursor rects; completer still works (e.g. Tab) without the popup.
         self.main_layout_container = FloatContainer(
             content=self.root_container,
-            floats=self.floats
+            floats=[],
         )
         
         self.layout = Layout(self.main_layout_container, focused_element=self.model_list_control)
@@ -559,7 +523,7 @@ class DownloadUI:
             key_bindings=self.kb,
             style=self.style,
             full_screen=False,
-            mouse_support=True,
+            mouse_support=False, # Allow terminal scrollback
             color_depth=ColorDepth.TRUE_COLOR,
             before_render=self._on_render
         )
@@ -569,6 +533,24 @@ class DownloadUI:
         if not hasattr(self, '_task_started'):
             setattr(self, '_task_started', True)
             self.app.create_background_task(self._initial_load())
+
+    def _list_region_height(self) -> int:
+        """Fixed height for all lists to avoid jumping."""
+        return 12
+
+    def _model_list_window_rows(self) -> int:
+        return 12
+
+    def _file_list_window_rows(self) -> int:
+        return 12
+
+    def _model_list_data_rows(self) -> int:
+        """Data rows visible in the model table (excludes 2 header lines inside control)."""
+        return 10
+
+    def _file_list_data_rows(self) -> int:
+        """Data rows visible in the file table (excludes title + 2 header lines)."""
+        return 9
 
     def _get_active_body(self) -> AnyContainer:
         if self.active_view == "model_list":
@@ -580,14 +562,16 @@ class DownloadUI:
     def _get_model_list_cursor_position(self) -> Optional[Point]:
         if self.is_loading or not self.models_data:
             return None
-        visible_count = max(min(len(self.models_data) - self.list_scroll_offset, 10), 1)
+        cap = self._model_list_data_rows()
+        visible_count = max(min(len(self.models_data) - self.list_scroll_offset, cap), 1)
         row = self.selected_model_index - self.list_scroll_offset + 2
         return Point(x=0, y=min(max(row, 2), visible_count + 1))
 
     def _get_file_list_cursor_position(self) -> Optional[Point]:
         if not self.files_data:
             return None
-        visible_count = max(min(len(self.files_data) - self.file_list_scroll_offset, 9), 1)
+        cap = self._file_list_data_rows()
+        visible_count = max(min(len(self.files_data) - self.file_list_scroll_offset, cap), 1)
         row = self.selected_file_index - self.file_list_scroll_offset + 3
         return Point(x=0, y=min(max(row, 3), visible_count + 2))
 
@@ -721,9 +705,10 @@ class DownloadUI:
             return "No models found."
             
         lines: list[Any] = []
+        # Total list height is 12. 2 rows for header, 10 rows for data.
         height = 12
         start = self.list_scroll_offset
-        end = start + max(height - 2, 1)
+        end = start + 10 # Exactly 10 data rows
         
         visible_items = self.models_data[start:end]
         is_focused = self.layout.has_focus(self.model_list_control)
@@ -747,9 +732,10 @@ class DownloadUI:
         lines.append(("class:status", " Filename                                   Quant              Size      Fit\n"))
         lines.append(("class:status", " " + "─" * 76 + "\n"))
         is_focused = self.layout.has_focus(self.file_list_control)
+        # Total list height is 12. 3 rows for header/title, 9 rows for data.
         height = 12
         start = self.file_list_scroll_offset
-        end = start + max(height - 3, 1)
+        end = start + 9 # Exactly 9 data rows
         
         for i, f in enumerate(self.files_data[start:end]):
             real_idx = start + i
@@ -860,20 +846,13 @@ class DownloadUI:
             # Type safe access to containers
             root_container = typing.cast(Any, self.layout.container)
             
-            # Find the CustomFrame(s) and dim them
-            if hasattr(root_container, 'get_children'):
-                for container in root_container.get_children():
-                    if isinstance(container, CustomFrame):
-                        container.is_dimmed = True
-            
+            self.frame.is_dimmed = True
+
             # If the layout is currently showing a popup, it's a FloatContainer
             if isinstance(root_container, FloatContainer):
                 for f in root_container.floats:
                     if isinstance(f.content, CustomFrame):
                         f.content.is_dimmed = True
-                # Also dim the base content
-                if isinstance(root_container.content, CustomFrame):
-                    root_container.content.is_dimmed = True
 
             dim_style = Style.from_dict({
                 "frame.border": "#444444", 
@@ -934,7 +913,7 @@ class DownloadUI:
             if self.selected_model_index < len(self.models_data) - 1:
                 self.selected_model_index += 1
                 # Scroll down if needed
-                height = 12 - 2
+                height = self._model_list_data_rows()
                 if self.selected_model_index >= self.list_scroll_offset + height:
                     self.list_scroll_offset = self.selected_model_index - height + 1
                 event.app.invalidate()
@@ -963,7 +942,7 @@ class DownloadUI:
         def _(event: KeyPressEvent) -> None:
             if self.selected_file_index < len(self.files_data) - 1:
                 self.selected_file_index += 1
-                height = 12 - 3
+                height = self._file_list_data_rows()
                 if self.selected_file_index >= self.file_list_scroll_offset + height:
                     self.file_list_scroll_offset = self.selected_file_index - height + 1
                 event.app.invalidate()

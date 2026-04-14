@@ -11,6 +11,59 @@ function Write-Status($msg)  { Write-Host "==> $msg" -ForegroundColor Green }
 function Write-Warn($msg)    { Write-Host "Warning: $msg" -ForegroundColor Yellow }
 function Write-Err($msg)     { Write-Host "Error: $msg" -ForegroundColor Red; exit 1 }
 
+function Test-PythonSeesCmake {
+    <#
+    .SYNOPSIS
+        True if cli/setup.py check_build_tools / shutil.which would find cmake (same PATH as this session).
+    #>
+    param([string]$PythonExe)
+    $p = Start-Process -FilePath $PythonExe `
+        -ArgumentList @('-c', "import shutil, sys; sys.exit(0 if shutil.which('cmake') else 1)") `
+        -Wait -PassThru -NoNewWindow
+    return ($p.ExitCode -eq 0)
+}
+
+function Ensure-Cmake {
+    <#
+    .SYNOPSIS
+        Ensure cmake is on PATH: use existing install, else pip (venv), else winget.
+    #>
+    param(
+        [string]$ProjectRoot,
+        [string]$PythonExe
+    )
+    $VenvScripts = Join-Path $ProjectRoot ".venv\Scripts"
+    if (Test-Path $VenvScripts) {
+        $env:Path = "$VenvScripts;$env:Path"
+    }
+    if (Test-PythonSeesCmake $PythonExe) {
+        return $true
+    }
+
+    Write-Status "CMake not found. Installing CMake into the virtual environment (for llama.cpp builds)..."
+    & $PythonExe -m pip install "cmake>=3.20" --quiet
+    if ($LASTEXITCODE -eq 0) {
+        $env:Path = "$VenvScripts;$env:Path"
+        if (Test-PythonSeesCmake $PythonExe) {
+            return $true
+        }
+    }
+
+    $Winget = Get-Command winget -ErrorAction SilentlyContinue
+    if ($Winget) {
+        Write-Status "Trying CMake via winget..."
+        & winget install Kitware.CMake -e --accept-package-agreements --accept-source-agreements
+        $machinePath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
+        $userPath = [System.Environment]::GetEnvironmentVariable("Path", "User")
+        $env:Path    = "$machinePath;$userPath"
+        if (Test-PythonSeesCmake $PythonExe) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
 # --- Resolve project root (one level up from this script's directory) ----------
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $ProjectRoot
@@ -101,14 +154,12 @@ if (-not $ExistingBin) {
     Write-Status "llama-server not found. Will attempt to build llama.cpp..."
     $NeedBuild = $true
 } else {
-    # Rebuild if CUDA is now available but the existing build is CPU-only.
-    # We only attempt this if BOTH the driver (nvidia-smi) and the toolkit (nvcc) are present.
+    # Rebuild if an NVIDIA GPU is present but the existing llama.cpp build is not CUDA-enabled.
     $NvidiaSmi = Get-Command "nvidia-smi" -ErrorAction SilentlyContinue
-    $Nvcc      = Get-Command "nvcc" -ErrorAction SilentlyContinue
-    if ($NvidiaSmi -and $Nvcc) {
+    if ($NvidiaSmi) {
         $BuildMode = (& $PythonExe -c "import sys, os; sys.path.insert(0, r'$ProjectRoot'); from cli.setup import detect_llama_build_mode; print(detect_llama_build_mode())" 2>$null).Trim()
         if ($BuildMode -ne "cuda") {
-            Write-Warn "CUDA-capable GPU and toolkit detected but llama.cpp built without CUDA ($BuildMode). Rebuilding..."
+            Write-Warn "NVIDIA GPU detected but llama.cpp is not CUDA-enabled ($BuildMode). Rebuilding for CUDA..."
             $NeedBuild = $true
         } else {
             Write-Status "llama-server already installed with CUDA: $ExistingBin"
@@ -119,14 +170,17 @@ if (-not $ExistingBin) {
 }
 
 if ($NeedBuild) {
-    $HasGit   = Get-Command "git"   -ErrorAction SilentlyContinue
-    $HasCMake = Get-Command "cmake" -ErrorAction SilentlyContinue
+    $HasGit = Get-Command "git" -ErrorAction SilentlyContinue
     if (-not $HasGit) {
         Write-Warn "git not found — cannot build llama.cpp. Install git and re-run setup."
-    } elseif (-not $HasCMake) {
-        Write-Warn "cmake not found — cannot build llama.cpp. Install CMake and re-run setup."
+    } elseif (-not (Ensure-Cmake -ProjectRoot $ProjectRoot -PythonExe $PythonExe)) {
+        Write-Warn "cmake not found — could not install CMake automatically (pip and winget). Install CMake manually and re-run setup."
     } else {
         Write-Status "Building llama.cpp (this may take several minutes)..."
+        $VenvScripts = Join-Path $ProjectRoot ".venv\Scripts"
+        if (Test-Path $VenvScripts) {
+            $env:Path = "$VenvScripts;$env:Path"
+        }
         # Write binary path to a temp file so stdout stays free for Rich output.
         $TempOut = [System.IO.Path]::GetTempFileName()
         & $PythonExe -c @"

@@ -88,6 +88,21 @@ def _get_nvcc_version(nvcc_path: str) -> tuple[int, int] | None:
     return None
 
 
+def has_nvidia_gpu() -> bool:
+    """True if nvidia-smi reports at least one NVIDIA GPU."""
+    if not shutil.which("nvidia-smi"):
+        return False
+    try:
+        output = subprocess.check_output(
+            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+        ).strip()
+    except (subprocess.SubprocessError, FileNotFoundError):
+        return False
+    return bool(output)
+
+
 def detect_cuda_toolkit() -> CudaSupport:
     """Detect a CUDA toolkit compatible with the installed GPU driver.
 

@@ -1,10 +1,9 @@
 """
 Discord configuration TUI — API-driven server/channel/user selection.
 
-Three phases:
-  1. Token entry (or show masked existing token)
-  2. Loading spinner while fetching guilds, channels, members
-  3. Checkbox selection lists for servers, channels, users
+Two phases (token entry happens in GatewayUI before this screen launches):
+  1. Loading spinner while fetching guilds, channels, members
+  2. Checkbox selection lists for servers, channels, users
 """
 
 from __future__ import annotations
@@ -22,10 +21,8 @@ from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.layout import Layout
 from prompt_toolkit.output.color_depth import ColorDepth
 from prompt_toolkit.styles import Style
-from prompt_toolkit.widgets import TextArea
 
 from cli.color_utils import (
-    GRADIENT_BLUE,
     GRADIENT_PINK,
     GRADIENT_YELLOW,
     console,
@@ -37,12 +34,10 @@ from cli.gateway.config import (
     get_discord_allowed_users,
     get_discord_edit_allowed_users,
     get_platform_token,
-    mask_token,
     set_discord_allowed_channels,
     set_discord_allowed_servers,
     set_discord_allowed_users,
     set_discord_edit_allowed_users,
-    set_platform_token,
 )
 from cli.ui_frames import GradientFrame
 
@@ -165,16 +160,17 @@ class DiscordFetcher:
 # ---------------------------------------------------------------------------
 
 class DiscordConfigUI:
-    """Three-phase Discord configuration screen."""
+    """Two-phase Discord configuration screen (loading → selection).
 
-    PHASE_TOKEN = "token"
+    The bot token is collected by GatewayUI before this screen launches.
+    """
+
     PHASE_LOADING = "loading"
     PHASE_SELECT = "select"
 
     def __init__(self) -> None:
-        self.phase: str = self.PHASE_TOKEN
+        self.phase: str = self.PHASE_LOADING
         self.token: str = get_platform_token("discord") or ""
-        self.has_existing_token: bool = bool(self.token.strip())
 
         # Selection state
         self.data: DiscordData = DiscordData()
@@ -187,22 +183,11 @@ class DiscordConfigUI:
 
         self.style = Style.from_dict({"status": "#888888"})
 
-        # -- Token phase widgets --
-        self._token_area = TextArea(
-            multiline=False,
-            prompt=[("#ffccff", "  Bot token: ")],
-            style="#ffccff",
-            text=self.token if self.has_existing_token else "",
-            wrap_lines=False,
-        )
-
-        # -- Phase-independent controls --
         self._main_control = FormattedTextControl(
             text=self._render_main, focusable=False, show_cursor=False
         )
         self._hints_control = FormattedTextControl(text=self._render_hints)
 
-        # Build layout — we swap between token input and main control based on phase
         self._body_window = Window(content=self._main_control)
 
         kb = self._build_key_bindings()
@@ -226,10 +211,6 @@ class DiscordConfigUI:
             mouse_support=False,
             color_depth=ColorDepth.TRUE_COLOR,
         )
-
-        # If we already have a token, jump straight to loading
-        if self.has_existing_token:
-            self.phase = self.PHASE_LOADING
 
     # ------------------------------------------------------------------ helpers
 
@@ -256,26 +237,9 @@ class DiscordConfigUI:
     # ------------------------------------------------------------------ renders
 
     def _render_main(self) -> StyleAndTextTuples:
-        if self.phase == self.PHASE_TOKEN:
-            return self._render_token_phase()
         if self.phase == self.PHASE_LOADING:
             return self._render_loading_phase()
         return self._render_select_phase()
-
-    def _render_token_phase(self) -> StyleAndTextTuples:
-        fragments: StyleAndTextTuples = []
-        fragments.append(("#888888", "\n"))
-        if self.has_existing_token:
-            fragments.append(("#888888", f"  Current token: {mask_token(self.token)}\n\n"))
-            fragments.append(("#ffccff", "  Press [Enter] to connect with this token\n"))
-            fragments.append(("#888888", "  or type a new token below and press [Enter]\n"))
-        else:
-            fragments.append(("#ffccff", "  Paste your Discord bot token and press [Enter]\n"))
-        fragments.append(("#888888", "\n"))
-        # The TextArea is rendered separately via the layout — show a placeholder
-        fragments.append(("#888888", f"  Token: {self._token_area.text or '(waiting for input)'}"))
-        fragments.append(("#888888", "\n"))
-        return fragments
 
     def _render_loading_phase(self) -> StyleAndTextTuples:
         spinner_chars = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
@@ -361,8 +325,6 @@ class DiscordConfigUI:
         return fragments
 
     def _render_hints(self) -> StyleAndTextTuples:
-        if self.phase == self.PHASE_TOKEN:
-            return [("#888888", " [Enter] Connect  [Esc] Cancel")]
         if self.phase == self.PHASE_LOADING:
             return [("#888888", " Connecting...  [Esc] Cancel")]
         return [
@@ -376,18 +338,7 @@ class DiscordConfigUI:
 
         @kb.add("enter")
         def _enter(event: KeyPressEvent) -> None:
-            if self.phase == self.PHASE_TOKEN:
-                # Use text from the token area if user typed something new
-                raw = self._token_area.text.strip()
-                if raw:
-                    self.token = raw
-                if not self.token.strip():
-                    return  # nothing to do
-                set_platform_token("discord", self.token)
-                self.phase = self.PHASE_LOADING
-                self._start_fetch()
-                event.app.invalidate()
-            elif self.phase == self.PHASE_SELECT:
+            if self.phase == self.PHASE_SELECT:
                 if self.data.error:
                     event.app.exit()
                     return

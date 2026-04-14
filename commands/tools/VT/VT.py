@@ -14,6 +14,7 @@ import signal
 import struct
 import subprocess
 import threading
+from typing import Any
 
 import pyte
 
@@ -494,7 +495,7 @@ class NoCprOutputWrapper:
 class VTApplication:
     """prompt_toolkit Application for VT mode — persistent PTY terminal emulator."""
 
-    def __init__(self, agent: object = None) -> None:
+    def __init__(self, agent: Any = None) -> None:
         from prompt_toolkit import Application
         from prompt_toolkit.output.color_depth import ColorDepth
         from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
@@ -803,7 +804,11 @@ class VTApplication:
                 pass
 
         # Start background reader via pre_run hook to ensure loop exists
-        self.app.run(pre_run=start_bg_task)
+        if self.agent is not None:
+            with self.agent.modal_prompt_application(self.app):
+                self.app.run(pre_run=start_bg_task)
+        else:
+            self.app.run(pre_run=start_bg_task)
         return self._result or VTResult("exit")
 
 

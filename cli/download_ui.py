@@ -1218,10 +1218,14 @@ class DownloadUI:
         return self.app.run()
 
 
-def run_download_ui() -> Optional[Union[str, dict[str, Any]]]:
+def run_download_ui(agent: Optional[Any] = None) -> Optional[Union[str, dict[str, Any]]]:
     """Entry point."""
     ui = DownloadUI()
-    result = ui.run()
+    if agent is not None:
+        with agent.modal_prompt_application(ui.app):
+            result = ui.run()
+    else:
+        result = ui.run()
     
     if isinstance(result, str):
         return result

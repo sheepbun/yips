@@ -12,7 +12,25 @@ from pathlib import Path
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, DownloadColumn, TransferSpeedColumn
 from cli.color_utils import console
 from cli.llamacpp import LLAMA_MODELS_DIR, LLAMA_DEFAULT_MODEL, get_llama_server_candidates
-from cli.hw_utils import detect_cuda_toolkit
+from cli.hw_utils import detect_cuda_toolkit, has_nvidia_gpu, _get_driver_max_cuda_version, _get_nvcc_version
+
+
+def _yips_project_root() -> Path:
+    return Path(__file__).resolve().parent.parent
+
+
+def _prepend_yips_venv_scripts_to_path() -> None:
+    """Put project .venv\\Scripts first on PATH (Windows pip cmake installs there)."""
+    if sys.platform != "win32":
+        return
+    scripts = _yips_project_root() / ".venv" / "Scripts"
+    if not scripts.is_dir():
+        return
+    prefix = str(scripts)
+    current = os.environ.get("PATH", "")
+    parts = current.split(os.pathsep) if current else []
+    if prefix not in parts:
+        os.environ["PATH"] = prefix + os.pathsep + current
 
 
 def detect_llama_build_mode(install_dir: Path | None = None) -> str:
@@ -65,9 +83,25 @@ def get_llama_cmake_args(cuda_enabled: bool, cuda_toolkit_root: str | None = Non
 
 def check_build_tools() -> bool:
     """Check if git, cmake, and compiler are available."""
+    if sys.platform == "win32":
+        _prepend_yips_venv_scripts_to_path()
+
     missing: List[str] = []
     if not shutil.which("git"):
         missing.append("git")
+
+    if not shutil.which("cmake") and sys.platform == "win32":
+        try:
+            subprocess.run(
+                [sys.executable, "-m", "pip", "install", "cmake>=3.20", "-q"],
+                check=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            pass
+        _prepend_yips_venv_scripts_to_path()
+
     if not shutil.which("cmake"):
         missing.append("cmake")
     # On Windows CMake auto-detects MSVC via the registry, so skip the
@@ -76,10 +110,17 @@ def check_build_tools() -> bool:
     if sys.platform != "win32":
         if not shutil.which("g++") and not shutil.which("clang++"):
             missing.append("g++ or clang++")
-    
+
     if missing:
         console.print(f"[red]Missing build tools: {', '.join(missing)}[/red]")
-        console.print("Please install them using your package manager (e.g., `sudo apt install git build-essential`).")
+        if sys.platform == "win32":
+            console.print(
+                "Install Git for Windows and CMake (or re-run scripts/setup.bat so pip can install CMake into .venv)."
+            )
+        else:
+            console.print(
+                "Please install them using your package manager (e.g., `sudo apt install git build-essential`)."
+            )
         return False
     return True
 
@@ -200,14 +241,24 @@ def install_llama_server() -> str | None:
     Downloads and builds llama.cpp (or installs a compatible pre-built binary on Windows).
     Returns the path to the built binary, or None if failed.
 
-    On Windows with an NVIDIA GPU, prefers downloading a pre-built CUDA binary that
-    matches the driver's maximum supported CUDA version, avoiding cmake's tendency to
-    always pick the latest CUDA toolkit from the registry regardless of driver support.
+    When an NVIDIA GPU is present, prefers CUDA (pre-built on Windows when possible, else a
+    source build with GGML_CUDA=ON). A CPU-only build is not performed if a GPU is detected
+    but no CUDA toolkit is available (install the toolkit or use a pre-built binary).
     """
     install_dir = Path.home() / "llama.cpp"
     cuda_support = detect_cuda_toolkit()
-    prefer_cuda = cuda_support["available"]
+    has_gpu = has_nvidia_gpu()
     existing_mode = detect_llama_build_mode(install_dir) if install_dir.exists() else "unknown"
+
+    cuda_major_prebuilt: int | None = None
+    if cuda_support["available"] and cuda_support.get("nvcc_path"):
+        nvcc_ver = _get_nvcc_version(cuda_support["nvcc_path"])
+        if nvcc_ver:
+            cuda_major_prebuilt = nvcc_ver[0]
+    if cuda_major_prebuilt is None and has_gpu:
+        driver_ver = _get_driver_max_cuda_version()
+        if driver_ver:
+            cuda_major_prebuilt = driver_ver[0]
 
     # Clone/update the source repo so we know the tag and can build if needed
     if (install_dir / ".git").exists():
@@ -231,33 +282,37 @@ def install_llama_server() -> str | None:
             console.print(f"[red]Failed to clone llama.cpp: {e}[/red]")
             return None
 
-    # On Windows with CUDA, try downloading a pre-built binary first.
-    # cmake on Windows always picks the CUDA version registered in the registry
-    # (typically the newest), which may be incompatible with the GPU driver.
-    # Downloading the matching pre-built binary sidesteps this entirely.
-    if sys.platform == "win32" and prefer_cuda and cuda_support.get("nvcc_path"):
+    # On Windows with an NVIDIA GPU, try a pre-built CUDA binary first (driver-reported or nvcc major).
+    # cmake on Windows often picks the newest toolkit from the registry, which may not match the driver.
+    if sys.platform == "win32" and has_gpu and cuda_major_prebuilt is not None:
         if existing_mode == "cuda":
             for candidate in get_llama_server_candidates():
                 if Path(candidate).exists():
                     console.print(f"[green]llama-server already has CUDA support at {candidate}[/green]")
                     return candidate
 
-        from cli.hw_utils import _get_nvcc_version
-        nvcc_ver = _get_nvcc_version(cuda_support["nvcc_path"])
-        if nvcc_ver:
-            cuda_major = nvcc_ver[0]
-            console.print(
-                f"[cyan]NVIDIA GPU detected. Trying pre-built CUDA {cuda_major}.x binary "
-                f"(avoids cmake registry issues)...[/cyan]"
-            )
-            if _download_prebuilt_llama_cuda(install_dir, cuda_major):
-                for candidate in get_llama_server_candidates():
-                    if Path(candidate).exists():
-                        console.print(f"[green]llama-server installed at {candidate}[/green]")
-                        return candidate
+        console.print(
+            f"[cyan]NVIDIA GPU detected. Trying pre-built CUDA {cuda_major_prebuilt}.x binary "
+            f"(avoids cmake registry issues)...[/cyan]"
+        )
+        if _download_prebuilt_llama_cuda(install_dir, cuda_major_prebuilt):
+            for candidate in get_llama_server_candidates():
+                if Path(candidate).exists():
+                    console.print(f"[green]llama-server installed at {candidate}[/green]")
+                    return candidate
 
     if not check_build_tools():
         return None
+
+    if has_gpu and not cuda_support["available"]:
+        console.print(
+            "[red]NVIDIA GPU detected but no CUDA toolkit was found. "
+            "Install the NVIDIA CUDA Toolkit (a version your driver supports) so llama.cpp can build with CUDA. "
+            "On Windows, ensure a matching pre-built release exists or install the toolkit from NVIDIA.[/red]"
+        )
+        return None
+
+    prefer_cuda = cuda_support["available"]
 
     if prefer_cuda:
         console.print(f"[cyan]CUDA detected ({cuda_support['reason']}). Building llama.cpp with CUDA support...[/cyan]")

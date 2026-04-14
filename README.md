@@ -46,3 +46,7 @@ Yips features a hardware-aware Model Manager. Run:
 /model
 ```
 within the CLI to manage your local models, switch between backends, or jump to the interactive downloader.
+
+## Developer documentation
+
+For persistence layout, how to add slash-command plugins, model tool tags, and setup/backend operations, see [docs/DEVELOPER.md](docs/DEVELOPER.md).

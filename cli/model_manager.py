@@ -755,6 +755,9 @@ class ModelManagerUI:
         # Total overhead: 2 (frame) + 2 (marker) + 21 + 13 + 18 + 15 + 2 = 71
         return max(1, total_width - 71)
 
-def run_model_manager_ui(current_model: str, current_backend: str) -> str | bool | None:
+def run_model_manager_ui(
+    current_model: str, current_backend: str, agent: Any
+) -> str | bool | None:
     ui = ModelManagerUI(current_model, current_backend)
-    return ui.run()
+    with agent.modal_prompt_application(ui.app):
+        return ui.run()

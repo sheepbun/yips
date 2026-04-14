@@ -1,10 +1,6 @@
 {
   "name": "yips-root",
   "version": "1.0.0",
-  "description": "Root package for Yips CLI",
-  "scripts": {
-    "start": "npm start --prefix app",
-    "dev": "npm run dev --prefix app",
-    "build": "npm run build --prefix app"
-  }
+  "description": "Placeholder package.json. Yips is a Python CLI; run startup.sh, startup.bat, or python -m cli.main from the repo root.",
+  "private": true
 }

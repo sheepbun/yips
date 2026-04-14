@@ -236,7 +236,9 @@ def handle_model_command(agent: YipsAgentProtocol, args: str) -> str | bool:
 
     if not args:
         from cli.model_manager import run_model_manager_ui
-        result: str | bool | None = run_model_manager_ui(agent.current_model or "Default", agent.backend)
+        result: str | bool | None = run_model_manager_ui(
+            agent.current_model or "Default", agent.backend, agent
+        )
         return result or True
 
     # Switch model
@@ -375,14 +377,14 @@ def handle_slash_command(agent: YipsAgentProtocol, user_input: str) -> str | boo
 
     if command in ("download", "dl"):
         from cli.download_ui import run_download_ui
-        result = run_download_ui()
+        result = run_download_ui(agent)
         if isinstance(result, str) and result.startswith("/"):
             return handle_slash_command(agent, result)
         return True
 
     if command in ("gateway", "gw"):
         from cli.gateway.gateway_ui import run_gateway_ui
-        run_gateway_ui()
+        run_gateway_ui(agent)
         return True
 
     # Check for command directory (case-insensitive) in tools then skills
@@ -411,7 +413,10 @@ def handle_slash_command(agent: YipsAgentProtocol, user_input: str) -> str | boo
         if tool_path.exists():
             try:
                 # Prefer venv python for tool execution if available
-                venv_python = PROJECT_ROOT / ".venv" / "bin" / "python3"
+                if sys.platform == "win32":
+                    venv_python = PROJECT_ROOT / ".venv" / "Scripts" / "python.exe"
+                else:
+                    venv_python = PROJECT_ROOT / ".venv" / "bin" / "python3"
                 executable = str(venv_python) if venv_python.exists() else sys.executable
 
                 cmd = [executable, str(tool_path)] + (args.split() if args else [])

@@ -10,13 +10,15 @@ import os
 from typing import Any, Literal
 
 from prompt_toolkit import Application
+from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import StyleAndTextTuples
 from prompt_toolkit.key_binding import KeyBindings, KeyPressEvent
-from prompt_toolkit.layout.containers import HSplit, VSplit, Window
+from prompt_toolkit.layout.containers import ConditionalContainer, HSplit, VSplit, Window
 from prompt_toolkit.layout.controls import FormattedTextControl
 from prompt_toolkit.layout.layout import Layout
 from prompt_toolkit.output.color_depth import ColorDepth
 from prompt_toolkit.styles import Style
+from prompt_toolkit.widgets import TextArea
 
 from cli.color_utils import (
     GRADIENT_BLUE,
@@ -63,6 +65,10 @@ class GatewayUI:
         self.platform_idx: int = 0
         self.agent_idx: int = self._current_agent_idx()
 
+        self.editing_platform: bool = False
+        self._editing_key: str = ""
+        self._editing_label: str = ""
+
         self.style = Style.from_dict(
             {
                 "status": "#888888",
@@ -72,7 +78,7 @@ class GatewayUI:
         # Controls
         self._platforms_control = FormattedTextControl(
             text=self._render_platforms,
-            focusable=False,
+            focusable=True,
             show_cursor=False,
         )
         self._agents_control = FormattedTextControl(
@@ -82,6 +88,15 @@ class GatewayUI:
         )
         self._hints_control = FormattedTextControl(
             text=self._render_hints,
+        )
+        self._edit_label_control = FormattedTextControl(
+            text=self._render_edit_label,
+        )
+
+        self._token_edit = TextArea(
+            multiline=False,
+            style="#ffccff",
+            wrap_lines=False,
         )
 
         kb = self._build_key_bindings()
@@ -99,15 +114,36 @@ class GatewayUI:
             ]
         )
 
+        not_editing = Condition(lambda: not self.editing_platform)
+        is_editing = Condition(lambda: self.editing_platform)
+
+        hints_row = ConditionalContainer(
+            content=Window(
+                content=self._hints_control,
+                height=1,
+                style="class:status",
+            ),
+            filter=not_editing,
+        )
+        edit_row = ConditionalContainer(
+            content=HSplit(
+                [
+                    Window(
+                        content=self._edit_label_control,
+                        height=1,
+                    ),
+                    self._token_edit,
+                ]
+            ),
+            filter=is_editing,
+        )
+
         main_content = HSplit(
             [
                 body,
                 Window(height=1, char=" "),
-                Window(
-                    content=self._hints_control,
-                    height=1,
-                    style="class:status",
-                ),
+                hints_row,
+                edit_row,
             ]
         )
 
@@ -164,6 +200,7 @@ class GatewayUI:
             token = get_platform_token(key)
             masked = mask_token(token)
             is_selected = (i == self.platform_idx)
+            is_editing_row = self.editing_platform and key == self._editing_key
             cursor = "▶" if is_selected else " "
 
             # Show LIVE indicator for Discord when the bot is running
@@ -171,23 +208,30 @@ class GatewayUI:
             if key == "discord" and is_discord_running():
                 live_tag = " LIVE"
 
+            edit_tag = " [editing]" if is_editing_row else ""
+
             row = f" {cursor} {label:<12} {masked}\n"
 
             if is_selected:
                 focused = self.active_panel == "platforms"
-                if live_tag:
-                    # Render row without newline, append LIVE tag, then newline
+                if live_tag or edit_tag:
                     row_no_nl = row.rstrip("\n")
                     fragments.extend(self._gradient_row(row_no_nl, focused))
-                    fragments.append(("bg:#00cc66 #000000 bold", live_tag))
+                    if live_tag:
+                        fragments.append(("bg:#00cc66 #000000 bold", live_tag))
+                    if edit_tag:
+                        fragments.append(("#ffff66 bold", edit_tag))
                     fragments.append(("", "\n"))
                 else:
                     fragments.extend(self._gradient_row(row, focused))
             else:
-                if live_tag:
+                if live_tag or edit_tag:
                     row_no_nl = row.rstrip("\n")
                     fragments.append(("", row_no_nl))
-                    fragments.append(("#00cc66 bold", live_tag))
+                    if live_tag:
+                        fragments.append(("#00cc66 bold", live_tag))
+                    if edit_tag:
+                        fragments.append(("#ffff66 bold", edit_tag))
                     fragments.append(("", "\n"))
                 else:
                     fragments.append(("", row))
@@ -227,19 +271,29 @@ class GatewayUI:
             ("#888888", " [Tab] Switch  [↑/↓] Move  [Enter] Configure  [D/Del] Clear token  [Esc] Exit")
         ]
 
+    def _render_edit_label(self) -> StyleAndTextTuples:
+        label = self._editing_label or "Token"
+        return [
+            ("#ffccff bold", f"  {label} token "),
+            ("#888888", "— [Enter] Save  [Esc] Cancel"),
+        ]
+
     # ------------------------------------------------------------------ keys
 
     def _build_key_bindings(self) -> KeyBindings:
         kb = KeyBindings()
 
-        @kb.add("tab")
+        not_editing = Condition(lambda: not self.editing_platform)
+        is_editing = Condition(lambda: self.editing_platform)
+
+        @kb.add("tab", filter=not_editing)
         def _tab(event: KeyPressEvent) -> None:
             self.active_panel = (
                 "agents" if self.active_panel == "platforms" else "platforms"
             )
             event.app.invalidate()
 
-        @kb.add("up")
+        @kb.add("up", filter=not_editing)
         def _up(event: KeyPressEvent) -> None:
             if self.active_panel == "platforms":
                 self.platform_idx = (self.platform_idx - 1) % len(self.PLATFORMS)
@@ -247,7 +301,7 @@ class GatewayUI:
                 self.agent_idx = (self.agent_idx - 1) % len(self.AGENTS)
             event.app.invalidate()
 
-        @kb.add("down")
+        @kb.add("down", filter=not_editing)
         def _down(event: KeyPressEvent) -> None:
             if self.active_panel == "platforms":
                 self.platform_idx = (self.platform_idx + 1) % len(self.PLATFORMS)
@@ -255,59 +309,88 @@ class GatewayUI:
                 self.agent_idx = (self.agent_idx + 1) % len(self.AGENTS)
             event.app.invalidate()
 
-        @kb.add("enter")
+        @kb.add("enter", filter=not_editing)
         async def _enter(event: KeyPressEvent) -> None:
             if self.active_panel == "platforms":
-                await self._configure_platform(event)
+                self._enter_edit_mode(event)
             else:
                 await self._configure_agent(event)
 
-        @kb.add("d")
-        @kb.add("delete")
+        @kb.add("enter", filter=is_editing)
+        def _enter_commit(event: KeyPressEvent) -> None:
+            self._commit_edit(event)
+
+        @kb.add("d", filter=not_editing)
+        @kb.add("delete", filter=not_editing)
         def _delete(event: KeyPressEvent) -> None:
             if self.active_panel == "platforms":
                 key, label = self.PLATFORMS[self.platform_idx]
                 remove_platform_token(key)
             event.app.invalidate()
 
-        @kb.add("escape")
-        @kb.add("q")
-        @kb.add("c-c")
+        @kb.add("escape", filter=not_editing)
+        @kb.add("q", filter=not_editing)
+        @kb.add("c-c", filter=not_editing)
         def _exit(event: KeyPressEvent) -> None:
             event.app.exit()
+
+        @kb.add("escape", filter=is_editing)
+        @kb.add("c-c", filter=is_editing)
+        def _cancel_edit(event: KeyPressEvent) -> None:
+            self._exit_edit_mode(event)
+            event.app.invalidate()
 
         return kb
 
     # ------------------------------------------------------------------ actions
 
-    async def _configure_platform(self, event: KeyPressEvent) -> None:
-        """Prompt for a bot token and save it.  Discord gets its own TUI."""
+    def _enter_edit_mode(self, event: KeyPressEvent) -> None:
+        """Open the inline token composer for the selected platform."""
         key, label = self.PLATFORMS[self.platform_idx]
+        existing = get_platform_token(key) or ""
 
-        if key == "discord":
-            # Exit the Gateway UI so DiscordConfigUI can run (PT can't nest apps)
-            event.app.exit(result="discord_config")
+        self._editing_key = key
+        self._editing_label = label
+        self.editing_platform = True
+
+        buf = self._token_edit.buffer
+        buf.text = existing
+        buf.cursor_position = len(existing)
+
+        event.app.layout.focus(self._token_edit)
+        event.app.invalidate()
+
+    def _exit_edit_mode(self, event: KeyPressEvent) -> None:
+        """Leave edit mode without persisting and restore list focus."""
+        self.editing_platform = False
+        self._editing_key = ""
+        self._editing_label = ""
+        self._token_edit.buffer.text = ""
+        try:
+            event.app.layout.focus(self._platforms_control)
+        except Exception:
+            pass
+
+    def _commit_edit(self, event: KeyPressEvent) -> None:
+        """Persist the composer's token then exit edit mode."""
+        key = self._editing_key
+        if not key:
+            self._exit_edit_mode(event)
+            event.app.invalidate()
             return
 
-        from prompt_toolkit.application import run_in_terminal
+        token = self._token_edit.buffer.text.strip()
+        if token:
+            set_platform_token(key, token)
+        else:
+            remove_platform_token(key)
 
-        result: list[str] = []
+        launch_discord = key == "discord" and bool(token)
+        self._exit_edit_mode(event)
 
-        def _get_input() -> None:
-            try:
-                token = input(f"  Enter {label} bot token (blank to clear): ")
-                result.append(token)
-            except (KeyboardInterrupt, EOFError):
-                pass
-
-        await run_in_terminal(_get_input)
-
-        if result:
-            token = result[0]
-            if token.strip():
-                set_platform_token(key, token)
-            else:
-                remove_platform_token(key)
+        if launch_discord:
+            event.app.exit(result="discord_config")
+            return
 
         event.app.invalidate()
 
@@ -355,13 +438,17 @@ class GatewayUI:
         return self._app.run()
 
 
-def run_gateway_ui() -> None:
+def run_gateway_ui(agent: Any) -> None:
     """Launch the Yips Model Gateway management screen."""
     while True:
         ui = GatewayUI()
-        result = ui.run()
+        with agent.modal_prompt_application(ui._app):
+            result = ui.run()
         if result == "discord_config":
             from cli.gateway.discord_config_ui import DiscordConfigUI
-            DiscordConfigUI().run()
+
+            dc = DiscordConfigUI()
+            with agent.modal_prompt_application(dc._app):
+                dc.run()
             continue  # re-enter Gateway UI after Discord config
         break

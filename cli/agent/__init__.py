@@ -11,8 +11,9 @@ import signal
 import sys
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, cast, TYPE_CHECKING
+from typing import Any, Iterator, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from types import FrameType
@@ -76,6 +77,7 @@ class YipsAgent(
         self.interrupted_input_text: str = ""
         self._resize_timer: threading.Timer | None = None
         self._prompt_app: "Application[str] | None" = None
+        self._modal_pt_app: Any = None
 
         self.session_file_path: Path | None = None
         self.session_created = False
@@ -125,6 +127,18 @@ class YipsAgent(
         # Eagerly calculate token limits so the title box shows the correct max from the start
         self.calculate_context_limits()
 
+    @contextmanager
+    def modal_prompt_application(self, app: Any) -> Iterator[None]:
+        """Register a nested PT Application so resize does not clear the screen over it."""
+        if self._resize_timer is not None:
+            self._resize_timer.cancel()
+            self._resize_timer = None
+        self._modal_pt_app = app
+        try:
+            yield
+        finally:
+            self._modal_pt_app = None
+
     @property
     def is_gui(self) -> bool:
         return os.environ.get("YIPS_GUI_MODE") == "1"
@@ -171,11 +185,18 @@ class YipsAgent(
                 try:
                     cols = os.get_terminal_size().columns
                     if last_cols != 0 and cols != last_cols:
-                        # Size changed — immediately clear to avoid wrap artifacts
-                        print("\033[2J\033[H", end="", flush=True)
                         if self._resize_timer is not None:
                             self._resize_timer.cancel()
-                        self._resize_timer = threading.Timer(0.15, self._trigger_resize)
+                        if self._prompt_app is not None:
+                            # Main >>> prompt: clear avoids wrap artifacts; exit via sentinel
+                            print("\033[2J\033[H", end="", flush=True)
+                            self._resize_timer = threading.Timer(0.15, self._trigger_resize)
+                        elif self._modal_pt_app is not None:
+                            self._resize_timer = threading.Timer(
+                                0.15, self._trigger_modal_invalidate
+                            )
+                        else:
+                            self._resize_timer = threading.Timer(0.15, self._trigger_resize)
                         self._resize_timer.start()
                     last_cols = cols
                 except OSError:
@@ -187,13 +208,26 @@ class YipsAgent(
 
     def _handle_resize(self, signum: int, frame: "FrameType | None") -> None:
         """Handle SIGWINCH signal with debouncing."""
-        # Immediately clear screen to prevent line wrapping during resize
-        print("\033[2J\033[H", end="", flush=True)
-
         if self._resize_timer is not None:
             self._resize_timer.cancel()
-        self._resize_timer = threading.Timer(0.1, self._trigger_resize)
+        if self._prompt_app is not None:
+            print("\033[2J\033[H", end="", flush=True)
+            self._resize_timer = threading.Timer(0.1, self._trigger_resize)
+        elif self._modal_pt_app is not None:
+            self._resize_timer = threading.Timer(0.1, self._trigger_modal_invalidate)
+        else:
+            self._resize_timer = threading.Timer(0.1, self._trigger_resize)
         self._resize_timer.start()
+
+    def _trigger_modal_invalidate(self) -> None:
+        """Redraw nested prompt_toolkit UI after resize (no full-screen clear)."""
+        app = self._modal_pt_app
+        if app is None:
+            return
+        try:
+            app.invalidate()
+        except Exception:
+            pass
 
     def _trigger_resize(self) -> None:
         """Trigger resize: exit running prompt app (if any) or set pending flag."""

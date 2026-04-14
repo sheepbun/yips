@@ -43,9 +43,11 @@ PY
 
 detect_cuda_support() {
     "$PROJECT_ROOT/.venv/bin/python" - <<'PY'
-from cli.hw_utils import detect_cuda_toolkit
+from cli.hw_utils import detect_cuda_toolkit, has_nvidia_gpu
 support = detect_cuda_toolkit()
+gpu = has_nvidia_gpu()
 print("1" if support["available"] else "0")
+print("1" if gpu else "0")
 print(support["reason"])
 print(support.get("toolkit_root") or "")
 print(support.get("nvcc_path") or "")
@@ -133,21 +135,23 @@ build_llama_cpp() {
 ensure_llama_cpp() {
     local binary_path
     local cuda_enabled
+    local gpu_present
     local cuda_reason
     local cuda_toolkit_root
     local nvcc_path
     local build_mode
 
-    mapfile -t cuda_probe < <(detect_cuda_support 2>/dev/null || printf '0\nCUDA detection failed\n')
+    mapfile -t cuda_probe < <(detect_cuda_support 2>/dev/null || printf '0\n0\nCUDA detection failed\n\n\n')
     cuda_enabled="${cuda_probe[0]:-0}"
-    cuda_reason="${cuda_probe[1]:-CUDA detection failed}"
-    cuda_toolkit_root="${cuda_probe[2]:-}"
-    nvcc_path="${cuda_probe[3]:-}"
+    gpu_present="${cuda_probe[1]:-0}"
+    cuda_reason="${cuda_probe[2]:-CUDA detection failed}"
+    cuda_toolkit_root="${cuda_probe[3]:-}"
+    nvcc_path="${cuda_probe[4]:-}"
 
     if binary_path="$(llama_server_path)"; then
         build_mode="$(detect_llama_build_mode 2>/dev/null || echo unknown)"
-        if [ "$cuda_enabled" = "1" ] && [ "$build_mode" != "cuda" ]; then
-            status "CUDA detected ($cuda_reason). Rebuilding existing llama.cpp with CUDA support..."
+        if [ "$gpu_present" = "1" ] && [ "$build_mode" != "cuda" ]; then
+            status "NVIDIA GPU detected but llama.cpp is not CUDA-enabled (${build_mode}). Rebuilding for CUDA..."
         else
             status "llama.cpp detected and built (${build_mode})."
             install_llama_server_link "$binary_path"
@@ -177,6 +181,11 @@ ensure_llama_cpp() {
 
     if ! command_exists cmake; then
         warning "cmake is not installed, so llama.cpp cannot be built automatically."
+        return 1
+    fi
+
+    if [ "$gpu_present" = "1" ] && [ "$cuda_enabled" != "1" ]; then
+        warning "NVIDIA GPU detected but no CUDA toolkit was found ($cuda_reason). Install the CUDA toolkit to build llama.cpp with GPU support."
         return 1
     fi
 

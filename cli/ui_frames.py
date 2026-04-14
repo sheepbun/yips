@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from functools import partial
 from typing import Any
 
@@ -23,6 +24,22 @@ from cli.color_utils import (
     GRADIENT_YELLOW,
     GRADIENT_BLUE,
 )
+
+
+def _terminal_columns_for_layout() -> int:
+    """Width in columns for TUI borders; match prompt_toolkit, not Rich's Console."""
+    try:
+        from prompt_toolkit.application import get_app
+
+        app = get_app()
+        return app.output.get_size().columns
+    except Exception:
+        pass
+    try:
+        return os.get_terminal_size().columns
+    except OSError:
+        pass
+    return console.width or 80
 
 
 class GradientFrame:
@@ -83,7 +100,7 @@ class GradientFrame:
 
     def _get_container(self) -> HSplit:
         total_rows = 15
-        total_cols = console.width or 80
+        total_cols = _terminal_columns_for_layout()
 
         body_container = VSplit(
             [

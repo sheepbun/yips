@@ -20,16 +20,34 @@ def get_appdata_path():
     return Path.home() / ".yips"
 
 def update_path(bin_dir):
-    """Update system PATH to include the bin directory."""
+    """Update system PATH to include the bin directory with a more robust method for Windows."""
     if os.name == "nt":
         try:
-            user_path = os.environ.get("PATH", "")
-            if str(bin_dir).lower() not in user_path.lower():
-                subprocess.run(["setx", "PATH", f"{user_path};{bin_dir}"], capture_output=True)
-                return True
+            # Use PowerShell to update the User Path directly via the Registry
+            # This is generally more reliable than setx which has a 1024 char limit
+            bin_dir_str = str(bin_dir)
+            ps_cmd = f'[Environment]::SetEnvironmentVariable("Path", [Environment]::GetEnvironmentVariable("Path", "User") + ";{bin_dir_str}", "User")'
+            
+            # Check if it's already there first to avoid duplicates
+            check_ps = f'if ([Environment]::GetEnvironmentVariable("Path", "User") -like "*{bin_dir_str}*") {{ exit 0 }} else {{ exit 1 }}'
+            
+            check_res = subprocess.run(["powershell", "-Command", check_ps])
+            if check_res.returncode == 0:
+                return False # Already in path
+                
+            subprocess.run(["powershell", "-Command", ps_cmd], capture_output=True)
+            return True
         except Exception:
-            pass
+            # Fallback to setx if PowerShell fails
+            try:
+                user_path = os.environ.get("PATH", "")
+                if str(bin_dir).lower() not in user_path.lower():
+                    subprocess.run(["setx", "PATH", f"{user_path};{bin_dir}"], capture_output=True)
+                    return True
+            except Exception:
+                pass
     else:
+        # Unix PATH update (unchanged logic but cleaner)
         shell_rc = None
         shell = os.environ.get("SHELL", "")
         if "zsh" in shell:

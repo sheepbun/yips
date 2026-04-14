@@ -203,8 +203,11 @@ def confirm_action(
     is_destructive: bool = False,
     pause_live: Callable[[], None] | None = None,
     resume_live: Callable[[], None] | None = None,
+    non_interactive: bool = False,
 ) -> bool:
-    """Ask user for confirmation."""
+    """Ask user for confirmation. In non-interactive mode, auto-deny."""
+    if non_interactive:
+        return False
     if pause_live:
         pause_live()
     try:
@@ -239,8 +242,31 @@ def execute_tool(
     preview_callback: Callable[["RenderableType"], None] | None = None,
     pause_live: Callable[[], None] | None = None,
     resume_live: Callable[[], None] | None = None,
+    non_interactive: bool = False,
+    allowed_tools: set[str] | None = None,
 ) -> str:
-    """Execute a tool request (autonomously unless destructive or out of bounds)."""
+    """Execute a tool request (autonomously unless destructive or out of bounds).
+
+    Args:
+        non_interactive: If True, skip all user confirmation prompts and auto-deny
+            destructive / out-of-zone / preview-requiring actions.
+        allowed_tools: Optional allow-list of tool/skill/request names; anything
+            not in the set returns an error without executing.
+    """
+
+    # Allow-list enforcement (applies to actions, skills, identity alike)
+    if allowed_tools is not None:
+        req_type = request["type"]
+        if req_type == "action":
+            name_for_gate = str(request["tool"])
+        elif req_type == "skill":
+            name_for_gate = str(request["skill"])
+        elif req_type == "identity":
+            name_for_gate = "update_identity"
+        else:
+            name_for_gate = ""
+        if name_for_gate and name_for_gate not in allowed_tools:
+            return f"[Error: tool '{name_for_gate}' is not permitted in this context]"
 
     if request["type"] == "action":
         tool: str = str(request["tool"])
@@ -249,7 +275,7 @@ def execute_tool(
         if tool == "read_file":
             path = params.strip()
             if not is_in_working_zone(path):
-                if not confirm_action(f"Read file outside working zone: {path}", pause_live=pause_live, resume_live=resume_live):
+                if not confirm_action(f"Read file outside working zone: {path}", pause_live=pause_live, resume_live=resume_live, non_interactive=non_interactive):
                     return "[Read cancelled by user]"
             try:
                 content = Path(path).expanduser().read_text()
@@ -263,7 +289,7 @@ def execute_tool(
                 return "[Error: write_file requires path:content]"
             path, content = parts[0].strip(), parts[1]
             if not is_in_working_zone(path):
-                if not confirm_action(f"Write file outside working zone: {path}", pause_live=pause_live, resume_live=resume_live):
+                if not confirm_action(f"Write file outside working zone: {path}", pause_live=pause_live, resume_live=resume_live, non_interactive=non_interactive):
                     return "[Write cancelled by user]"
             try:
                 p = Path(path).expanduser()
@@ -275,7 +301,7 @@ def execute_tool(
                         old_content.splitlines(), content.splitlines(),
                         fromfile=f"a/{path}", tofile=f"b/{path}", lineterm=""
                     ))
-                    if diff_lines:
+                    if diff_lines and not non_interactive:
                         diff_text = "\n".join(diff_lines)
                         if pause_live:
                             pause_live()
@@ -288,7 +314,7 @@ def execute_tool(
                         finally:
                             if resume_live:
                                 resume_live()
-                else:
+                elif not non_interactive:
                     # New file: show preview and ask for confirmation
                     if pause_live:
                         pause_live()
@@ -311,12 +337,12 @@ def execute_tool(
 
             # Check for destructive commands
             if is_destructive_command(command):
-                if not confirm_action(f"Run: {command}", is_destructive=True, pause_live=pause_live, resume_live=resume_live):
+                if not confirm_action(f"Run: {command}", is_destructive=True, pause_live=pause_live, resume_live=resume_live, non_interactive=non_interactive):
                     return "[Command cancelled by user]"
-            
+
             # Check for out-of-zone activity (heuristically)
             if not any(is_in_working_zone(p) for p in [".", os.getcwd()]):
-                 if not confirm_action(f"Run command in non-working directory: {os.getcwd()}", pause_live=pause_live, resume_live=resume_live):
+                 if not confirm_action(f"Run command in non-working directory: {os.getcwd()}", pause_live=pause_live, resume_live=resume_live, non_interactive=non_interactive):
                     return "[Command cancelled by user]"
 
             try:
@@ -339,7 +365,7 @@ def execute_tool(
         elif tool == "ls":
             path = params.strip() or "."
             if not is_in_working_zone(path):
-                if not confirm_action(f"List directory outside working zone: {path}", pause_live=pause_live, resume_live=resume_live):
+                if not confirm_action(f"List directory outside working zone: {path}", pause_live=pause_live, resume_live=resume_live, non_interactive=non_interactive):
                     return "[ls cancelled by user]"
             try:
                 if os.name == 'nt':
@@ -358,7 +384,7 @@ def execute_tool(
             pattern = parts[0].strip()
             path = parts[1].strip() if len(parts) > 1 else "."
             if not is_in_working_zone(path):
-                if not confirm_action(f"Grep outside working zone: {path}", pause_live=pause_live, resume_live=resume_live):
+                if not confirm_action(f"Grep outside working zone: {path}", pause_live=pause_live, resume_live=resume_live, non_interactive=non_interactive):
                     return "[grep cancelled by user]"
             try:
                 if os.name == 'nt':
@@ -390,7 +416,7 @@ def execute_tool(
                 return "[Error: sed requires expression:path]"
             expression, path = parts[0].strip(), parts[1].strip()
             if not is_in_working_zone(path):
-                if not confirm_action(f"Sed outside working zone: {path}", pause_live=pause_live, resume_live=resume_live):
+                if not confirm_action(f"Sed outside working zone: {path}", pause_live=pause_live, resume_live=resume_live, non_interactive=non_interactive):
                     return "[sed cancelled by user]"
             try:
                 if os.name == 'nt':
@@ -413,7 +439,7 @@ def execute_tool(
                 return "[Error: edit_file requires path:::old_string:::new_string]"
             path, old_string, new_string = parts[0].strip(), parts[1], parts[2]
             if not is_in_working_zone(path):
-                if not confirm_action(f"Edit file outside working zone: {path}", pause_live=pause_live, resume_live=resume_live):
+                if not confirm_action(f"Edit file outside working zone: {path}", pause_live=pause_live, resume_live=resume_live, non_interactive=non_interactive):
                     return "[Edit cancelled by user]"
             try:
                 p = Path(path).expanduser()
@@ -427,22 +453,23 @@ def execute_tool(
                     return f"[Error: old_string found {count} times in {path} — must be unique]"
                 # Generate diff
                 new_content = file_content.replace(old_string, new_string, 1)
-                diff_lines = list(difflib.unified_diff(
-                    file_content.splitlines(), new_content.splitlines(),
-                    fromfile=f"a/{path}", tofile=f"b/{path}", lineterm=""
-                ))
-                diff_text = "\n".join(diff_lines) if diff_lines else "(No textual changes detected)"
-                if pause_live:
-                    pause_live()
-                try:
-                    console.print(render_text_preview(path, diff_text, mode="diff", title="✏️ Edit Preview"))
-                    console.print("Apply this change? (y/n): ", style=PROMPT_COLOR, end="")
-                    response = input().strip().lower()
-                    if response not in ("y", "yes"):
-                        return "[Edit cancelled by user]"
-                finally:
-                    if resume_live:
-                        resume_live()
+                if not non_interactive:
+                    diff_lines = list(difflib.unified_diff(
+                        file_content.splitlines(), new_content.splitlines(),
+                        fromfile=f"a/{path}", tofile=f"b/{path}", lineterm=""
+                    ))
+                    diff_text = "\n".join(diff_lines) if diff_lines else "(No textual changes detected)"
+                    if pause_live:
+                        pause_live()
+                    try:
+                        console.print(render_text_preview(path, diff_text, mode="diff", title="✏️ Edit Preview"))
+                        console.print("Apply this change? (y/n): ", style=PROMPT_COLOR, end="")
+                        response = input().strip().lower()
+                        if response not in ("y", "yes"):
+                            return "[Edit cancelled by user]"
+                    finally:
+                        if resume_live:
+                            resume_live()
                 p.write_text(new_content)
                 return f"[File edited: {path}]"
             except Exception as e:

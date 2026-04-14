@@ -13,12 +13,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable
 
 import discord
+from discord import app_commands
 
+from cli.config import SKILLS_DIR, TOOLS_DIR
 from cli.gateway.config import (
     get_agent_bin_path,
     get_agent_api_key,
@@ -30,9 +33,23 @@ from cli.gateway.config import (
     is_edit_allowed,
 )
 from cli.gateway.discord_session import DiscordSessionManager
+from cli.gateway.gateway_commands import (
+    GATEWAY_REPROMPT_PREFIX,
+    GATEWAY_RESET,
+    handle_gateway_slash_command,
+)
 from cli.gateway.runners.base import AgentRunner
 
 log = logging.getLogger(__name__)
+
+# Slash commands that don't translate to Discord (UI-only, CLI-only, or blocked)
+_SLASH_SKIP = frozenset({
+    "exit", "quit", "reprompt", "download", "dl",
+    "gateway", "gw", "nick", "verbose", "stream",
+})
+
+# Discord slash command name constraint: lowercase letters/digits/_/-, 1-32 chars
+_SLASH_NAME_RE = re.compile(r"^[a-z0-9_-]{1,32}$")
 
 
 def get_runner() -> AgentRunner:
@@ -67,6 +84,142 @@ class YipsDiscordBot(discord.Client):
             on_session_saved=self._handle_session_saved
         )
         self._session_mgr.load_sessions_from_disk()
+        self.tree = app_commands.CommandTree(self)
+        self._register_slash_commands()
+
+    async def setup_hook(self) -> None:
+        """Sync application commands. Called once before on_ready."""
+        allowed = get_discord_allowed_servers()
+        if allowed:
+            for gid in allowed:
+                try:
+                    guild = discord.Object(id=int(gid))
+                except ValueError:
+                    continue
+                try:
+                    self.tree.copy_global_to(guild=guild)
+                    await self.tree.sync(guild=guild)
+                except discord.DiscordException as exc:
+                    log.warning("Slash sync failed for guild %s: %s", gid, exc)
+        else:
+            try:
+                await self.tree.sync()
+            except discord.DiscordException as exc:
+                log.warning("Global slash sync failed: %s", exc)
+
+    def _interaction_allowed(self, interaction: discord.Interaction) -> bool:
+        """Mirror on_message allowlist filters for slash interactions."""
+        allowed_servers = get_discord_allowed_servers()
+        if allowed_servers and interaction.guild_id is not None:
+            if str(interaction.guild_id) not in allowed_servers:
+                return False
+        allowed_channels = get_discord_allowed_channels()
+        if allowed_channels and interaction.channel_id is not None:
+            if str(interaction.channel_id) not in allowed_channels:
+                return False
+        allowed_users = get_discord_allowed_users()
+        if allowed_users and str(interaction.user.id) not in allowed_users:
+            return False
+        return True
+
+    async def _run_slash(self, interaction: discord.Interaction, cmd_line: str) -> None:
+        """Execute a slash command line and reply with the result, chunked."""
+        if not self._interaction_allowed(interaction):
+            await interaction.response.send_message(
+                "This bot is not configured to run here.", ephemeral=True
+            )
+            return
+
+        channel_id = str(interaction.channel_id) if interaction.channel_id else "dm"
+
+        await interaction.response.defer(thinking=True)
+
+        try:
+            result = await asyncio.to_thread(
+                handle_gateway_slash_command, cmd_line, channel_id, self._session_mgr
+            )
+        except Exception as exc:
+            await interaction.followup.send(f"Error: {exc}")
+            return
+
+        if result is None:
+            await interaction.followup.send("(no output)")
+            return
+
+        if result == GATEWAY_RESET:
+            self._session_mgr.reset_session(channel_id)
+            await interaction.followup.send("Session cleared. Starting fresh!")
+            return
+
+        if result.startswith(GATEWAY_REPROMPT_PREFIX):
+            await interaction.followup.send(
+                "Reprompt tools are only supported for plain messages."
+            )
+            return
+
+        chunks = [result[i : i + 1990] for i in range(0, len(result), 1990)] or ["(no output)"]
+        for chunk in chunks:
+            await interaction.followup.send(chunk)
+
+    def _register_slash_commands(self) -> None:
+        """Register built-in + discovered tool/skill slash commands on the tree."""
+        tree = self.tree
+        registered: set[str] = set()
+
+        def add_builtin(name: str, description: str, cmd_line: str) -> None:
+            @tree.command(name=name, description=description)
+            async def _handler(interaction: discord.Interaction) -> None:
+                await self._run_slash(interaction, cmd_line)
+            registered.add(name)
+
+        add_builtin("clear", "Clear this channel's session and start fresh.", "/clear")
+        add_builtin("new", "Start a new session (alias for /clear).", "/new")
+        add_builtin("help", "List available Yips commands.", "/help")
+        add_builtin("models", "List known gateway agents.", "/models")
+        add_builtin("sessions", "Show recent turns in this channel.", "/sessions")
+
+        @tree.command(name="model", description="Show or set the gateway agent.")
+        @app_commands.describe(name="Agent name (llamacpp, claude, claude-code, codex)")
+        async def _cmd_model(
+            interaction: discord.Interaction, name: str | None = None
+        ) -> None:
+            await self._run_slash(interaction, f"/model {name}" if name else "/model")
+        registered.add("model")
+
+        @tree.command(name="backend", description="Show or set the gateway backend.")
+        @app_commands.describe(name="Backend name")
+        async def _cmd_backend(
+            interaction: discord.Interaction, name: str | None = None
+        ) -> None:
+            await self._run_slash(interaction, f"/backend {name}" if name else "/backend")
+        registered.add("backend")
+
+        for parent in (TOOLS_DIR, SKILLS_DIR):
+            if not parent.exists():
+                continue
+            for entry in parent.iterdir():
+                if not entry.is_dir():
+                    continue
+                name = entry.name.lower()
+                if name in _SLASH_SKIP or name in registered:
+                    continue
+                if not _SLASH_NAME_RE.match(name):
+                    continue
+                registered.add(name)
+                self._register_dynamic_slash(name)
+
+    def _register_dynamic_slash(self, cmd_name: str) -> None:
+        """Register a single dynamic tool/skill slash command with an optional args string."""
+        @self.tree.command(
+            name=cmd_name,
+            description=f"Run the /{cmd_name} Yips tool or skill.",
+        )
+        @app_commands.describe(args="Optional arguments to pass through")
+        async def _handler(
+            interaction: discord.Interaction, args: str | None = None
+        ) -> None:
+            line = f"/{cmd_name}" + (f" {args}" if args else "")
+            await self._run_slash(interaction, line)
 
     def _handle_session_saved(self, channel_id: str, session_file_path: Path) -> None:
         if self._on_activity is None:

@@ -1,0 +1,90 @@
+name: Release Build
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12' # Using stable 3.12
+      - name: Install dependencies
+        run: |
+          pip install pyinstaller requests rich prompt_toolkit
+      - name: Build Core App
+        run: |
+          pyinstaller --name yips-core-windows --onefile cli/main.py
+      - name: Build Installer Wizard
+        run: |
+          pyinstaller --name yips-installer-windows --onefile cli/installer_wizard.py
+      - name: Upload Windows Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-binaries
+          path: dist/*.exe
+
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          pip install pyinstaller requests rich prompt_toolkit
+      - name: Build Core App
+        run: |
+          pyinstaller --name yips-core-linux --onefile cli/main.py
+      - name: Build Installer Wizard
+        run: |
+          pyinstaller --name yips-installer-linux --onefile cli/installer_wizard.py
+      - name: Upload Linux Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-binaries
+          path: dist/yips-core-linux
+          # Also need to upload the installer-linux
+      - name: Upload Linux Installer Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-installer
+          path: dist/yips-installer-linux
+
+  create-release:
+    needs: [build-windows, build-linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download Windows Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-binaries
+          path: ./release-assets
+      - name: Download Linux Core Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-binaries
+          path: ./release-assets
+      - name: Download Linux Installer Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: linux-installer
+          path: ./release-assets
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ./release-assets/yips-core-windows.exe
+            ./release-assets/yips-installer-windows.exe
+            ./release-assets/yips-core-linux
+            ./release-assets/yips-installer-linux
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

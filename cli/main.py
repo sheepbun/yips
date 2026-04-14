@@ -369,8 +369,11 @@ def main() -> None:
     """Main entry point for Yips CLI."""
     import argparse
     import atexit
+    import signal
     from commands.tools.VT.VT import kill_pty_session
     atexit.register(kill_pty_session)
+
+    signal.signal(signal.SIGINT, lambda *_: os._exit(0))
 
     parser = argparse.ArgumentParser(description="Yips - Personal Desktop Agent")
     parser.add_argument("-c", "--command", type=str, help="Run a single command and exit")
@@ -394,6 +397,10 @@ def main() -> None:
 
     # Define key bindings
     bindings = KeyBindings()
+
+    @bindings.add('c-c', eager=True)
+    def _(event: KeyPressEvent):
+        os._exit(0)
 
     @bindings.add('enter', eager=True)
     @bindings.add('c-m', eager=True)

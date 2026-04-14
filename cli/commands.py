@@ -326,8 +326,7 @@ def handle_slash_command(agent: YipsAgentProtocol, user_input: str) -> str | boo
 
     # Built-in commands
     if command in ("exit", "quit"):
-        agent.graceful_exit()
-        return "exit"
+        os._exit(0)
 
     if command in ("model", "models"):
         result = handle_model_command(agent, args)

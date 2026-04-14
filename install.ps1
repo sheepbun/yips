@@ -1,17 +1,39 @@
 $ErrorActionPreference = "Stop"
 
 $Repo = "sheepbun/yips"
-$Binary = "yips-windows.exe"
-$DownloadUrl = "https://github.com/$Repo/releases/latest/download/$Binary"
-$InstallDir = "$env:USERPROFILE\AppData\Local\Microsoft\WindowsApps"
+$BinaryName = "yips.exe"
+$Tag = "v0.1.44"
+$DownloadUrl = "https://github.com/$Repo/releases/download/$Tag/yips-windows.exe"
 
-Write-Host "Downloading Yips ($Binary) from $DownloadUrl..."
-If (!(Test-Path $InstallDir)) {
-    New-Item -ItemType Directory -Force -Path $InstallDir | Out-Null
+$AppDataYips = Join-Path $env:APPDATA ".yips"
+$BinDir = Join-Path $AppDataYips "bin"
+
+Write-Host "--- Yips Windows Installer ---"
+Write-Host "Target: $AppDataYips"
+
+# 1. Create directory structure
+If (!(Test-Path $BinDir)) {
+    Write-Host "Creating directory structure..."
+    New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
 }
 
-$DestPath = Join-Path $InstallDir "yips.exe"
+# 2. Download the binary
+$DestPath = Join-Path $BinDir $BinaryName
+Write-Host "Downloading $BinaryName from GitHub..."
 Invoke-WebRequest -Uri $DownloadUrl -OutFile $DestPath
 
-Write-Host "Yips installed successfully to $DestPath."
-Write-Host "Ensure $InstallDir is in your PATH."
+# 3. Add to User PATH if not already there
+Write-Host "Updating PATH environment variable..."
+$UserPath = [Environment]::GetEnvironmentVariable("Path", "User")
+if ($UserPath -notlike "*$BinDir*") {
+    [Environment]::SetEnvironmentVariable("Path", $UserPath + ";" + $BinDir, "User")
+    $env:Path += ";$BinDir"
+    Write-Host "Added $BinDir to User PATH."
+} else {
+    Write-Host "$BinDir is already in PATH."
+}
+
+Write-Host "----------------------------"
+Write-Host "Installation Complete!"
+Write-Host "You may need to restart your terminal for 'yips' to be recognized."
+Write-Host "Run 'yips' to get started."

@@ -2,14 +2,41 @@
 set -e
 
 REPO="sheepbun/yips"
+TAG="v0.1.44"
 BINARY="yips-linux"
-DOWNLOAD_URL="https://github.com/$REPO/releases/latest/download/$BINARY"
-INSTALL_DIR="$HOME/.local/bin"
+DOWNLOAD_URL="https://github.com/$REPO/releases/download/$TAG/$BINARY"
 
-echo "Downloading Yips ($BINARY) from $DOWNLOAD_URL..."
-mkdir -p "$INSTALL_DIR"
-curl -L -o "$INSTALL_DIR/yips" "$DOWNLOAD_URL"
-chmod +x "$INSTALL_DIR/yips"
+INSTALL_ROOT="$HOME/.yips"
+BIN_DIR="$INSTALL_ROOT/bin"
 
-echo "Yips installed successfully to $INSTALL_DIR/yips."
-echo "Ensure $INSTALL_DIR is in your PATH."
+echo "--- Yips Linux Installer ---"
+echo "Target: $INSTALL_ROOT"
+
+# 1. Create directory structure
+mkdir -p "$BIN_DIR"
+
+# 2. Download the binary
+echo "Downloading $BINARY from GitHub..."
+curl -L -o "$BIN_DIR/yips" "$DOWNLOAD_URL"
+chmod +x "$BIN_DIR/yips"
+
+# 3. Handle PATH (Update .bashrc or .zshrc)
+SHELL_RC=""
+if [[ "$SHELL" == */zsh ]]; then
+    SHELL_RC="$HOME/.zshrc"
+elif [[ "$SHELL" == */bash ]]; then
+    SHELL_RC="$HOME/.bashrc"
+fi
+
+if [[ -n "$SHELL_RC" ]]; then
+    if ! grep -q "$BIN_DIR" "$SHELL_RC"; then
+        echo "Updating $SHELL_RC..."
+        echo -e "\n# Yips CLI\nexport PATH=\"\$PATH:$BIN_DIR\"" >> "$SHELL_RC"
+        echo "Added $BIN_DIR to PATH in $SHELL_RC."
+    fi
+fi
+
+echo "----------------------------"
+echo "Installation Complete!"
+echo "Please restart your shell or run: source $SHELL_RC"
+echo "Run 'yips' to get started."

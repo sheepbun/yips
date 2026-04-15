@@ -1,16 +1,26 @@
 """Gateway configuration: token storage, agent settings, masking."""
-
+import re
 from cli.config import load_config, save_config
 
 PLATFORMS = ("whatsapp", "telegram", "discord")
 GATEWAY_AGENTS = ("llamacpp", "claude", "claude-code", "codex")
 
+def clean_token(token: str | None) -> str:
+    """Aggressively strip invisible characters and bracketed paste artifacts from tokens."""
+    if not token:
+        return ""
+    # Remove bracketed paste escape sequences explicitly
+    t = token.replace("\x1b[200~", "").replace("\x1b[201~", "")
+    # Remove all whitespace, newlines, and non-printable ascii
+    t = re.sub(r'[\s\x00-\x1f\x7f-\x9f]', '', t)
+    # Remove surrounding quotes
+    return t.strip("\"'")
 
 def mask_token(token: str | None) -> str:
     """Display a masked version of a bot token."""
-    if not token or not token.strip():
+    t = clean_token(token)
+    if not t:
         return "<not set>"
-    t = token.strip()
     if len(t) <= 6:
         return "*" * len(t)
     return f"{t[:3]}{'*' * (len(t) - 6)}{t[-3:]}"
@@ -19,12 +29,13 @@ def mask_token(token: str | None) -> str:
 # Platform token helpers
 def get_platform_token(platform: str) -> str:
     config = load_config()
-    return config.get(f"{platform}_token", "")  # type: ignore[return-value]
+    raw_token = config.get(f"{platform}_token", "")
+    return clean_token(raw_token)
 
 
 def set_platform_token(platform: str, token: str) -> None:
     config = load_config()
-    config[f"{platform}_token"] = token.strip()  # type: ignore[literal-required]
+    config[f"{platform}_token"] = clean_token(token)
     save_config(config)
 
 

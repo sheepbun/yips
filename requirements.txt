@@ -7,6 +7,7 @@ psutil>=5.9.0
 pyte>=0.8.0
 huggingface_hub>=0.19.0
 discord.py>=2.3.0
+certifi>=2024.0.0
 
 # Development dependencies
 pyright>=1.1.350

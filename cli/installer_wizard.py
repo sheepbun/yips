@@ -1,5 +1,15 @@
 import os
 import sys
+
+# --- SSL Certificate Fix for Linux Binaries ---
+try:
+    import certifi
+    os.environ['SSL_CERT_FILE'] = certifi.where()
+    os.environ['REQUESTS_CA_BUNDLE'] = certifi.where()
+except ImportError:
+    pass
+# --------------------------------------------
+
 import shutil
 import subprocess
 import time

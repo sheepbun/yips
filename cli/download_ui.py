@@ -1133,6 +1133,7 @@ class DownloadUI:
             self.app.invalidate()
 
     def _download_file_sync(self, file_info: dict[str, Any], loop: asyncio.AbstractEventLoop) -> None:
+        import requests
         model_id = self.selected_model_id
         if not model_id:
             raise RuntimeError("No model selected")
@@ -1154,8 +1155,8 @@ class DownloadUI:
         loop.call_soon_threadsafe(self.app.invalidate)
 
         try:
-            request = Request(url, headers={"User-Agent": "yips-cli"})
-            with urlopen(request, timeout=30) as response:
+            with requests.get(url, stream=True, headers={"User-Agent": "yips-cli"}, timeout=30) as response:
+                response.raise_for_status()
                 total = int(response.headers.get("content-length", "0"))
                 if total > 0:
                     self.download_total_bytes = total
@@ -1163,8 +1164,7 @@ class DownloadUI:
                 last_bytes = 0
 
                 with open(temp_path, "wb") as handle:
-                    while True:
-                        chunk = response.read(1024 * 256)
+                    for chunk in response.iter_content(chunk_size=1024 * 256):
                         if not chunk:
                             break
                         handle.write(chunk)
@@ -1180,10 +1180,10 @@ class DownloadUI:
                 target_path.unlink()
             temp_path.replace(target_path)
             self.downloaded_path = str(target_path)
-        except Exception:
+        except Exception as e:
             if temp_path.exists():
                 temp_path.unlink()
-            raise
+            raise RuntimeError(f"Download failed: {e}")
 
         self.download_status = "Finalizing"
         loop.call_soon_threadsafe(self.app.invalidate)

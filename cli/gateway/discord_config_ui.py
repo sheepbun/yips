@@ -92,13 +92,20 @@ class DiscordFetcher:
             # Start the client in the background
             task = asyncio.ensure_future(client.start(token))
 
-            # Wait for ready (or timeout)
-            try:
-                await asyncio.wait_for(ready_event.wait(), timeout=15)
-            except asyncio.TimeoutError:
+            # Wait for ready (or task completion or timeout)
+            done, pending = await asyncio.wait(
+                [asyncio.create_task(ready_event.wait()), task],
+                return_when=asyncio.FIRST_COMPLETED,
+                timeout=15,
+            )
+
+            if not done:
                 data.error = "Timed out connecting to Discord."
                 task.cancel()
                 return data
+
+            if task in done and task.exception():
+                raise task.exception()
 
             # Fetch guilds
             for guild in client.guilds:

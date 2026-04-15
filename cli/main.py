@@ -367,6 +367,8 @@ def process_response_and_tools(agent: YipsAgentProtocol, response: str, depth: i
 
 def install_self():
     """If running as a frozen binary, ensure it's installed in the .yips/bin directory."""
+    if os.environ.get("YIPS_NPM_INSTALL") == "1":
+        return
     if not getattr(sys, "frozen", False):
         return
 

@@ -5,7 +5,7 @@ Write-Host "--- Yips Build Script ---"
 
 # 1. Build the CORE BINARY (The actual app)
 Write-Host "Building Core App..."
-& .venv\Scripts\python.exe -m PyInstaller --name yips-core-windows --onefile cli/main.py
+& .venv\Scripts\python.exe -m PyInstaller --name yips-core-windows --onefile --add-data "package.json;." cli/main.py
 
 # 2. Build the INSTALLER WIZARD (The public-facing wizard)
 Write-Host "Building Installer Wizard..."

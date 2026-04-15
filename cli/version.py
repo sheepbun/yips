@@ -1,16 +1,18 @@
 #!/usr/bin/env python3
+"""Version management for Yips.
+
+Version resolution order:
+1. ``package.json`` — the canonical source (matches the npm release).
+   Resolved from ``sys._MEIPASS`` when running as a PyInstaller onefile
+   binary, otherwise from the project root.
+2. ``git rev-list --count HEAD`` — dev fallback when ``package.json`` is
+   absent (useful in worktrees between releases).
+3. ``v0.0.0`` — last-resort fallback.
 """
-Version management for Yips.
 
-Generates MAJOR.MINOR.PATCH versions derived from the total git commit count
-so every commit adds +0.0.1 (rolls into +0.1.0 and +1.0.0 as digits overflow).
-
-Usage:
-    python version.py              # Display current version
-    import version; print(version.__version__)  # Get version in Python
-"""
-
+import json
 import subprocess
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -21,11 +23,38 @@ def _get_project_root() -> Path:
         from root import PROJECT_ROOT
         return PROJECT_ROOT
     except ImportError:
-        # Fallback if root.py isn't available
         return Path(__file__).parent
 
 
 PROJECT_ROOT = _get_project_root()
+
+
+def _package_json_path() -> Optional[Path]:
+    """Locate ``package.json`` for frozen and source trees."""
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        bundled = Path(sys._MEIPASS) / "package.json"  # type: ignore[attr-defined]
+        if bundled.exists():
+            return bundled
+
+    source = Path(__file__).resolve().parent.parent / "package.json"
+    if source.exists():
+        return source
+    return None
+
+
+def _version_from_package_json() -> Optional[str]:
+    """Return ``v<version>`` from ``package.json`` or ``None`` if unavailable."""
+    path = _package_json_path()
+    if path is None:
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    version = data.get("version")
+    if not isinstance(version, str) or not version:
+        return None
+    return f"v{version}"
 
 
 def get_commit_count() -> Optional[int]:
@@ -55,14 +84,16 @@ def version_from_commits(count: int) -> str:
 
 
 def get_version() -> str:
-    """Return version derived from git commit count or fallback."""
+    """Return the version string, preferring ``package.json``."""
+    pkg = _version_from_package_json()
+    if pkg is not None:
+        return pkg
     count = get_commit_count()
     if count is not None:
         return version_from_commits(count)
     return "v0.0.0"
 
 
-# Module-level version that's calculated when imported
 __version__ = get_version()
 
 

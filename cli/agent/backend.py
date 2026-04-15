@@ -282,7 +282,9 @@ class AgentBackendMixin:
                 self.backend_ready_event.wait()
 
         if not getattr(self, 'backend_initialized', False):
-            return "[Error: Backend not initialized]"
+            err = getattr(self, 'backend_init_error', None)
+            detail = f": {err}" if err else ""
+            return f"[Error: Backend not initialized{detail}. See ~/.yips/logs/backend.log]"
 
         # Check and prune context before generation
         self.check_and_prune_context(additional_text=message)

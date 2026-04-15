@@ -60,6 +60,27 @@ from cli.completer import SlashCommandCompleter
 from cli.subprocess_utils import clear_screen
 
 
+def _log_backend_init_error(exc: BaseException) -> None:
+    """Persist a backend init traceback so `get_response` can cite it.
+
+    Mirrors the Discord gateway logger added in v0.1.54: write to
+    ``~/.yips/logs/backend.log`` and never crash the caller.
+    """
+    try:
+        import datetime
+        import traceback
+        from cli.config import DOT_YIPS_DIR
+
+        log_dir = DOT_YIPS_DIR / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = log_dir / "backend.log"
+        with log_path.open("a", encoding="utf-8") as fh:
+            fh.write(f"\n--- {datetime.datetime.now().isoformat()} ---\n")
+            traceback.print_exception(type(exc), exc, exc.__traceback__, file=fh)
+    except Exception:
+        pass
+
+
 def run_inline_prompt(
     agent: YipsAgentProtocol,
     completer: SlashCommandCompleter,
@@ -598,8 +619,11 @@ def main() -> None:
         import threading
         def background_init():
             try:
-                # Initialize backend after displaying UI
-                agent.initialize_backend(silent=True)
+                try:
+                    agent.initialize_backend(silent=True)
+                except Exception as exc:
+                    _log_backend_init_error(exc)
+                    agent.backend_init_error = exc
 
                 # Precache HF model data in background for snappy /download command
                 try:

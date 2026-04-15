@@ -22,7 +22,7 @@ jobs:
           pip install -r requirements.txt pyinstaller
       - name: Build Core App
         run: |
-          pyinstaller --name yips-core-windows --onefile cli/main.py
+          pyinstaller --name yips-core-windows --onefile --add-data "package.json;." cli/main.py
       - name: Build Installer Wizard
         run: |
           pyinstaller --name yips-installer-windows --onefile cli/installer_wizard.py
@@ -45,7 +45,7 @@ jobs:
           pip install -r requirements.txt pyinstaller
       - name: Build Core App
         run: |
-          pyinstaller --name yips-core-linux --onefile cli/main.py
+          pyinstaller --name yips-core-linux --onefile --add-data "package.json:." cli/main.py
       - name: Build Installer Wizard
         run: |
           pyinstaller --name yips-installer-linux --onefile cli/installer_wizard.py

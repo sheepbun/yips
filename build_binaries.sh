@@ -6,7 +6,7 @@ pip install -r requirements.txt pyinstaller
 
 # 1. Build the CORE BINARY
 echo "Building Core App..."
-pyinstaller --name yips-core-linux --onefile cli/main.py
+pyinstaller --name yips-core-linux --onefile --add-data "package.json:." cli/main.py
 
 # 2. Build the INSTALLER WIZARD
 echo "Building Installer Wizard..."

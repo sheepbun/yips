@@ -14,6 +14,7 @@ from cli.type_defs import YipsConfig
 
 # 1. Source/Code Root (where the binary/bundle is)
 SOURCE_ROOT = PROJECT_ROOT
+BASE_DIR = PROJECT_ROOT
 COMMANDS_DIR = SOURCE_ROOT / "commands"
 SKILLS_DIR = COMMANDS_DIR / "skills"
 TOOLS_DIR = COMMANDS_DIR / "tools"

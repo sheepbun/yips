@@ -380,6 +380,9 @@ class GatewayUI:
             return
 
         token = self._token_edit.buffer.text.strip()
+        # Clean up bracketed paste markers and accidental quotes
+        token = token.replace("\x1b[200~", "").replace("\x1b[201~", "").strip("\"'")
+        
         if token:
             set_platform_token(key, token)
         else:

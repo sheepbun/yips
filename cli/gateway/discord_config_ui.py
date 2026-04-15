@@ -93,8 +93,9 @@ class DiscordFetcher:
             task = asyncio.ensure_future(client.start(token))
 
             # Wait for ready (or task completion or timeout)
+            wait_task = asyncio.create_task(ready_event.wait())
             done, pending = await asyncio.wait(
-                [asyncio.create_task(ready_event.wait()), task],
+                [wait_task, task],
                 return_when=asyncio.FIRST_COMPLETED,
                 timeout=15,
             )
@@ -102,7 +103,12 @@ class DiscordFetcher:
             if not done:
                 data.error = "Timed out connecting to Discord."
                 task.cancel()
+                wait_task.cancel()
                 return data
+
+            # Cancel remaining pending tasks (either start() or wait())
+            for p in pending:
+                p.cancel()
 
             if task in done and task.exception():
                 raise task.exception()

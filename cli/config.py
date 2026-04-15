@@ -7,20 +7,31 @@ Handles loading and saving user configuration, paths, and constants.
 import json
 import os
 import shutil
+from pathlib import Path
 
 from cli.root import PROJECT_ROOT
 from cli.type_defs import YipsConfig
 
-# Directory paths
-BASE_DIR = PROJECT_ROOT
-DOT_YIPS_DIR = BASE_DIR / ".yips"
-MEMORIES_DIR = DOT_YIPS_DIR / "memory"
-WORKING_ZONE = BASE_DIR # The default "Working Zone" for autonomous actions
-COMMANDS_DIR = BASE_DIR / "commands"
+# 1. Source/Code Root (where the binary/bundle is)
+SOURCE_ROOT = PROJECT_ROOT
+COMMANDS_DIR = SOURCE_ROOT / "commands"
 SKILLS_DIR = COMMANDS_DIR / "skills"
 TOOLS_DIR = COMMANDS_DIR / "tools"
+
+# 2. User Data Root (persistent and writable)
+if os.name == "nt":
+    USER_DATA_ROOT = Path(os.environ.get("APPDATA", "")) / ".yips"
+else:
+    USER_DATA_ROOT = Path.home() / ".yips"
+
+# Move config and logs to the user data root
+DOT_YIPS_DIR = USER_DATA_ROOT
+MEMORIES_DIR = DOT_YIPS_DIR / "memory"
 PLANS_DIR = DOT_YIPS_DIR / "plans"
-CONFIG_FILE = BASE_DIR / ".yips_config.json"
+CONFIG_FILE = DOT_YIPS_DIR / "config.json"
+
+# Working Zone (where the agent operates)
+WORKING_ZONE = PROJECT_ROOT
 
 # Application info
 APP_NAME = "Yips"
@@ -54,17 +65,28 @@ INTERNAL_REPROMPT = "Observation received. Please proceed."
 
 def load_config() -> YipsConfig:
     """Load saved configuration from file."""
+    # 1. Try new location in home directory
     if CONFIG_FILE.exists():
         try:
             return json.loads(CONFIG_FILE.read_text())
         except (json.JSONDecodeError, OSError):
             pass
+
+    # 2. Fallback to old location in project root (for migration)
+    old_config = SOURCE_ROOT / ".yips_config.json"
+    if old_config.exists():
+        try:
+            return json.loads(old_config.read_text())
+        except (json.JSONDecodeError, OSError):
+            pass
+
     return {}
 
 
 def save_config(config: YipsConfig) -> None:
     """Save configuration to file."""
     try:
+        DOT_YIPS_DIR.mkdir(parents=True, exist_ok=True)
         CONFIG_FILE.write_text(json.dumps(config, indent=2))
     except OSError:
         pass

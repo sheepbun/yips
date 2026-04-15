@@ -22,7 +22,7 @@ from cli.harness import run_harness
 from cli.tool_execution import execute_tool
 from cli.type_defs import ToolRequest
 
-DEFAULT_TIMEOUT = 120
+DEFAULT_TIMEOUT = 600
 
 log = logging.getLogger(__name__)
 

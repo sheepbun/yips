@@ -57,6 +57,7 @@ from cli.color_utils import (
 from cli.commands import handle_command
 from cli.tool_execution import parse_tool_requests, execute_tool, clean_response
 from cli.completer import SlashCommandCompleter
+from cli.subprocess_utils import clear_screen
 
 
 def run_inline_prompt(
@@ -574,7 +575,7 @@ def main() -> None:
 
         # 4. Re-render title box if we used the UI
         if not is_gui and is_tty:
-            subprocess.run('cls' if os.name == 'nt' else 'clear', shell=True)
+            clear_screen()
             agent.render_title_box()
 
     old_settings = termios.tcgetattr(fd) if (is_tty and os.name != 'nt') else None
@@ -590,7 +591,7 @@ def main() -> None:
 
         if not is_gui and is_tty:
             # Clear terminal and render the title box (all platforms)
-            subprocess.run('cls' if os.name == 'nt' else 'clear', shell=True)
+            clear_screen()
             agent.render_title_box()
 
         # Initialize backend and services in background

@@ -9,11 +9,36 @@ is_discord_running()     returns whether the bot thread is alive
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
+import traceback
 from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
     from cli.gateway.discord_bot import YipsDiscordBot
+
+log = logging.getLogger(__name__)
+
+
+def _log_gateway_error(exc: BaseException) -> None:
+    """Write Discord gateway errors to ~/.yips/logs/discord.log.
+
+    Prior versions swallowed exceptions silently, so users had no way to
+    see why the bot failed to start (bad token, SSL failure, network).
+    """
+    log.error("Discord gateway failed: %s", exc, exc_info=True)
+    try:
+        from cli.config import DOT_YIPS_DIR
+        import datetime
+
+        log_dir = DOT_YIPS_DIR / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = log_dir / "discord.log"
+        with log_path.open("a", encoding="utf-8") as fh:
+            fh.write(f"\n--- {datetime.datetime.now().isoformat()} ---\n")
+            traceback.print_exception(type(exc), exc, exc.__traceback__, file=fh)
+    except Exception:
+        pass
 
 _bot: YipsDiscordBot | None = None
 _thread: threading.Thread | None = None
@@ -65,8 +90,8 @@ def start_discord_service() -> None:
         asyncio.set_event_loop(_loop)
         try:
             _loop.run_until_complete(_bot.start(token))
-        except Exception:
-            pass  # token invalid, network error, etc. — don't crash the main process
+        except Exception as exc:
+            _log_gateway_error(exc)  # bad token, SSL, network — don't crash the main process
         finally:
             try:
                 _loop.run_until_complete(_loop.shutdown_asyncgens())

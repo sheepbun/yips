@@ -23,6 +23,7 @@ from cli.color_utils import console, PROMPT_COLOR
 from cli.ui_rendering import render_text_preview
 from cli.config import BASE_DIR, WORKING_ZONE, SKILLS_DIR, TOOLS_DIR, PLANS_DIR
 from cli.root import PROJECT_ROOT
+from cli.subprocess_utils import clean_subprocess_env
 from cli.type_defs import ToolRequest
 
 # Destructive commands that require confirmation
@@ -351,7 +352,8 @@ def execute_tool(
                     shell=True,
                     capture_output=True,
                     text=True,
-                    timeout=60
+                    timeout=60,
+                    env=clean_subprocess_env(),
                 )
                 output = result.stdout
                 if result.stderr:
@@ -371,7 +373,7 @@ def execute_tool(
                 if os.name == 'nt':
                     result = subprocess.run(f'dir "{path}"', shell=True, capture_output=True, text=True, timeout=10)
                 else:
-                    result = subprocess.run(f"ls -F1 {path}", shell=True, capture_output=True, text=True, timeout=10)
+                    result = subprocess.run(f"ls -F1 {path}", shell=True, capture_output=True, text=True, timeout=10, env=clean_subprocess_env())
                 if result.returncode == 0:
                     return f"[Directory listing for {path}]:\n{result.stdout}"
                 return f"[Error listing {path}]: {result.stderr}"
@@ -390,7 +392,7 @@ def execute_tool(
                 if os.name == 'nt':
                     result = subprocess.run(f'findstr /s /n /i "{pattern}" "{path}"', shell=True, capture_output=True, text=True, timeout=30)
                 else:
-                    result = subprocess.run(f"grep -rnI \"{pattern}\" {path}", shell=True, capture_output=True, text=True, timeout=30)
+                    result = subprocess.run(f"grep -rnI \"{pattern}\" {path}", shell=True, capture_output=True, text=True, timeout=30, env=clean_subprocess_env())
                 if result.stdout:
                     return f"[Grep matches for '{pattern}' in {path}]:\n{result.stdout}"
                 return f"[No matches found for '{pattern}' in {path}]"
@@ -401,7 +403,7 @@ def execute_tool(
             subcommand = params.strip()
             try:
                 # Run git command from project root
-                result = subprocess.run(f"git {subcommand}", shell=True, capture_output=True, text=True, timeout=30, cwd=PROJECT_ROOT)
+                result = subprocess.run(f"git {subcommand}", shell=True, capture_output=True, text=True, timeout=30, cwd=PROJECT_ROOT, env=clean_subprocess_env())
                 output = result.stdout
                 if result.stderr:
                     output += f"\n[git stderr]: {result.stderr}"
@@ -424,7 +426,7 @@ def execute_tool(
                 # and return output unless it's clearly an in-place edit request.
                 # Actually, most agents want to modify files.
                 # Let's support both. If expression contains -i, we handle it.
-                result = subprocess.run(f"sed {expression} {path}", shell=True, capture_output=True, text=True, timeout=10)
+                result = subprocess.run(f"sed {expression} {path}", shell=True, capture_output=True, text=True, timeout=10, env=clean_subprocess_env())
                 if result.returncode == 0:
                     return f"[Sed output for {path}]:\n{result.stdout}" if result.stdout else f"[Sed operation on {path} completed]"
                 return f"[Error running sed on {path}]: {result.stderr}"

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import re
-import subprocess
 import time
 import json
 from typing import TYPE_CHECKING, Any
@@ -12,6 +11,7 @@ from rich.text import Text
 from rich.live import Live
 from rich.console import Group
 
+from cli.subprocess_utils import clear_screen
 from cli.color_utils import (
     gradient_text,
     apply_gradient_to_text,
@@ -532,7 +532,7 @@ class AgentUIMixin:
 
     def refresh_display(self: YipsAgentProtocol) -> None:
         """Clear terminal and re-render title box and history."""
-        subprocess.run('clear' if os.name != 'nt' else 'cls', shell=True)
+        clear_screen()
         self.render_title_box()
         self.replay_conversation_history()
 
@@ -618,17 +618,17 @@ class AgentUIMixin:
         if getattr(self, 'prompt_session', None) is not None:
             try:
                 from prompt_toolkit.application import get_app
-                subprocess.run('clear' if os.name != 'nt' else 'cls', shell=True)
+                clear_screen()
                 self.render_title_box()
                 self.replay_conversation_history()
                 app = get_app()
                 app.invalidate()
             except Exception:
-                subprocess.run('clear' if os.name != 'nt' else 'cls', shell=True)
+                clear_screen()
                 self.render_title_box()
                 self.replay_conversation_history()
         else:
-            subprocess.run('clear' if os.name != 'nt' else 'cls', shell=True)
+            clear_screen()
             self.render_title_box()
             self.replay_conversation_history()
 

@@ -15,6 +15,7 @@ import shutil
 from pathlib import Path
 from cli.color_utils import console
 from cli.hw_utils import detect_cuda_support, get_system_specs
+from cli.subprocess_utils import clean_subprocess_env
 
 # llama.cpp configuration
 def get_llama_server_candidates() -> list[str]:
@@ -80,6 +81,7 @@ def get_llama_build_mode() -> str:
                 [LLAMA_SERVER_PATH, "--version"],
                 text=True,
                 stderr=subprocess.STDOUT,
+                env=clean_subprocess_env(),
             ).lower()
         except (subprocess.SubprocessError, FileNotFoundError, OSError):
             output = ""
@@ -280,6 +282,7 @@ def start_llamacpp(model_path: str | None = None) -> bool:
         popen_kwargs: dict = {
             "stdout": subprocess.DEVNULL,
             "stderr": open(error_log_path, "wb"),
+            "env": clean_subprocess_env(),
         }
         if sys.platform == 'win32':
             popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
@@ -332,7 +335,7 @@ def stop_llamacpp() -> bool:
         if sys.platform == 'win32':
             subprocess.run(["taskkill", "/F", "/IM", "llama-server.exe"], check=False, capture_output=True)
         else:
-            subprocess.run(["pkill", "-f", "llama-server"], check=False)
+            subprocess.run(["pkill", "-f", "llama-server"], check=False, env=clean_subprocess_env())
     except Exception:
         pass
 
@@ -347,7 +350,7 @@ def stop_llamacpp() -> bool:
         if sys.platform == 'win32':
             subprocess.run(["taskkill", "/F", "/T", "/IM", "llama-server.exe"], check=False, capture_output=True)
         else:
-            subprocess.run(["pkill", "-9", "-f", "llama-server"], check=False)
+            subprocess.run(["pkill", "-9", "-f", "llama-server"], check=False, env=clean_subprocess_env())
     except Exception:
         pass
     

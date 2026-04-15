@@ -391,7 +391,7 @@ class AgentBackendMixin:
                                 "max_tokens": 2048,
                                 "temperature": 0.7,
                             },
-                            timeout=120
+                            timeout=600
                         )
                         response.encoding = "utf-8"
                         

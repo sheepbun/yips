@@ -21,6 +21,7 @@ from cli.info_utils import (
     get_session_list,
 )
 from cli.llamacpp import get_available_models as get_llama_models, stop_llamacpp, start_llamacpp
+from cli.subprocess_utils import clear_screen
 
 
 def handle_backend_command(agent: YipsAgentProtocol, args: str) -> None:
@@ -90,7 +91,7 @@ def handle_sessions_command(agent: YipsAgentProtocol) -> None:
     agent.session_selection_active = True
     
     # Clear screen to prepare for Live view
-    subprocess.run('clear' if os.name != 'nt' else 'cls', shell=True)
+    clear_screen()
     
     from rich.live import Live
     import sys

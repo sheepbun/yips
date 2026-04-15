@@ -1,6 +1,6 @@
 {
   "name": "@sheepbun/yips",
-  "version": "0.1.47",
+  "version": "0.1.48",
   "description": "Yips Personal Desktop Agent",
   "scripts": {
     "postinstall": "node postinstall.js"
